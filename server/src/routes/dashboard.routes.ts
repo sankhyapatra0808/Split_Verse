@@ -34,7 +34,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     const userResult = await db.query(
       `
-      SELECT id, name
+      SELECT id
       FROM users
       WHERE firebase_uid = $1;
       `,
@@ -48,7 +48,6 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     }
 
     const dbUserId = userResult.rows[0].id;
-    const userName = userResult.rows[0].name || "You";
 
     const summaryResult = await db.query(
       `
@@ -97,29 +96,38 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const receivable = Number(summary.receivable);
     const walletBalance = Number(summary.wallet_balance);
 
-    const categoryResult = await db.query(
+    const timeSlotResult = await db.query(
       `
       SELECT
-        COALESCE(category, 'Other') AS label,
+        CASE
+          WHEN EXTRACT(HOUR FROM created_at) >= 0
+           AND EXTRACT(HOUR FROM created_at) < 6
+            THEN '12 AM - 6 AM'
+
+          WHEN EXTRACT(HOUR FROM created_at) >= 6
+           AND EXTRACT(HOUR FROM created_at) < 12
+            THEN '6 AM - 12 PM'
+
+          WHEN EXTRACT(HOUR FROM created_at) >= 12
+           AND EXTRACT(HOUR FROM created_at) < 18
+            THEN '12 PM - 6 PM'
+
+          ELSE '6 PM - 12 AM'
+        END AS label,
+
         SUM(amount)::float AS amount
       FROM expenses
       WHERE user_id = $1
       AND expense_date = CURRENT_DATE
-      GROUP BY COALESCE(category, 'Other')
-      ORDER BY amount DESC;
+      GROUP BY label;
       `,
       [dbUserId]
     );
 
-    const expenseCategories = categoryResult.rows.map((row) => {
-      const amount = Number(row.amount);
-
-      return {
-        label: row.label,
-        amount,
-        value: todayExpense > 0 ? Math.round((amount / todayExpense) * 100) : 0,
-      };
-    });
+    const timeSlots = timeSlotResult.rows.map((row) => ({
+      label: row.label,
+      amount: Number(row.amount),
+    }));
 
     const monthlyResult = await db.query(
       `
@@ -137,6 +145,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     const monthlyAmounts = Array.from({ length: 12 }, (_, index) => {
       const monthNumber = index + 1;
+
       const found = monthlyResult.rows.find(
         (row) => Number(row.month) === monthNumber
       );
@@ -147,7 +156,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const maxMonthlyAmount = Math.max(...monthlyAmounts, 1);
     const graphTotal = monthlyAmounts.reduce((sum, amount) => sum + amount, 0);
 
-    const monthSpend = monthlyAmounts.map((amount, index) => ({
+    const months = monthlyAmounts.map((amount, index) => ({
       label: monthLabels[index],
       amount,
       value: Math.round((amount / maxMonthlyAmount) * 100),
@@ -157,13 +166,12 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
       metrics: {
         todayExpense,
         pendingPayment,
-        todaySavings: 0,
         walletBalance,
       },
 
       expenseTracker: {
         totalSpentToday: todayExpense,
-        categories: expenseCategories,
+        timeSlots,
       },
 
       walletHealth: {
@@ -173,21 +181,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
       monthlySpend: {
         graphTotal,
-        months: monthSpend,
-      },
-
-      ranking: {
-        title: "Level 1 Saver",
-        rankText: "#1",
-        subtitle: "among your active rooms today",
-        rows: [
-          {
-            rank: "01",
-            name: "You",
-            saved: 0,
-            active: true,
-          },
-        ],
+        months,
       },
     });
   } catch (error) {

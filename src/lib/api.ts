@@ -50,18 +50,6 @@ export type DashboardSummary = {
       peakSpendingDay?: number | string;
     }[];
   };
-
-  ranking?: {
-    title: string;
-    rankText: string;
-    subtitle: string;
-    rows: {
-      rank: string;
-      name: string;
-      saved: number;
-      active?: boolean;
-    }[];
-  };
 };
 
 export async function apiFetch<T>(
