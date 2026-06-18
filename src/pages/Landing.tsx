@@ -1,253 +1,313 @@
+import type { MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
   BellRing,
   CheckCircle2,
+  ChevronRight,
   IndianRupee,
+  Menu,
   ReceiptText,
+  Search,
   ShieldCheck,
-  Sparkles,
   UsersRound,
   WalletCards,
 } from "lucide-react";
 
+import editorialImage from "../assets/SplitVerse_Landing.png";
+import iconimage from "../assets/Logo.png";
 import "../styles/Landing.css";
 
-const featurePills = [
-  "Item-wise split",
-  "Expense rooms",
-  "Friends",
-  "Wallet",
-  "Balances",
-  "Reminders",
-  "Savings score",
-  "Transactions",
+const navLinks = [
+  { label: "Friends", href: "#friends" },
+  { label: "Rooms", href: "#rooms" },
+  { label: "Trips", href: "#workflow" },
+  { label: "Dashboard", href: "#preview" },
+];
+
+const proofPoints = ["Item-wise bills", "Room balances", "Manual settlements"];
+
+const heroStats = [
+  { label: "Dinner table", value: "Rs. 4,820", helper: "7 people" },
+  { label: "You owe", value: "Rs. 640", helper: "2 dues" },
+  { label: "You get back", value: "Rs. 1,180", helper: "4 friends" },
+];
+
+const splitRows = [
+  { name: "Aarav", item: "Pasta, drink", amount: "Rs. 780" },
+  { name: "Mira", item: "Salad, dessert", amount: "Rs. 620" },
+  { name: "Kabir", item: "Shared sides", amount: "Rs. 430" },
+];
+
+const services = [
+  {
+    icon: UsersRound,
+    label: "Rooms",
+    title: "One money room for every group plan.",
+    text: "Keep restaurant bills, hostel expenses, subscriptions, and weekend plans separated with clear room balances.",
+    metric: "24 active rooms",
+  },
+  {
+    icon: ReceiptText,
+    label: "Bills",
+    title: "Split the exact items people used.",
+    text: "Assign dishes, delivery fees, tax, tips, and extras without forcing a single equal split on everyone.",
+    metric: "18 item splits",
+  },
+  {
+    icon: WalletCards,
+    label: "Settle",
+    title: "Track dues until the group is square.",
+    text: "Record payments manually, see who owes whom, and send calm reminders when balances are still pending.",
+    metric: "Rs. 3,300 owed",
+  },
 ];
 
 const features = [
   {
     icon: ReceiptText,
-    title: "Item-wise bill splitting",
-    text: "Assign biryani, pizza, drinks, tax, and service charges to the exact people who consumed them.",
+    title: "Item-wise receipt flow",
+    text: "Turn one bill into exact personal shares with service charges, taxes, and extras accounted for.",
   },
   {
     icon: UsersRound,
-    title: "Friends and rooms",
-    text: "Add friends, create restaurant/trip/hostel rooms, invite members, and split expenses together.",
-  },
-  {
-    icon: WalletCards,
-    title: "Wallet-style tracking",
-    text: "Track paid, received, pending, and manually settled payments without acting like a real bank wallet.",
-  },
-  {
-    icon: BellRing,
-    title: "Smart reminders",
-    text: "Send friendly payment reminders and keep pending settlements visible without awkward follow-ups.",
+    title: "Friends and groups",
+    text: "Invite people into focused rooms so each shared purchase stays attached to the right context.",
   },
   {
     icon: IndianRupee,
-    title: "Clear balances",
-    text: "See who owes you, who you owe, room-wise balances, and simplified settlement suggestions.",
+    title: "Simple balance math",
+    text: "See what you owe, what you should receive, and practical settlement suggestions at a glance.",
+  },
+  {
+    icon: BellRing,
+    title: "Gentle reminders",
+    text: "Send payment nudges that keep dues visible without making follow-ups feel awkward.",
+  },
+  {
+    icon: WalletCards,
+    title: "Settlement history",
+    text: "Maintain a clean log of paid, received, pending, and manually settled activity.",
   },
   {
     icon: ShieldCheck,
-    title: "Professional money UI",
-    text: "Clean, serious, responsive, glassmorphic design built for trust because the product handles money.",
+    title: "Trust-first interface",
+    text: "A restrained shared-money surface that feels readable, calm, and serious on every screen.",
   },
 ];
 
 const steps = [
+  "Create a room",
   "Add friends",
-  "Create room",
-  "Add expense",
+  "Enter the bill",
   "Assign items",
-  "Settle dues",
-  "Earn score",
+  "Review balances",
+  "Record settlement",
+];
+
+const footerColumns = [
+  {
+    heading: "Product",
+    links: ["Bill splitting", "Rooms", "Wallet log", "Balances"],
+  },
+  {
+    heading: "Use cases",
+    links: ["Restaurants", "Flatmates", "Trips", "Team lunches"],
+  },
+  {
+    heading: "Company",
+    links: ["About", "Careers", "News", "Contact"],
+  },
+  {
+    heading: "Help",
+    links: ["Support", "Privacy", "Terms", "Security"],
+  },
 ];
 
 export default function Landing() {
+  const handleBrandClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
     <main className="landing-page">
-      <nav className="landing-nav">
-        <Link to="/" className="brand">
-          <span className="brand-mark">
-            <span className="brand-spark">✦</span>
-          </span>
+      <nav className="landing-nav" aria-label="Primary navigation">
+        <Link
+          to="/"
+          className="brand"
+          aria-label="SplitVerse home"
+          onClick={handleBrandClick}
+        >
+          <img src={iconimage} className="logo-sv" alt="SplitVerse Logo" />
 
-          <span className="brand-text">
-            Split<span>Spark</span>
-          </span>
+          <span className="brand-text">SplitVerse</span>
         </Link>
+
+        <div className="nav-link-group">
+          {navLinks.map((link) => (
+            <a href={link.href} key={link.label}>
+              {link.label}
+            </a>
+          ))}
+        </div>
+
         <div className="nav-actions">
+          <button className="nav-icon-button" type="button" aria-label="Search">
+            <Search size={18} />
+          </button>
+          <button
+            className="nav-icon-button nav-menu"
+            type="button"
+            aria-label="Menu"
+          >
+            <Menu size={19} />
+          </button>
           <Link to="/login" className="nav-login">
             Login
           </Link>
           <Link to="/signup" className="nav-cta">
-            Get Started
+            Get started
           </Link>
         </div>
       </nav>
 
-      <section className="hero-section">
-        <div className="hero-glow hero-glow-one" />
-        <div className="hero-glow hero-glow-two" />
-
+      <section className="hero-section reveal" aria-labelledby="hero-title">
         <div className="hero-content">
-          <div className="hero-badge">
-            Smart bill splitting for friends, rooms, and trips
-          </div>
 
-          <h1>
-            Split bills fairly.
-            <span> Track money beautifully.</span>
-          </h1>
+          <h1 id="hero-title">Split group bills with institutional calm.</h1>
 
           <p>
-            SplitSpark helps you add friends, create expense rooms, split
-            restaurant bills item by item, track wallet activity, view balances,
-            send reminders, and build better spending habits.
+            SplitVerse turns restaurant receipts, room expenses, trips, and team
+            lunches into clean balances everyone can understand.
           </p>
 
           <div className="hero-actions">
-            <Link to="/signup" className="primary-btn">
-              Start splitting smarter
+            <Link to="/signup" className="primary-btn primary-btn-large">
+              Start splitting
               <ArrowRight size={18} />
             </Link>
 
-            <Link to="/rooms" className="secondary-btn">
-              Create Split Room
+            <Link to="/signup" className="secondary-btn secondary-btn-dark">
+              Create room
             </Link>
           </div>
 
-          <div className="hero-proof">
-            <span>
-              <CheckCircle2 size={16} /> No unfair equal splits
-            </span>
-            <span>
-              <CheckCircle2 size={16} /> Manual settlement ready
-            </span>
-            <span>
-              <CheckCircle2 size={16} /> Built for UPI-first users
-            </span>
+          <div className="hero-proof" aria-label="SplitVerse highlights">
+            {proofPoints.map((point) => (
+              <span key={point}>
+                <CheckCircle2 size={16} />
+                {point}
+              </span>
+            ))}
           </div>
         </div>
 
-        <div className="hero-preview-card">
-          <div className="preview-header">
-            <div>
-              <span className="eyebrow">Live split preview</span>
-              <h3>Restaurant Night</h3>
-              <p>Item-wise settlement for a ₹1,000 group bill.</p>
-            </div>
-
-            <div className="preview-status">
-              <span />
-              Synced
-            </div>
+        <div className="hero-visual" aria-label="Bill splitting preview">
+          <div className="receipt-image-card">
+            <img
+              src={editorialImage}
+              alt="A restaurant receipt, payment cards, coins, and a phone showing a shared bill interface."
+            />
           </div>
 
-          <div className="preview-balance-panel">
-            <div>
+          <div className="split-card split-card-main">
+            <div className="card-topline">
+              <span>Dinner table</span>
+              <strong>Ready to settle</strong>
+            </div>
+            <div className="split-total">
               <span>Total bill</span>
-              <strong>₹1,000</strong>
+              <strong>Rs. 4,820</strong>
             </div>
-
-            <div>
-              <span>Settlement status</span>
-              <strong>2 pending</strong>
-            </div>
-          </div>
-
-          <div className="professional-bill-list">
-            <div className="professional-bill-row">
-              <div>
-                <span>Biryani Bowl</span>
-                <small>Assigned to Max</small>
-              </div>
-              <strong>₹300</strong>
-            </div>
-
-            <div className="professional-bill-row">
-              <div>
-                <span>Pizza Platter</span>
-                <small>Assigned to John</small>
-              </div>
-              <strong>₹450</strong>
-            </div>
-
-            <div className="professional-bill-row">
-              <div>
-                <span>Drinks & Sides</span>
-                <small>Assigned to Ravi</small>
-              </div>
-              <strong>₹250</strong>
+            <div className="split-list">
+              {splitRows.map((row) => (
+                <div className="split-row" key={row.name}>
+                  <span className="avatar-chip">{row.name.charAt(0)}</span>
+                  <div>
+                    <strong>{row.name}</strong>
+                    <span>{row.item}</span>
+                  </div>
+                  <em>{row.amount}</em>
+                </div>
+              ))}
             </div>
           </div>
 
-          <div className="preview-divider" />
-
-          <div className="settlement-grid">
-            <div className="settlement-card positive">
-              <span>You are owed</span>
-              <strong>₹700</strong>
-              <small>From 2 friends</small>
-            </div>
-
-            <div className="settlement-card neutral">
-              <span>Your share</span>
-              <strong>₹300</strong>
-              <small>Already recorded</small>
-            </div>
+          <div className="split-card split-card-floating">
+            <span>Settlement note</span>
+            <br />
+            <strong>Rs. 640 pending</strong>
+            <p>Due from two friends after tax and shared sides.</p>
           </div>
         </div>
       </section>
 
-      <section className="feature-rail" aria-label="SplitSpark features">
-        <div className="feature-track">
-          <div className="feature-group">
-            {[...featurePills, ...featurePills].map((pill, index) => (
-              <span key={`group-1-${pill}-${index}`}>{pill}</span>
-            ))}
-          </div>
-
-          <div className="feature-group" aria-hidden="true">
-            {[...featurePills, ...featurePills].map((pill, index) => (
-              <span key={`group-2-${pill}-${index}`}>{pill}</span>
-            ))}
-          </div>
+      <section className="intro-section reveal" id="friends">
+        <div className="intro-copy">
+          <h2>Equal split is quick. Exact split is fair.</h2>
         </div>
-      </section>
 
-      <section className="problem-section">
-        <div className="section-heading">
-          <span className="section-kicker">The problem</span>
-          <h2>Equal split is not always fair.</h2>
+        <div className="intro-text">
           <p>
-            When everyone consumes different items, SplitSpark lets every person
-            pay for exactly what they used instead of forcing one equal split.
+            Everyone orders differently, so the money record should match what
+            happened. SplitVerse keeps the flow soft while the math stays
+            precise underneath.
+          </p>
+
+          <div className="intro-stats" aria-label="Example room totals">
+            {heroStats.map((stat) => (
+              <div key={stat.label}>
+                <span>{stat.label}</span>
+                <strong>{stat.value}</strong>
+                <em>{stat.helper}</em>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section
+        className="services-section reveal"
+        id="rooms"
+        aria-labelledby="services-title"
+      >
+        <div className="section-heading">
+          <h2 id="services-title">A connected path from bill to balance.</h2>
+          <p>
+            Build rooms, assign expenses, and settle dues from one composed
+            money-management surface.
           </p>
         </div>
 
-        <div className="comparison-grid">
-          <div className="comparison-card active-card">
-            <span>SplitSpark way</span>
-            <h3>₹300 + ₹450 + ₹250</h3>
-            <p>
-              Each friend pays only for their own item. Fair, clear, and
-              trackable.
-            </p>
-          </div>
+        <div className="service-grid">
+          {services.map((service) => {
+            const Icon = service.icon;
+
+            return (
+              <article className="service-card" key={service.title}>
+                <div className="service-icon">
+                  <Icon size={22} />
+                </div>
+                <span>{service.label}</span>
+                <h3>{service.title}</h3>
+                <p>{service.text}</p>
+                <div className="service-metric">
+                  <strong>{service.metric}</strong>
+                  <ChevronRight size={18} />
+                </div>
+              </article>
+            );
+          })}
         </div>
       </section>
 
-      <section className="features-section" id="features">
+      <section className="features-section reveal" id="features">
         <div className="section-heading">
-          <span className="section-kicker">Features</span>
-          <h2>Everything needed for social money management.</h2>
+          <h2>Everything needed for shared expenses.</h2>
           <p>
-            Built for college students, flatmates, corporate teams, restaurants,
-            trips, subscriptions, events, and shared purchases.
+            Designed for college students, flatmates, office teams, restaurants,
+            trips, subscriptions, events, and everyday shared purchases.
           </p>
         </div>
 
@@ -268,10 +328,13 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="how-section" id="how">
-        <div className="section-heading">
-          <span className="section-kicker">How it works</span>
-          <h2>From bill to balance in six clean steps.</h2>
+      <section className="workflow-section reveal" id="workflow">
+        <div className="workflow-copy">
+          <h2>From receipt to settlement in six calm steps.</h2>
+          <p>
+            The page stays lightweight for the group, while SplitVerse keeps
+            each share, reminder, and settlement traceable.
+          </p>
         </div>
 
         <div className="steps-grid">
@@ -284,14 +347,12 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="dashboard-preview-section" id="preview">
+      <section className="dashboard-preview-section reveal" id="preview">
         <div className="dashboard-copy">
-          <span className="section-kicker">Dashboard preview</span>
-          <h2>A bento dashboard for balances, rooms, wallet, and savings.</h2>
+          <h2>Balances, rooms, reminders, and savings in one view.</h2>
           <p>
-            The dashboard gives users a fast view of total balance, money owed,
-            money to receive, active rooms, recent transactions, reminders, and
-            gamified savings progress.
+            A fast read on money owed, money to receive, active rooms, recent
+            transactions, reminders, and group savings progress.
           </p>
 
           <Link to="/signup" className="primary-btn">
@@ -300,45 +361,67 @@ export default function Landing() {
           </Link>
         </div>
 
-        <div className="bento-preview">
-          <div className="bento-card large">
-            <span>Total Balance</span>
-            <strong>+₹2,450</strong>
-            <div className="soft-chart">
-              <i />
-              <i />
-              <i />
-              <i />
-              <i />
-            </div>
+        <div className="balance-ledger" aria-label="Dashboard preview">
+          <div className="ledger-header">
+            <span>Current balance</span>
+            <strong>+Rs. 2,450</strong>
           </div>
-
-          <div className="bento-card">
+          <div className="ledger-row">
             <span>You owe</span>
-            <strong>₹850</strong>
+            <strong>Rs. 850</strong>
           </div>
-
-          <div className="bento-card">
+          <div className="ledger-row">
             <span>You are owed</span>
-            <strong>₹3,300</strong>
+            <strong>Rs. 3,300</strong>
           </div>
-
-          <div className="bento-card wide">
+          <div className="ledger-row">
             <span>Active rooms</span>
             <strong>Goa Trip, Hostel 403, Office Lunch</strong>
           </div>
-
-          <div className="bento-card">
+          <div className="ledger-row">
             <span>Reminders</span>
             <strong>4 pending</strong>
           </div>
-
-          <div className="bento-card">
-            <span>Savings Score</span>
-            <strong>720</strong>
-          </div>
         </div>
       </section>
+
+      <section className="final-cta reveal">
+        <div>
+          <h2>Shared money can feel lighter.</h2>
+          <p>
+            Keep the bill, the people, the reminders, and the settlement trail
+            in one clear place.
+          </p>
+        </div>
+        <Link to="/signup" className="footer-primary-btn">
+          Get started
+          <ArrowRight size={18} />
+        </Link>
+      </section>
+
+      <footer className="landing-footer">
+        <div className="footer-head">
+          <h2>Always ready when the group bill gets complicated.</h2>
+        </div>
+
+        <div className="footer-grid">
+          {footerColumns.map((column) => (
+            <div key={column.heading}>
+              <h3>{column.heading}</h3>
+              {column.links.map((link) => (
+                <a href="#rooms" key={link}>
+                  {link}
+                </a>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="footer-bottom">
+          <span>Copyright 2026 SplitVerse</span>
+          <button type="button">India / English</button>
+        </div>
+      </footer>
     </main>
   );
 }
