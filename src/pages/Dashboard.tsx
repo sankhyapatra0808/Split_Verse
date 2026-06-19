@@ -34,8 +34,6 @@ const FALLBACK_MONTHS = [
   "Dec",
 ].map((label) => ({ label, value: 0, amount: 0 }));
 
-const FALLBACK_PEAK_DAYS = [12, 19, 8, 24, 15, 5, 28, 17, 9, 21, 13, 27];
-
 type ExpenseTimeSlots = NonNullable<
   DashboardSummary["expenseTracker"]
 >["timeSlots"];
@@ -110,16 +108,18 @@ function buildExpenseSlots(
   });
 }
 
-function formatPeakDay(month: MonthlySpendMonth, index: number) {
+function formatPeakDay(month: MonthlySpendMonth) {
   const suppliedDay = month.peakDay ?? month.peakSpendingDay;
-  const peakDay =
-    suppliedDay ?? FALLBACK_PEAK_DAYS[index % FALLBACK_PEAK_DAYS.length];
 
-  if (typeof peakDay === "number") {
-    return `Day ${peakDay}`;
+  if (!suppliedDay) {
+    return "No spend yet";
   }
 
-  return peakDay;
+  if (typeof suppliedDay === "number") {
+    return `Day ${suppliedDay}`;
+  }
+
+  return suppliedDay;
 }
 
 export default function Dashboard() {
@@ -169,6 +169,12 @@ export default function Dashboard() {
 
   const totalSpentToday =
     expenseTracker?.totalSpentToday ?? summaryMetrics?.todayExpense ?? 0;
+  const currentMonthIndex = new Date().getMonth();
+  const currentMonth = displayedMonths[currentMonthIndex];
+  const monthlyExpenditure =
+    monthlySpend?.currentMonthTotal ?? currentMonth?.amount ?? 0;
+  const monthlyExpenditureLabel =
+    monthlySpend?.currentMonthLabel ?? currentMonth?.label ?? "This month";
   const walletBalance =
     walletHealth?.availableBalance ?? summaryMetrics?.walletBalance ?? 0;
   const receivable = walletHealth?.receivable ?? 0;
@@ -294,18 +300,24 @@ export default function Dashboard() {
         <article className="bento-card total-spend-card">
           <div className="bento-card-head">
             <div>
-              <span>Total amount spent today</span>
+              <span>Monthly expenditure</span>
               <h2>
                 {dashboardLoading ? (
                   <LoadingValue wide />
                 ) : (
-                  formatCurrency(totalSpentToday)
+                  formatCurrency(monthlyExpenditure)
                 )}
               </h2>
             </div>
             <IndianRupee size={24} />
           </div>
-          <p>{dashboardLoading ? <LoadingValue wide /> : spendingInsight}</p>
+          <p>
+            {dashboardLoading ? (
+              <LoadingValue wide />
+            ) : (
+              `${monthlyExpenditureLabel}: ${spendingInsight}`
+            )}
+          </p>
         </article>
 
         <article className="bento-card monthly-graph-card">
@@ -324,7 +336,7 @@ export default function Dashboard() {
           </div>
 
           <div className="month-chart" aria-label="12 months spending graph">
-            {displayedMonths.map((month, index) => {
+            {displayedMonths.map((month) => {
               const normalizedValue =
                 maxMonthlyAmount > 0
                   ? Math.round((month.amount / maxMonthlyAmount) * 100)
@@ -332,7 +344,7 @@ export default function Dashboard() {
               const barHeight = dashboardLoading
                 ? 0
                 : Math.max(month.amount > 0 ? 8 : 0, normalizedValue);
-              const peakDay = formatPeakDay(month, index);
+              const peakDay = formatPeakDay(month);
 
               return (
                 <div

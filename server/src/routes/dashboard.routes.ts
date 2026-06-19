@@ -103,7 +103,9 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
             )::float
           FROM wallet_transactions
           WHERE user_id = $1
-        ), 0) AS wallet_balance;
+        ), 0) AS wallet_balance,
+
+        EXTRACT(MONTH FROM (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date)::int AS current_month_number;
       `,
       [dbUserId, dbUserEmail],
     );
@@ -114,6 +116,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const pendingPayment = Number(summary.pending_payment);
     const receivable = Number(summary.receivable);
     const walletBalance = Number(summary.wallet_balance);
+    const currentMonthNumber = Number(summary.current_month_number);
 
     const timeSlotResult = await db.query(
       `
@@ -198,6 +201,56 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
       [dbUserId, dbUserEmail],
     );
 
+    const monthlyPeakResult = await db.query(
+      `
+      WITH daily_monthly_spend AS (
+        SELECT
+          EXTRACT(MONTH FROM e.expense_date)::int AS month,
+          EXTRACT(DAY FROM e.expense_date)::int AS day,
+          SUM(e.amount)::float AS amount
+        FROM expenses e
+        WHERE e.user_id = $1
+        AND EXTRACT(YEAR FROM e.expense_date) = EXTRACT(YEAR FROM (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date)
+        AND NOT (
+          e.category = 'Shared room'
+          AND EXISTS (
+            SELECT 1
+            FROM split_rooms room
+            INNER JOIN split_room_items item
+              ON item.room_id = room.id
+            INNER JOIN split_room_members member
+              ON member.id = item.assigned_member_id
+            WHERE room.owner_user_id = $1
+            AND e.title = room.name || ': ' || item.title
+            AND e.amount = item.amount
+            AND NOT (
+              member.user_id = $1
+              OR LOWER(COALESCE(member.email, '')) = LOWER($2)
+            )
+          )
+        )
+        GROUP BY
+          EXTRACT(MONTH FROM e.expense_date),
+          EXTRACT(DAY FROM e.expense_date)
+      ),
+      ranked_days AS (
+        SELECT
+          month,
+          day,
+          ROW_NUMBER() OVER (
+            PARTITION BY month
+            ORDER BY amount DESC, day ASC
+          ) AS day_rank
+        FROM daily_monthly_spend
+      )
+      SELECT month, day AS peak_day
+      FROM ranked_days
+      WHERE day_rank = 1
+      ORDER BY month;
+      `,
+      [dbUserId, dbUserEmail],
+    );
+
     const monthlyAmounts = Array.from({ length: 12 }, (_, index) => {
       const monthNumber = index + 1;
 
@@ -210,11 +263,24 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     const maxMonthlyAmount = Math.max(...monthlyAmounts, 1);
     const graphTotal = monthlyAmounts.reduce((sum, amount) => sum + amount, 0);
+    const currentMonthIndex = Math.max(
+      0,
+      Math.min(11, currentMonthNumber - 1),
+    );
+    const currentMonthTotal = monthlyAmounts[currentMonthIndex] ?? 0;
+    const currentMonthLabel = monthLabels[currentMonthIndex] ?? "This month";
+    const peakDaysByMonth = new Map(
+      monthlyPeakResult.rows.map((row) => [
+        Number(row.month),
+        Number(row.peak_day),
+      ]),
+    );
 
     const months = monthlyAmounts.map((amount, index) => ({
       label: monthLabels[index],
       amount,
       value: Math.round((amount / maxMonthlyAmount) * 100),
+      peakDay: peakDaysByMonth.get(index + 1),
     }));
 
     return res.json({
@@ -236,13 +302,15 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
       monthlySpend: {
         graphTotal,
+        currentMonthTotal,
+        currentMonthLabel,
         months,
       },
       spendingInsight: {
         text:
-          todayExpense > 0
-            ? "Your expenses are being tracked for today."
-            : "No expenses recorded today yet.",
+          currentMonthTotal > 0
+            ? "Expenditure updates from your saved expenses."
+            : "No expenses recorded for this month yet.",
       },
     });
   } catch (error) {

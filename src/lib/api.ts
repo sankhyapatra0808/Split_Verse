@@ -42,6 +42,8 @@ export type DashboardSummary = {
 
   monthlySpend?: {
     graphTotal: number;
+    currentMonthTotal?: number;
+    currentMonthLabel?: string;
     months: {
       label: string;
       amount: number;
