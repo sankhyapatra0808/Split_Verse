@@ -45,11 +45,33 @@ const socialProviders = {
 
 const firebaseSetupError =
   "Firebase is not configured yet. Add your VITE_FIREBASE_* values to a local .env file and restart the dev server.";
+const rememberedSessionExpiryKey = "splitverse-remembered-session-expires-at";
+const rememberedSessionDurationMs = 15 * 24 * 60 * 60 * 1000;
 
 function assertFirebaseConfigured() {
   if (!isFirebaseConfigured) {
     throw new Error(firebaseSetupError);
   }
+}
+
+function setRememberedSession(remember: boolean) {
+  if (remember) {
+    window.localStorage.setItem(
+      rememberedSessionExpiryKey,
+      String(Date.now() + rememberedSessionDurationMs)
+    );
+    return;
+  }
+
+  window.localStorage.removeItem(rememberedSessionExpiryKey);
+}
+
+function isRememberedSessionExpired() {
+  const expiresAt = Number(
+    window.localStorage.getItem(rememberedSessionExpiryKey) || 0
+  );
+
+  return expiresAt > 0 && Date.now() > expiresAt;
 }
 
 type AuthProviderProps = {
@@ -63,6 +85,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser && isRememberedSessionExpired()) {
+        window.localStorage.removeItem(rememberedSessionExpiryKey);
+        setUser(null);
+        setDbUser(null);
+        await signOut(auth);
+        setLoading(false);
+        return;
+      }
+
       setUser(currentUser);
 
       if (!currentUser) {
@@ -100,6 +131,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         );
 
         await signInWithEmailAndPassword(auth, email, password);
+        setRememberedSession(remember);
 
         const response = await syncCurrentUser();
         setDbUser(response.user);
@@ -125,15 +157,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         const response = await syncCurrentUser();
+        setRememberedSession(true);
         setDbUser(response.user);
       },
 
-      async loginWithProvider(provider) {
+      async loginWithProvider(provider, remember = true) {
         assertFirebaseConfigured();
 
-        await setPersistence(auth, browserLocalPersistence);
+        await setPersistence(
+          auth,
+          remember ? browserLocalPersistence : browserSessionPersistence
+        );
 
         await signInWithPopup(auth, socialProviders[provider]);
+        setRememberedSession(remember);
 
         const response = await syncCurrentUser();
         setDbUser(response.user);
@@ -145,6 +182,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       },
 
       async logout() {
+        window.localStorage.removeItem(rememberedSessionExpiryKey);
         setDbUser(null);
         await signOut(auth);
       },

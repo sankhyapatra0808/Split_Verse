@@ -1,39 +1,42 @@
 import { Download, Filter, Search } from "lucide-react";
 
+import { useAppSettings } from "../context/useAppSettings";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
 const transactions = [
   {
     title: "Dinner table settlement",
     room: "Restaurant Night",
-    amount: "+Rs. 640",
+    amount: 640,
     status: "Received",
     date: "Today",
   },
   {
     title: "Taxi split",
     room: "Goa Trip",
-    amount: "-Rs. 280",
+    amount: -280,
     status: "Paid",
     date: "Today",
   },
   {
     title: "Wallet top-up",
     room: "UPI",
-    amount: "+Rs. 2,000",
+    amount: 2000,
     status: "Added",
     date: "Yesterday",
   },
   {
     title: "Groceries",
     room: "Hostel 403",
-    amount: "-Rs. 840",
+    amount: -840,
     status: "Pending",
     date: "May 20",
   },
 ];
 
 export default function TransactionHistory() {
+  const { formatCurrency } = useAppSettings();
+
   return (
     <DashboardLayout eyebrow="History">
       <section className="dashboard-page-grid">
@@ -88,7 +91,7 @@ export default function TransactionHistory() {
                   <strong>{transaction.title}</strong>
                   <span>{transaction.room}</span>
                 </div>
-                <em>{transaction.amount}</em>
+                <em>{formatCurrency(transaction.amount, { signed: true })}</em>
                 <span className={`status-pill ${transaction.status.toLowerCase()}`}>
                   {transaction.status}
                 </span>
@@ -100,7 +103,7 @@ export default function TransactionHistory() {
 
         <article className="bento-card history-summary-card dark">
           <span>Net movement</span>
-          <strong>+Rs. 1,520</strong>
+          <strong>{formatCurrency(1520, { signed: true })}</strong>
           <p>Across 4 recorded transactions in the current filter.</p>
         </article>
       </section>

@@ -45,7 +45,7 @@ export default function Login() {
 
     try {
       setLoading(true);
-      await loginWithProvider(provider);
+      await loginWithProvider(provider, remember);
       navigate(from, { replace: true });
     } catch (loginError) {
       setError(getFirebaseErrorMessage(loginError));

@@ -19,7 +19,10 @@ export type AuthContextValue = {
     email: string,
     password: string
   ) => Promise<void>;
-  loginWithProvider: (provider: SocialProvider) => Promise<void>;
+  loginWithProvider: (
+    provider: SocialProvider,
+    remember?: boolean
+  ) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
 };

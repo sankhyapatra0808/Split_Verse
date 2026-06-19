@@ -1,20 +1,23 @@
 import { ArrowDownRight, ArrowUpRight, CheckCircle2, WalletCards } from "lucide-react";
 
+import { useAppSettings } from "../context/useAppSettings";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
 const settlementRows = [
-  { name: "Mira", note: "Dinner table", amount: "+Rs. 640", type: "receive" },
-  { name: "Kabir", note: "Taxi split", amount: "-Rs. 280", type: "pay" },
-  { name: "Office Lunch", note: "Team room", amount: "+Rs. 1,180", type: "receive" },
+  { name: "Mira", note: "Dinner table", amount: 640, type: "receive" },
+  { name: "Kabir", note: "Taxi split", amount: -280, type: "pay" },
+  { name: "Office Lunch", note: "Team room", amount: 1180, type: "receive" },
 ];
 
 const accountRows = [
-  { label: "Primary wallet", value: "Rs. 12,480" },
-  { label: "Pending incoming", value: "Rs. 3,300" },
-  { label: "Pending outgoing", value: "Rs. 850" },
+  { label: "Primary wallet", value: 12480 },
+  { label: "Pending incoming", value: 3300 },
+  { label: "Pending outgoing", value: 850 },
 ];
 
 export default function WalletBalance() {
+  const { formatCurrency } = useAppSettings();
+
   return (
     <DashboardLayout eyebrow="Wallet">
       <section className="dashboard-page-grid">
@@ -35,7 +38,7 @@ export default function WalletBalance() {
         <article className="bento-card balance-total-card dark">
           <div className="balance-total-details">
             <span>Available balance</span>
-            <strong>Rs. 12,480</strong>
+            <strong>{formatCurrency(12480)}</strong>
             <p>Enough to settle every pending outgoing payment today.</p>
           </div>
         </article>
@@ -50,7 +53,7 @@ export default function WalletBalance() {
           <form className="dashboard-form compact">
             <label>
               <span>Low balance alert</span>
-              <input type="text" defaultValue="Rs. 1,000" />
+              <input type="text" defaultValue={formatCurrency(1000)} />
             </label>
             <label>
               <span>Reminder cadence</span>
@@ -77,7 +80,7 @@ export default function WalletBalance() {
             {accountRows.map((row) => (
               <div key={row.label}>
                 <span>{row.label}</span>
-                <strong>{row.value}</strong>
+                <strong>{formatCurrency(row.value)}</strong>
               </div>
             ))}
           </div>
@@ -105,7 +108,7 @@ export default function WalletBalance() {
                   <strong>{row.name}</strong>
                   <span>{row.note}</span>
                 </div>
-                <em>{row.amount}</em>
+                <em>{formatCurrency(row.amount, { signed: true })}</em>
                 <button type="button">
                   {row.type === "receive" ? "Remind" : "Pay"}
                 </button>

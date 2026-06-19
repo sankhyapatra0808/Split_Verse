@@ -34,11 +34,11 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     const userResult = await db.query(
       `
-      SELECT id
+      SELECT id, email
       FROM users
       WHERE firebase_uid = $1;
       `,
-      [firebaseUser.uid]
+      [firebaseUser.uid],
     );
 
     if (userResult.rows.length === 0) {
@@ -48,15 +48,34 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     }
 
     const dbUserId = userResult.rows[0].id;
+    const dbUserEmail = userResult.rows[0].email;
 
     const summaryResult = await db.query(
       `
       SELECT
         COALESCE((
-          SELECT SUM(amount)::float
-          FROM expenses
-          WHERE user_id = $1
-          AND expense_date = CURRENT_DATE
+          SELECT SUM(e.amount)::float
+          FROM expenses e
+          WHERE e.user_id = $1
+          AND e.expense_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+          AND NOT (
+            e.category = 'Shared room'
+            AND EXISTS (
+              SELECT 1
+              FROM split_rooms room
+              INNER JOIN split_room_items item
+                ON item.room_id = room.id
+              INNER JOIN split_room_members member
+                ON member.id = item.assigned_member_id
+              WHERE room.owner_user_id = $1
+              AND e.title = room.name || ': ' || item.title
+              AND e.amount = item.amount
+              AND NOT (
+                member.user_id = $1
+                OR LOWER(COALESCE(member.email, '')) = LOWER($2)
+              )
+            )
+          )
         ), 0) AS today_expense,
 
         COALESCE((
@@ -86,7 +105,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
           WHERE user_id = $1
         ), 0) AS wallet_balance;
       `,
-      [dbUserId]
+      [dbUserId, dbUserEmail],
     );
 
     const summary = summaryResult.rows[0];
@@ -100,28 +119,46 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
       `
       SELECT
         CASE
-          WHEN EXTRACT(HOUR FROM created_at) >= 0
-           AND EXTRACT(HOUR FROM created_at) < 6
+          WHEN EXTRACT(HOUR FROM (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')) >= 0
+           AND EXTRACT(HOUR FROM (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')) < 6
             THEN '12 AM - 6 AM'
 
-          WHEN EXTRACT(HOUR FROM created_at) >= 6
-           AND EXTRACT(HOUR FROM created_at) < 12
+          WHEN EXTRACT(HOUR FROM (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')) >= 6
+           AND EXTRACT(HOUR FROM (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')) < 12
             THEN '6 AM - 12 PM'
 
-          WHEN EXTRACT(HOUR FROM created_at) >= 12
-           AND EXTRACT(HOUR FROM created_at) < 18
+          WHEN EXTRACT(HOUR FROM (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')) >= 12
+           AND EXTRACT(HOUR FROM (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')) < 18
             THEN '12 PM - 6 PM'
 
           ELSE '6 PM - 12 AM'
         END AS label,
 
-        SUM(amount)::float AS amount
-      FROM expenses
-      WHERE user_id = $1
-      AND expense_date = CURRENT_DATE
+        SUM(e.amount)::float AS amount
+      FROM expenses e
+      WHERE e.user_id = $1
+      AND e.expense_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+      AND NOT (
+        e.category = 'Shared room'
+        AND EXISTS (
+          SELECT 1
+          FROM split_rooms room
+          INNER JOIN split_room_items item
+            ON item.room_id = room.id
+          INNER JOIN split_room_members member
+            ON member.id = item.assigned_member_id
+          WHERE room.owner_user_id = $1
+          AND e.title = room.name || ': ' || item.title
+          AND e.amount = item.amount
+          AND NOT (
+            member.user_id = $1
+            OR LOWER(COALESCE(member.email, '')) = LOWER($2)
+          )
+        )
+      )
       GROUP BY label;
       `,
-      [dbUserId]
+      [dbUserId, dbUserEmail],
     );
 
     const timeSlots = timeSlotResult.rows.map((row) => ({
@@ -132,22 +169,40 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const monthlyResult = await db.query(
       `
       SELECT
-        EXTRACT(MONTH FROM expense_date)::int AS month,
-        SUM(amount)::float AS amount
-      FROM expenses
-      WHERE user_id = $1
-      AND EXTRACT(YEAR FROM expense_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-      GROUP BY EXTRACT(MONTH FROM expense_date)
+        EXTRACT(MONTH FROM e.expense_date)::int AS month,
+        SUM(e.amount)::float AS amount
+      FROM expenses e
+      WHERE e.user_id = $1
+      AND EXTRACT(YEAR FROM e.expense_date) = EXTRACT(YEAR FROM (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date)
+      AND NOT (
+        e.category = 'Shared room'
+        AND EXISTS (
+          SELECT 1
+          FROM split_rooms room
+          INNER JOIN split_room_items item
+            ON item.room_id = room.id
+          INNER JOIN split_room_members member
+            ON member.id = item.assigned_member_id
+          WHERE room.owner_user_id = $1
+          AND e.title = room.name || ': ' || item.title
+          AND e.amount = item.amount
+          AND NOT (
+            member.user_id = $1
+            OR LOWER(COALESCE(member.email, '')) = LOWER($2)
+          )
+        )
+      )
+      GROUP BY EXTRACT(MONTH FROM e.expense_date)
       ORDER BY month;
       `,
-      [dbUserId]
+      [dbUserId, dbUserEmail],
     );
 
     const monthlyAmounts = Array.from({ length: 12 }, (_, index) => {
       const monthNumber = index + 1;
 
       const found = monthlyResult.rows.find(
-        (row) => Number(row.month) === monthNumber
+        (row) => Number(row.month) === monthNumber,
       );
 
       return found ? Number(found.amount) : 0;
@@ -182,6 +237,12 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
       monthlySpend: {
         graphTotal,
         months,
+      },
+      spendingInsight: {
+        text:
+          todayExpense > 0
+            ? "Your expenses are being tracked for today."
+            : "No expenses recorded today yet.",
       },
     });
   } catch (error) {

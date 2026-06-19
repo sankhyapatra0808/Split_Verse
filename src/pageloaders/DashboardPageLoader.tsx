@@ -2,7 +2,7 @@ import type { CSSProperties, ReactElement } from "react";
 
 import "../styles/DashboardPageLoader.css";
 
-const navRows = Array.from({ length: 5 });
+const navRows = Array.from({ length: 6 });
 const statCards = Array.from({ length: 4 });
 const chartBars = Array.from({ length: 12 });
 const listRows = Array.from({ length: 4 });
@@ -13,7 +13,9 @@ export type DashboardLoaderVariant =
   | "splitRooms"
   | "wallet"
   | "walletTopUp"
-  | "transactions";
+  | "transactions"
+  | "friends"
+  | "settings";
 
 type DashboardPageLoaderProps = {
   variant?: DashboardLoaderVariant;
@@ -241,12 +243,38 @@ function TransactionsSkeleton() {
   );
 }
 
+function SettingsSkeleton() {
+  return (
+    <>
+      <HeroCard />
+      <FormCard />
+      <FormCard />
+      <ListCard className="loader-page-small" rows={3} />
+      <ListCard className="loader-page-list" rows={4} />
+    </>
+  );
+}
+
+function FriendsSkeleton() {
+  return (
+    <>
+      <HeroCard dark />
+      <FormCard compact />
+      <ListCard className="loader-page-list" rows={5} />
+      <ListCard className="loader-page-small" rows={3} />
+      <ListCard className="loader-page-small" rows={3} />
+    </>
+  );
+}
+
 const skeletons: Record<DashboardLoaderVariant, () => ReactElement> = {
   dashboard: DashboardSkeleton,
   splitRooms: SplitRoomsSkeleton,
   wallet: WalletSkeleton,
   walletTopUp: WalletTopUpSkeleton,
   transactions: TransactionsSkeleton,
+  friends: FriendsSkeleton,
+  settings: SettingsSkeleton,
 };
 
 export default function DashboardPageLoader({

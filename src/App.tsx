@@ -1,8 +1,9 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Navigate, Routes, Route } from "react-router-dom";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardPageLoader from "./pageloaders/DashboardPageLoader";
 import type { DashboardLoaderVariant } from "./pageloaders/DashboardPageLoader";
+import { useAuth } from "./context/useAuth";
 
 const Home = lazy(() => import("./pages/Landing"));
 const Login = lazy(() => import("./pages/auth/Login"));
@@ -13,9 +14,33 @@ const SharedSplitRooms = lazy(() => import("./pages/SharedSplitRooms"));
 const WalletBalance = lazy(() => import("./pages/WalletBalance"));
 const WalletTopUp = lazy(() => import("./pages/WalletTopUp"));
 const TransactionHistory = lazy(() => import("./pages/TransactionHistory"));
+const AppSettings = lazy(() => import("./pages/AppSettings"));
+const Friends = lazy(() => import("./pages/Friends"));
 
 function publicPage(page: ReactNode) {
   return <Suspense fallback={null}>{page}</Suspense>;
+}
+
+function homePage(page: ReactNode) {
+  return (
+    <Suspense fallback={null}>
+      <HomeRoute>{page}</HomeRoute>
+    </Suspense>
+  );
+}
+
+function HomeRoute({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <DashboardPageLoader variant="dashboard" />;
+  }
+
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <>{children}</>;
 }
 
 function dashboardPage(page: ReactNode, loaderVariant: DashboardLoaderVariant) {
@@ -31,7 +56,7 @@ function dashboardPage(page: ReactNode, loaderVariant: DashboardLoaderVariant) {
 function App() {
   return (
     <Routes>
-      <Route path="/" element={publicPage(<Home />)} />
+      <Route path="/" element={homePage(<Home />)} />
       <Route path="/login" element={publicPage(<Login />)} />
       <Route path="/signup" element={publicPage(<Signup />)} />
       <Route path="/forgot-password" element={publicPage(<ForgotPassword />)} />
@@ -41,6 +66,8 @@ function App() {
       <Route path="/wallet" element={dashboardPage(<WalletBalance />, "wallet")} />
       <Route path="/wallet-top-up" element={dashboardPage(<WalletTopUp />, "walletTopUp")} />
       <Route path="/transactions" element={dashboardPage(<TransactionHistory />, "transactions")} />
+      <Route path="/friends" element={dashboardPage(<Friends />, "friends")} />
+      <Route path="/settings" element={dashboardPage(<AppSettings />, "settings")} />
     </Routes>
   );
 }

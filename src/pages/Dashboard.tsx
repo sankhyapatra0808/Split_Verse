@@ -10,6 +10,7 @@ import {
 
 import DashboardLayout from "./dashboard/DashboardLayout";
 import { getDashboardSummary, type DashboardSummary } from "../lib/api";
+import { useAppSettings } from "../context/useAppSettings";
 
 const TIME_SLOTS = [
   { label: "12 AM - 6 AM", startHour: 0 },
@@ -35,19 +36,19 @@ const FALLBACK_MONTHS = [
 
 const FALLBACK_PEAK_DAYS = [12, 19, 8, 24, 15, 5, 28, 17, 9, 21, 13, 27];
 
-type ExpenseTimeSlots = NonNullable<DashboardSummary["expenseTracker"]>["timeSlots"];
-type MonthlySpendMonth = NonNullable<DashboardSummary["monthlySpend"]>["months"][number];
-
-function formatCurrency(amount: number) {
-  return `Rs. ${amount.toLocaleString("en-IN", {
-    maximumFractionDigits: 0,
-  })}`;
-}
+type ExpenseTimeSlots = NonNullable<
+  DashboardSummary["expenseTracker"]
+>["timeSlots"];
+type MonthlySpendMonth = NonNullable<
+  DashboardSummary["monthlySpend"]
+>["months"][number];
 
 function LoadingValue({ wide = false }: { wide?: boolean }) {
   return (
     <span
-      className={wide ? "dashboard-value-skeleton wide" : "dashboard-value-skeleton"}
+      className={
+        wide ? "dashboard-value-skeleton wide" : "dashboard-value-skeleton"
+      }
       aria-label="Loading value"
     />
   );
@@ -71,7 +72,7 @@ function getCurrentSlotIndex() {
 
 function buildExpenseSlots(
   timeSlots: ExpenseTimeSlots,
-  totalSpentToday: number
+  totalSpentToday: number,
 ) {
   const currentSlotIndex = getCurrentSlotIndex();
   const currentHour = new Date().getHours();
@@ -79,15 +80,18 @@ function buildExpenseSlots(
   const maxAmount = Math.max(
     totalSpentToday,
     ...suppliedSlots.map((slot) => slot.amount),
-    1
+    1,
   );
 
   return TIME_SLOTS.map((slot, index) => {
     const suppliedSlot = suppliedSlots.find(
-      (item) => item.label.toLowerCase() === slot.label.toLowerCase()
+      (item) => item.label.toLowerCase() === slot.label.toLowerCase(),
     );
     const amount =
-      suppliedSlot?.amount ?? (suppliedSlots.length === 0 && index === currentSlotIndex ? totalSpentToday : 0);
+      suppliedSlot?.amount ??
+      (suppliedSlots.length === 0 && index === currentSlotIndex
+        ? totalSpentToday
+        : 0);
     const detail = suppliedSlot?.peakHour
       ? `Peak: ${suppliedSlot.peakHour}`
       : amount > 0 && index === currentSlotIndex
@@ -108,7 +112,8 @@ function buildExpenseSlots(
 
 function formatPeakDay(month: MonthlySpendMonth, index: number) {
   const suppliedDay = month.peakDay ?? month.peakSpendingDay;
-  const peakDay = suppliedDay ?? FALLBACK_PEAK_DAYS[index % FALLBACK_PEAK_DAYS.length];
+  const peakDay =
+    suppliedDay ?? FALLBACK_PEAK_DAYS[index % FALLBACK_PEAK_DAYS.length];
 
   if (typeof peakDay === "number") {
     return `Day ${peakDay}`;
@@ -118,6 +123,7 @@ function formatPeakDay(month: MonthlySpendMonth, index: number) {
 }
 
 export default function Dashboard() {
+  const { formatCurrency } = useAppSettings();
   const [dashboardSummary, setDashboardSummary] =
     useState<DashboardSummary | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
@@ -158,7 +164,7 @@ export default function Dashboard() {
   const displayedMonths = monthSpend.length > 0 ? monthSpend : FALLBACK_MONTHS;
   const maxMonthlyAmount = Math.max(
     ...displayedMonths.map((month) => month.amount),
-    0
+    0,
   );
 
   const totalSpentToday =
@@ -167,9 +173,12 @@ export default function Dashboard() {
     walletHealth?.availableBalance ?? summaryMetrics?.walletBalance ?? 0;
   const receivable = walletHealth?.receivable ?? 0;
   const graphTotal = monthlySpend?.graphTotal ?? 0;
+  const spendingInsight =
+    dashboardSummary?.spendingInsight?.text ??
+    "No expenses recorded today yet.";
   const expenseTimeSlots = buildExpenseSlots(
     expenseTracker?.timeSlots,
-    summaryMetrics?.todayExpense ?? totalSpentToday
+    summaryMetrics?.todayExpense ?? totalSpentToday,
   );
 
   const metrics = [
@@ -207,7 +216,13 @@ export default function Dashboard() {
 
           <div className="expense-tracker-body">
             <div className="expense-ring" aria-label="Expense tracker graph">
-              <strong>{dashboardLoading ? <LoadingValue /> : formatCurrency(totalSpentToday)}</strong>
+              <strong>
+                {dashboardLoading ? (
+                  <LoadingValue />
+                ) : (
+                  formatCurrency(totalSpentToday)
+                )}
+              </strong>
               <span>spent</span>
             </div>
 
@@ -217,14 +232,26 @@ export default function Dashboard() {
             >
               {expenseTimeSlots.map((slot) => (
                 <div
-                  className={slot.active ? "expense-line time-slot active" : "expense-line time-slot"}
+                  className={
+                    slot.active
+                      ? "expense-line time-slot active"
+                      : "expense-line time-slot"
+                  }
                   key={slot.label}
                 >
                   <div>
                     <span>{slot.label}</span>
-                    <strong>{dashboardLoading ? <LoadingValue /> : formatCurrency(slot.amount)}</strong>
+                    <strong>
+                      {dashboardLoading ? (
+                        <LoadingValue />
+                      ) : (
+                        formatCurrency(slot.amount)
+                      )}
+                    </strong>
                   </div>
-                  <small>{dashboardLoading ? <LoadingValue wide /> : slot.detail}</small>
+                  <small>
+                    {dashboardLoading ? <LoadingValue wide /> : slot.detail}
+                  </small>
                   <span className="expense-meter">
                     <i
                       style={
@@ -256,7 +283,9 @@ export default function Dashboard() {
                 key={metric.label}
               >
                 <span>{metric.label}</span>
-                <strong>{dashboardLoading ? <LoadingValue /> : metric.value}</strong>
+                <strong>
+                  {dashboardLoading ? <LoadingValue /> : metric.value}
+                </strong>
               </div>
             ))}
           </div>
@@ -266,18 +295,30 @@ export default function Dashboard() {
           <div className="bento-card-head">
             <div>
               <span>Total amount spent today</span>
-              <h2>{dashboardLoading ? <LoadingValue wide /> : formatCurrency(totalSpentToday)}</h2>
+              <h2>
+                {dashboardLoading ? (
+                  <LoadingValue wide />
+                ) : (
+                  formatCurrency(totalSpentToday)
+                )}
+              </h2>
             </div>
             <IndianRupee size={24} />
           </div>
-          <p>42% lower than your usual weekday average.</p>
+          <p>{dashboardLoading ? <LoadingValue wide /> : spendingInsight}</p>
         </article>
 
         <article className="bento-card monthly-graph-card">
           <div className="bento-card-head">
             <div>
               <span>12 months spending graph</span>
-              <h2>{dashboardLoading ? <LoadingValue wide /> : formatCurrency(graphTotal)}</h2>
+              <h2>
+                {dashboardLoading ? (
+                  <LoadingValue wide />
+                ) : (
+                  formatCurrency(graphTotal)
+                )}
+              </h2>
             </div>
             <BarChart3 size={24} />
           </div>
@@ -288,12 +329,16 @@ export default function Dashboard() {
                 maxMonthlyAmount > 0
                   ? Math.round((month.amount / maxMonthlyAmount) * 100)
                   : month.value;
-              const barHeight = dashboardLoading ? 0 : Math.max(month.amount > 0 ? 8 : 0, normalizedValue);
+              const barHeight = dashboardLoading
+                ? 0
+                : Math.max(month.amount > 0 ? 8 : 0, normalizedValue);
               const peakDay = formatPeakDay(month, index);
 
               return (
                 <div
-                  className={dashboardLoading ? "month-bar loading" : "month-bar"}
+                  className={
+                    dashboardLoading ? "month-bar loading" : "month-bar"
+                  }
                   key={month.label}
                   aria-label={`${month.label}: peak spend ${peakDay}, total ${formatCurrency(month.amount)}`}
                   tabIndex={dashboardLoading ? -1 : 0}
@@ -331,16 +376,27 @@ export default function Dashboard() {
             <div>
               <CreditCard size={18} />
               <span>Available balance</span>
-              <strong>{dashboardLoading ? <LoadingValue /> : formatCurrency(walletBalance)}</strong>
+              <strong>
+                {dashboardLoading ? (
+                  <LoadingValue />
+                ) : (
+                  formatCurrency(walletBalance)
+                )}
+              </strong>
             </div>
             <div>
               <WalletCards size={18} />
               <span>Receivable</span>
-              <strong>{dashboardLoading ? <LoadingValue /> : formatCurrency(receivable)}</strong>
+              <strong>
+                {dashboardLoading ? (
+                  <LoadingValue />
+                ) : (
+                  formatCurrency(receivable)
+                )}
+              </strong>
             </div>
           </div>
         </article>
-
       </section>
     </DashboardLayout>
   );

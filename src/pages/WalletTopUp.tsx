@@ -1,8 +1,9 @@
 import { CreditCard, Landmark, PlusCircle, Smartphone } from "lucide-react";
 
+import { useAppSettings } from "../context/useAppSettings";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
-const amounts = ["Rs. 500", "Rs. 1,000", "Rs. 2,000", "Rs. 5,000"];
+const amounts = [500, 1000, 2000, 5000];
 const methods = [
   { label: "UPI", icon: Smartphone },
   { label: "Card", icon: CreditCard },
@@ -10,6 +11,8 @@ const methods = [
 ];
 
 export default function WalletTopUp() {
+  const { formatCurrency } = useAppSettings();
+
   return (
     <DashboardLayout eyebrow="Top-up">
       <section className="dashboard-page-grid">
@@ -39,13 +42,13 @@ export default function WalletTopUp() {
             <div className="amount-grid" aria-label="Amount presets">
               {amounts.map((amount) => (
                 <button type="button" key={amount}>
-                  {amount}
+                  {formatCurrency(amount)}
                 </button>
               ))}
             </div>
             <label>
               <span>Custom amount</span>
-              <input type="text" placeholder="Rs. 750" />
+              <input type="text" placeholder={formatCurrency(750)} />
             </label>
             <button className="dashboard-primary-button" type="button">
               Add money to wallet
@@ -82,8 +85,8 @@ export default function WalletTopUp() {
 
         <article className="bento-card topup-summary-card">
           <span>Top-up preview</span>
-          <strong>Rs. 2,000</strong>
-          <p>Estimated wallet balance after top-up: Rs. 14,480.</p>
+          <strong>{formatCurrency(2000)}</strong>
+          <p>Estimated wallet balance after top-up: {formatCurrency(14480)}.</p>
           <button className="dashboard-secondary-button" type="button">
             Review payment
           </button>
@@ -99,17 +102,17 @@ export default function WalletTopUp() {
           <div className="compact-list">
             <div>
               <span>UPI</span>
-              <strong>Rs. 1,000</strong>
+              <strong>{formatCurrency(1000)}</strong>
               <em>Today</em>
             </div>
             <div>
               <span>Card</span>
-              <strong>Rs. 2,500</strong>
+              <strong>{formatCurrency(2500)}</strong>
               <em>Yesterday</em>
             </div>
             <div>
               <span>Net banking</span>
-              <strong>Rs. 5,000</strong>
+              <strong>{formatCurrency(5000)}</strong>
               <em>May 18</em>
             </div>
           </div>

@@ -36,7 +36,7 @@ export default function Signup() {
 
     try {
       setLoading(true);
-      await loginWithProvider(provider);
+      await loginWithProvider(provider, true);
       navigate("/dashboard", { replace: true });
     } catch (signupError) {
       setError(getFirebaseErrorMessage(signupError));

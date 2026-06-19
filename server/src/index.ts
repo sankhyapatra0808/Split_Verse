@@ -3,6 +3,9 @@ import express from "express";
 import cors from "cors";
 import { testDbConnection, db } from "./config/db.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
+import expenseRoutes from "./routes/expenses.routes.js";
+import splitRoomRoutes from "./routes/splitRooms.routes.js";
+import friendRoutes from "./routes/friends.routes.js";
 
 
 const app = express();
@@ -116,6 +119,80 @@ app.post("/api/setup/app-tables", async (_req, res) => {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS split_rooms (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        category TEXT,
+        payment_status TEXT NOT NULL DEFAULT 'no_one_paid',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      ALTER TABLE split_rooms
+        ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'no_one_paid';
+
+      CREATE TABLE IF NOT EXISTS split_room_members (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        room_id UUID NOT NULL REFERENCES split_rooms(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        display_name TEXT,
+        email TEXT,
+        role TEXT NOT NULL DEFAULT 'member',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS split_room_members_room_email_idx
+        ON split_room_members (room_id, LOWER(email))
+        WHERE email IS NOT NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS split_room_members_room_user_idx
+        ON split_room_members (room_id, user_id)
+        WHERE user_id IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS split_room_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        room_id UUID NOT NULL REFERENCES split_rooms(id) ON DELETE CASCADE,
+        assigned_member_id UUID NOT NULL REFERENCES split_room_members(id) ON DELETE CASCADE,
+        created_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+        collected_at TIMESTAMP,
+        expense_id UUID,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      ALTER TABLE split_room_items
+        ADD COLUMN IF NOT EXISTS collected_at TIMESTAMP;
+
+      ALTER TABLE split_room_items
+        ADD COLUMN IF NOT EXISTS expense_id UUID;
+
+      CREATE TABLE IF NOT EXISTS friend_requests (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        requester_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        recipient_email TEXT NOT NULL,
+        token TEXT UNIQUE NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        accepted_at TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS friend_requests_unique_pending_idx
+        ON friend_requests (requester_user_id, LOWER(recipient_email))
+        WHERE status = 'pending';
+
+      CREATE TABLE IF NOT EXISTS friendships (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_one_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_two_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        CONSTRAINT friendships_distinct_users CHECK (user_one_id <> user_two_id),
+        CONSTRAINT friendships_unique_pair UNIQUE (user_one_id, user_two_id)
+      );
     `);
 
     res.json({
@@ -134,6 +211,9 @@ app.post("/api/setup/app-tables", async (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/expenses", expenseRoutes);
+app.use("/api/split-rooms", splitRoomRoutes);
+app.use("/api/friends", friendRoutes);
 
 app.listen(PORT, () => {
   console.log(`SplitVerse backend running on http://localhost:${PORT}`);
