@@ -6,6 +6,7 @@ import dashboardRoutes from "./routes/dashboard.routes.js";
 import expenseRoutes from "./routes/expenses.routes.js";
 import splitRoomRoutes from "./routes/splitRooms.routes.js";
 import friendRoutes from "./routes/friends.routes.js";
+import transactionRoutes from "./routes/transactions.routes.js";
 
 
 const app = express();
@@ -214,6 +215,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/split-rooms", splitRoomRoutes);
 app.use("/api/friends", friendRoutes);
+app.use("/api/transactions", transactionRoutes);
 
 app.listen(PORT, () => {
   console.log(`SplitVerse backend running on http://localhost:${PORT}`);

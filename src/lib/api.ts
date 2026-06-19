@@ -74,6 +74,34 @@ export type Expense = {
   created_at: string;
 };
 
+// Transaction History Page Integration
+
+export type TransactionStatus =
+  | "all"
+  | "received"
+  | "paid"
+  | "pending"
+  | "added";
+
+export type TransactionItem = {
+  id: string;
+  title: string;
+  room: string;
+  amount: number;
+  status: "received" | "paid" | "pending" | "added" | string;
+  displayStatus: string;
+  type: string;
+  createdAt: string;
+};
+
+export type TransactionsResponse = {
+  transactions: TransactionItem[];
+  summary: {
+    netMovement: number;
+    count: number;
+  };
+};
+
 export type SplitRoomMember = {
   id: string;
   room_id: string;
@@ -294,7 +322,28 @@ export async function acceptFriendRequest(requestId: string) {
   );
 }
 
+// Transaction History Export function
 
+export async function getTransactions(params?: {
+  search?: string;
+  status?: TransactionStatus;
+}) {
+  const searchParams = new URLSearchParams();
+
+  if (params?.search) {
+    searchParams.set("search", params.search);
+  }
+
+  if (params?.status && params.status !== "all") {
+    searchParams.set("status", params.status);
+  }
+
+  const queryString = searchParams.toString();
+
+  return apiFetch<TransactionsResponse>(
+    `/api/transactions${queryString ? `?${queryString}` : ""}`
+  );
+}
 
 export async function getCurrentDbUser() {
   return apiFetch<{ user: DbUser }>("/api/auth/me");
