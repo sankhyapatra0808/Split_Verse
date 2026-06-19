@@ -2249,3 +2249,172 @@
   border-radius: inherit;
   object-fit: cover;
 }
+
+.dashboard-action-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -6px 0 12px;
+}
+
+.add-expense-toggle,
+.add-expense-form button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  color: #ffffff;
+  background: var(--dash-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  transition:
+    transform 220ms ease,
+    background-color 220ms ease,
+    box-shadow 220ms ease,
+    opacity 220ms ease;
+}
+
+.expense-composer-card {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 18px;
+  border-color: rgba(0, 82, 255, 0.18);
+  background:
+    linear-gradient(180deg, rgba(0, 82, 255, 0.035), rgba(255, 255, 255, 0) 44%),
+    var(--dash-canvas);
+}
+
+.expense-composer-card .bento-card-head svg {
+  color: var(--dash-primary);
+}
+
+.add-expense-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.8fr) minmax(150px, 0.75fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.add-expense-form label {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.add-expense-form label > span:first-child {
+  color: var(--dash-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.add-expense-form input,
+.add-expense-form select {
+  width: 100%;
+  box-sizing: border-box;
+  height: 44px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 12px;
+  outline: 0;
+  padding: 0 13px;
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.add-expense-form input::placeholder {
+  color: var(--dash-muted);
+  font-weight: 600;
+}
+
+.add-expense-form input:focus,
+.add-expense-form select:focus,
+.expense-amount-field:focus-within {
+  border-color: var(--dash-primary);
+  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+}
+
+.expense-amount-field {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 12px;
+  padding: 0 12px;
+  color: var(--dash-muted);
+  background: var(--dash-canvas);
+}
+
+.expense-amount-field input {
+  height: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.add-expense-form button {
+  min-width: 132px;
+  height: 44px;
+}
+
+.add-expense-toggle:disabled,
+.add-expense-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.add-expense-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: var(--dash-danger);
+  background: rgba(207, 32, 47, 0.08);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (hover: hover) {
+  .add-expense-toggle:hover,
+  .add-expense-form button:hover {
+    background: var(--dash-primary-active);
+    transform: translateY(-1px);
+    box-shadow: 0 12px 28px rgba(0, 82, 255, 0.18);
+  }
+}
+
+@media (max-width: 980px) {
+  .add-expense-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .add-expense-form button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .dashboard-action-row {
+    justify-content: stretch;
+  }
+
+  .add-expense-toggle,
+  .add-expense-form {
+    width: 100%;
+  }
+
+  .add-expense-form {
+    grid-template-columns: 1fr;
+  }
+}

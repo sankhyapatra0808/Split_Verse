@@ -1,15 +1,22 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import {
   BarChart3,
+  Check,
   CreditCard,
   IndianRupee,
+  Plus,
   ReceiptText,
   ShieldCheck,
   WalletCards,
+  X,
 } from "lucide-react";
 
 import DashboardLayout from "./dashboard/DashboardLayout";
-import { getDashboardSummary, type DashboardSummary } from "../lib/api";
+import {
+  createExpense,
+  getDashboardSummary,
+  type DashboardSummary,
+} from "../lib/api";
 import { useAppSettings } from "../context/useAppSettings";
 
 const TIME_SLOTS = [
@@ -128,6 +135,75 @@ export default function Dashboard() {
     useState<DashboardSummary | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
 
+  const [expenseFormOpen, setExpenseFormOpen] = useState(false);
+  const [expenseSubmitting, setExpenseSubmitting] = useState(false);
+  const [expenseFormError, setExpenseFormError] = useState("");
+  const [expenseForm, setExpenseForm] = useState({
+    title: "",
+    category: "Food",
+    amount: "",
+  });
+
+  async function reloadDashboard() {
+    setDashboardLoading(true);
+
+    try {
+      const data = await getDashboardSummary();
+      setDashboardSummary(data);
+    } catch (error) {
+      console.error("Failed to reload dashboard summary:", error);
+    } finally {
+      setDashboardLoading(false);
+    }
+  }
+
+  async function handleCreateExpense(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const title = expenseForm.title.trim();
+    const amount = Number(expenseForm.amount);
+
+    if (!title) {
+      setExpenseFormError("Expense title is required.");
+      return;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setExpenseFormError("Amount must be greater than 0.");
+      return;
+    }
+
+    setExpenseFormError("");
+    setExpenseSubmitting(true);
+
+    try {
+      await createExpense({
+        title,
+        category: expenseForm.category,
+        amount,
+      });
+
+      setExpenseForm({
+        title: "",
+        category: "Food",
+        amount: "",
+      });
+
+      setExpenseFormOpen(false);
+
+      await reloadDashboard();
+    } catch (error) {
+      console.error("Failed to create expense:", error);
+      setExpenseFormError(
+        error instanceof Error
+          ? error.message
+          : "Could not add expense. Please try again.",
+      );
+    } finally {
+      setExpenseSubmitting(false);
+    }
+  }
+
   useEffect(() => {
     let isMounted = true;
 
@@ -207,6 +283,108 @@ export default function Dashboard() {
 
   return (
     <DashboardLayout>
+      <div className="dashboard-action-row">
+        <button
+          className="add-expense-toggle"
+          type="button"
+          aria-expanded={expenseFormOpen}
+          aria-controls="dashboard-expense-form"
+          disabled={expenseSubmitting}
+          onClick={() => {
+            setExpenseFormOpen((prev) => !prev);
+            setExpenseFormError("");
+          }}
+        >
+          {expenseFormOpen ? <X size={18} /> : <Plus size={18} />}
+          {expenseFormOpen ? "Close" : "Add Expense"}
+        </button>
+      </div>
+
+      {expenseFormOpen && (
+        <section className="bento-card expense-composer-card">
+          <div className="bento-card-head">
+            <div>
+              <span>Quick entry</span>
+              <h2>Add expense</h2>
+            </div>
+            <ReceiptText size={22} />
+          </div>
+
+          <form
+            id="dashboard-expense-form"
+            className="add-expense-form"
+            onSubmit={handleCreateExpense}
+          >
+            <label>
+              <span>Title</span>
+              <input
+                type="text"
+                placeholder="Coffee, cab, groceries"
+                value={expenseForm.title}
+                required
+                onChange={(event) =>
+                  setExpenseForm((prev) => ({
+                    ...prev,
+                    title: event.target.value,
+                  }))
+                }
+              />
+            </label>
+
+            <label>
+              <span>Category</span>
+              <select
+                value={expenseForm.category}
+                onChange={(event) =>
+                  setExpenseForm((prev) => ({
+                    ...prev,
+                    category: event.target.value,
+                  }))
+                }
+              >
+                <option value="Food">Food</option>
+                <option value="Travel">Travel</option>
+                <option value="Bills">Bills</option>
+                <option value="Shopping">Shopping</option>
+                <option value="Subscription">Subscription</option>
+                <option value="Shared">Shared</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Amount</span>
+              <span className="expense-amount-field">
+                <IndianRupee size={16} aria-hidden="true" />
+                <input
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={expenseForm.amount}
+                  required
+                  onChange={(event) =>
+                    setExpenseForm((prev) => ({
+                      ...prev,
+                      amount: event.target.value,
+                    }))
+                  }
+                />
+              </span>
+            </label>
+
+            <button type="submit" disabled={expenseSubmitting}>
+              <Check size={17} />
+              {expenseSubmitting ? "Adding..." : "Save Expense"}
+            </button>
+
+            {expenseFormError && (
+              <p className="add-expense-error">{expenseFormError}</p>
+            )}
+          </form>
+        </section>
+      )}
+
       <section
         className="dashboard-bento"
         aria-label="SplitVerse dashboard summary"
