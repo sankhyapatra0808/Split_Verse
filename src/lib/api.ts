@@ -99,8 +99,52 @@ export type TransactionsResponse = {
   summary: {
     netMovement: number;
     count: number;
+    totalTillDate?: number;
+    visibleCount?: number;
+    accountCreatedAt?: string;
   };
 };
+
+export type WalletTopUpMethod = "UPI" | "Card" | "Net banking";
+
+export type WalletTopUpPayload = {
+  amount: number;
+  method?: WalletTopUpMethod;
+};
+
+export type WalletTopUpResponse = {
+  message: string;
+  transaction: {
+    id: string;
+    type: "credit" | "debit";
+    amount: number;
+    description: string | null;
+    created_at: string;
+  };
+  walletBalance: number;
+};
+
+export type WalletTopUpItem = {
+  id: string;
+  amount: number;
+  method: string;
+  createdAt: string;
+};
+
+export type WalletTopUpsResponse = {
+  topUps: WalletTopUpItem[];
+};
+
+export async function topUpWallet(payload: WalletTopUpPayload) {
+  return apiFetch<WalletTopUpResponse>("/api/wallet/top-up", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getRecentWalletTopUps() {
+  return apiFetch<WalletTopUpsResponse>("/api/wallet/top-ups");
+}
 
 export type SplitRoomMember = {
   id: string;
@@ -327,6 +371,9 @@ export async function acceptFriendRequest(requestId: string) {
 export async function getTransactions(params?: {
   search?: string;
   status?: TransactionStatus;
+  limit?: number;
+  exportMode?: "count" | "year";
+  year?: number;
 }) {
   const searchParams = new URLSearchParams();
 
@@ -336,6 +383,18 @@ export async function getTransactions(params?: {
 
   if (params?.status && params.status !== "all") {
     searchParams.set("status", params.status);
+  }
+
+  if (params?.limit) {
+    searchParams.set("limit", String(params.limit));
+  }
+
+  if (params?.exportMode) {
+    searchParams.set("exportMode", params.exportMode);
+  }
+
+  if (params?.year) {
+    searchParams.set("year", String(params.year));
   }
 
   const queryString = searchParams.toString();

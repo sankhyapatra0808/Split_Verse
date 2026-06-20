@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Download, Filter, Search } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { Download, Filter, Search, X } from "lucide-react";
 
 import DashboardLayout from "./dashboard/DashboardLayout";
 import {
@@ -48,6 +48,8 @@ function formatSignedCurrency(
   return `${prefix}${formatCurrency(Math.abs(amount))}`;
 }
 
+const visibleTransactionLimit = 10;
+
 export default function TransactionHistory() {
   const { formatCurrency } = useAppSettings();
 
@@ -57,6 +59,14 @@ export default function TransactionHistory() {
   const [status, setStatus] = useState<TransactionStatus>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportMode, setExportMode] = useState<"count" | "year">("count");
+  const [exportCount, setExportCount] = useState("100");
+  const [exportYear, setExportYear] = useState(String(new Date().getFullYear()));
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [transactionTotal, setTransactionTotal] = useState(0);
+  const [accountCreatedAt, setAccountCreatedAt] = useState("");
 
   async function loadTransactions() {
     setLoading(true);
@@ -66,10 +76,13 @@ export default function TransactionHistory() {
       const data = await getTransactions({
         search,
         status,
+        limit: visibleTransactionLimit,
       });
 
       setTransactions(data.transactions);
       setNetMovement(data.summary.netMovement);
+      setTransactionTotal(data.summary.totalTillDate ?? data.summary.count);
+      setAccountCreatedAt(data.summary.accountCreatedAt ?? "");
     } catch (err) {
       console.error("Failed to load transactions:", err);
       setError("Could not load transaction history.");
@@ -83,45 +96,111 @@ export default function TransactionHistory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  const visibleTransactions = useMemo(() => transactions, [transactions]);
+  const visibleTransactions = useMemo(
+    () => transactions.slice(0, visibleTransactionLimit),
+    [transactions]
+  );
+  const currentYear = new Date().getFullYear();
+  const accountYear = useMemo(() => {
+    const joinedDate = new Date(accountCreatedAt);
 
-  function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
+    return Number.isNaN(joinedDate.getTime())
+      ? currentYear
+      : joinedDate.getFullYear();
+  }, [accountCreatedAt, currentYear]);
+  const previousYearOptions = useMemo(
+    () =>
+      Array.from(
+        { length: Math.max(currentYear - accountYear + 1, 1) },
+        (_, index) => currentYear - index
+      ),
+    [accountYear, currentYear]
+  );
+
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     loadTransactions();
   }
 
-  function handleExportCsv() {
-    const header = ["Title", "Room", "Amount", "Status", "Type", "Date"];
+  async function handleExportCsv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const numericExportCount = Number(exportCount);
+    const numericExportYear = Number(exportYear);
 
-    const rows = visibleTransactions.map((transaction) => [
-      transaction.title,
-      transaction.room,
-      String(transaction.amount),
-      transaction.displayStatus,
-      transaction.type,
-      transaction.createdAt,
-    ]);
+    if (
+      exportMode === "count" &&
+      (!Number.isFinite(numericExportCount) || numericExportCount <= 0)
+    ) {
+      setExportError("Enter how many past transactions to export.");
+      return;
+    }
 
-    const csvContent = [header, ...rows]
-      .map((row) =>
-        row
-          .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-          .join(",")
-      )
-      .join("\n");
+    if (
+      exportMode === "year" &&
+      (!Number.isInteger(numericExportYear) ||
+        numericExportYear < accountYear ||
+        numericExportYear > currentYear)
+    ) {
+      setExportError("Choose a valid previous year.");
+      return;
+    }
 
-    const blob = new Blob([csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
+    setExporting(true);
+    setExportError("");
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+    try {
+      const data = await getTransactions({
+        search,
+        status,
+        exportMode,
+        limit:
+          exportMode === "count" ? Math.floor(numericExportCount) : undefined,
+        year: exportMode === "year" ? numericExportYear : undefined,
+      });
 
-    link.href = url;
-    link.download = "splitverse-transactions.csv";
-    link.click();
+      if (data.transactions.length === 0) {
+        setExportError("No transactions found for that export range.");
+        return;
+      }
 
-    URL.revokeObjectURL(url);
+      const header = ["Title", "Room", "Amount", "Status", "Type", "Date"];
+
+      const rows = data.transactions.map((transaction) => [
+        transaction.title,
+        transaction.room,
+        String(transaction.amount),
+        transaction.displayStatus,
+        transaction.type,
+        transaction.createdAt,
+      ]);
+
+      const csvContent = [header, ...rows]
+        .map((row) =>
+          row
+            .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+            .join(",")
+        )
+        .join("\n");
+
+      const blob = new Blob([csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = "splitverse-transactions.csv";
+      link.click();
+
+      URL.revokeObjectURL(url);
+      setExportDialogOpen(false);
+    } catch (err) {
+      console.error("Failed to export transactions:", err);
+      setExportError("Could not export transactions.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -174,8 +253,11 @@ export default function TransactionHistory() {
             <button
               className="dashboard-primary-button"
               type="button"
-              onClick={handleExportCsv}
-              disabled={visibleTransactions.length === 0}
+              onClick={() => {
+                setExportError("");
+                setExportDialogOpen(true);
+              }}
+              disabled={exporting || visibleTransactions.length === 0}
             >
               <Download size={18} />
               Export
@@ -252,11 +334,110 @@ export default function TransactionHistory() {
           <span>Net movement</span>
           <strong>{formatSignedCurrency(netMovement, formatCurrency)}</strong>
           <p>
-            Across {visibleTransactions.length} recorded transaction
+            Showing the latest {visibleTransactions.length} recorded transaction
             {visibleTransactions.length === 1 ? "" : "s"} in the current filter.
           </p>
         </article>
       </section>
+
+      {exportDialogOpen && (
+        <div className="transaction-export-backdrop" role="presentation">
+          <form
+            className="transaction-export-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="transaction-export-title"
+            onSubmit={handleExportCsv}
+          >
+            <div className="transaction-export-head">
+              <div>
+                <span>Export transactions</span>
+                <h2 id="transaction-export-title">Choose export range</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close export dialog"
+                onClick={() => setExportDialogOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="transaction-export-stats">
+              <div>
+                <span>Joined year</span>
+                <strong>{accountYear}</strong>
+              </div>
+              <div>
+                <span>Transactions till date</span>
+                <strong>{transactionTotal}</strong>
+              </div>
+            </div>
+
+            <label>
+              <span>Export menu</span>
+              <select
+                value={exportMode}
+                onChange={(event) =>
+                  setExportMode(event.target.value as "count" | "year")
+                }
+              >
+                <option value="count">Last transactions</option>
+                <option value="year">Previous years</option>
+              </select>
+            </label>
+
+            {exportMode === "count" ? (
+              <label>
+                <span>Number of past transactions</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="5000"
+                  step="1"
+                  value={exportCount}
+                  onChange={(event) => setExportCount(event.target.value)}
+                />
+              </label>
+            ) : (
+              <label>
+                <span>Previous year</span>
+                <select
+                  value={exportYear}
+                  onChange={(event) => setExportYear(event.target.value)}
+                >
+                  {previousYearOptions.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {exportError && (
+              <p className="transaction-export-message">{exportError}</p>
+            )}
+
+            <div className="transaction-export-actions">
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                onClick={() => setExportDialogOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="dashboard-primary-button"
+                type="submit"
+                disabled={exporting}
+              >
+                {exporting ? "Exporting..." : "Download CSV"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

@@ -1,17 +1,130 @@
-import { CreditCard, Landmark, PlusCircle, Smartphone } from "lucide-react";
-
+import { type FormEvent, useEffect, useState } from "react";
+import {
+  CreditCard,
+  Landmark,
+  type LucideIcon,
+  PlusCircle,
+  Smartphone,
+} from "lucide-react";
+import {
+  getRecentWalletTopUps,
+  type WalletTopUpItem,
+  type WalletTopUpMethod,
+  topUpWallet,
+} from "../lib/api";
 import { useAppSettings } from "../context/useAppSettings";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
 const amounts = [500, 1000, 2000, 5000];
 const methods = [
-  { label: "UPI", icon: Smartphone },
-  { label: "Card", icon: CreditCard },
-  { label: "Net banking", icon: Landmark },
-];
+  { label: "UPI", value: "UPI", icon: Smartphone },
+  { label: "Card", value: "Card", icon: CreditCard },
+  { label: "Net banking", value: "Net banking", icon: Landmark },
+] satisfies { label: string; value: WalletTopUpMethod; icon: LucideIcon }[];
+
+function formatTopUpDate(dateValue: string) {
+  const date = new Date(dateValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  const isSameDate = (first: Date, second: Date) =>
+    first.getFullYear() === second.getFullYear() &&
+    first.getMonth() === second.getMonth() &&
+    first.getDate() === second.getDate();
+
+  if (isSameDate(date, today)) {
+    return "Today";
+  }
+
+  if (isSameDate(date, yesterday)) {
+    return "Yesterday";
+  }
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+  });
+}
 
 export default function WalletTopUp() {
   const { formatCurrency } = useAppSettings();
+  const [selectedAmount, setSelectedAmount] = useState(1000);
+  const [customAmount, setCustomAmount] = useState("");
+  const [selectedMethod, setSelectedMethod] =
+    useState<WalletTopUpMethod>("UPI");
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [recentTopUps, setRecentTopUps] = useState<WalletTopUpItem[]>([]);
+  const [loadingTopUps, setLoadingTopUps] = useState(true);
+  const [topUpsError, setTopUpsError] = useState("");
+
+  const topUpAmount = customAmount ? Number(customAmount) : selectedAmount;
+
+  async function loadRecentTopUps({ silent = false } = {}) {
+    if (!silent) {
+      setLoadingTopUps(true);
+    }
+
+    setTopUpsError("");
+
+    try {
+      const data = await getRecentWalletTopUps();
+      setRecentTopUps(data.topUps);
+    } catch (err) {
+      console.error("Failed to load wallet top-ups:", err);
+      setTopUpsError("Could not load recent top-ups.");
+    } finally {
+      if (!silent) {
+        setLoadingTopUps(false);
+      }
+    }
+  }
+
+  useEffect(() => {
+    void loadRecentTopUps();
+  }, []);
+
+  async function handleTopUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!Number.isFinite(topUpAmount) || topUpAmount <= 0) {
+      setError("Enter a valid amount greater than 0.");
+      setMessage("");
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await topUpWallet({
+        amount: topUpAmount,
+        method: selectedMethod,
+      });
+
+      setMessage(
+        `Wallet topped up successfully. New balance: ${formatCurrency(
+          response.walletBalance,
+        )}`,
+      );
+
+      setCustomAmount("");
+      await loadRecentTopUps({ silent: true });
+    } catch (err) {
+      console.error("Wallet top-up failed:", err);
+      setError("Could not top up wallet. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <DashboardLayout eyebrow="Top-up">
@@ -38,21 +151,45 @@ export default function WalletTopUp() {
             </div>
           </div>
 
-          <form className="dashboard-form">
+          <form className="dashboard-form" onSubmit={handleTopUp}>
             <div className="amount-grid" aria-label="Amount presets">
               {amounts.map((amount) => (
-                <button type="button" key={amount}>
+                <button
+                  type="button"
+                  key={amount}
+                  className={
+                    selectedAmount === amount && !customAmount ? "active" : ""
+                  }
+                  onClick={() => {
+                    setSelectedAmount(amount);
+                    setCustomAmount("");
+                  }}
+                >
                   {formatCurrency(amount)}
                 </button>
               ))}
             </div>
             <label>
               <span>Custom amount</span>
-              <input type="text" placeholder={formatCurrency(750)} />
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                inputMode="decimal"
+                placeholder="Custom amount"
+                value={customAmount}
+                onChange={(event) => setCustomAmount(event.target.value)}
+              />
             </label>
-            <button className="dashboard-primary-button" type="button">
-              Add money to wallet
+            <button
+              className="dashboard-primary-button"
+              type="submit"
+              disabled={submitting}
+            >
+              {submitting ? "Adding..." : "Add money to wallet"}
             </button>
+            {message && <p className="wallet-success-message">{message}</p>}
+            {error && <p className="wallet-error-message">{error}</p>}
           </form>
         </article>
 
@@ -64,14 +201,20 @@ export default function WalletTopUp() {
             </div>
           </div>
           <div className="method-list">
-            {methods.map((method, index) => {
+            {methods.map((method) => {
               const Icon = method.icon;
               return (
-                <label className="method-row" key={method.label}>
+                <label
+                  className={`method-row${
+                    selectedMethod === method.value ? " active" : ""
+                  }`}
+                  key={method.label}
+                >
                   <input
                     name="payment-method"
                     type="radio"
-                    defaultChecked={index === 0}
+                    checked={selectedMethod === method.value}
+                    onChange={() => setSelectedMethod(method.value)}
                   />
                   <span>
                     <Icon size={19} />
@@ -85,11 +228,13 @@ export default function WalletTopUp() {
 
         <article className="bento-card topup-summary-card">
           <span>Top-up preview</span>
-          <strong>{formatCurrency(2000)}</strong>
-          <p>Estimated wallet balance after top-up: {formatCurrency(14480)}.</p>
-          <button className="dashboard-secondary-button" type="button">
-            Review payment
-          </button>
+          <strong>
+            {formatCurrency(Number.isFinite(topUpAmount) ? topUpAmount : 0)}
+          </strong>
+          <p>
+            This top-up will be added through {selectedMethod}. Your wallet
+            balance updates as soon as the payment is recorded.
+          </p>
         </article>
 
         <article className="bento-card recent-topups-card">
@@ -100,21 +245,39 @@ export default function WalletTopUp() {
             </div>
           </div>
           <div className="compact-list">
-            <div>
-              <span>UPI</span>
-              <strong>{formatCurrency(1000)}</strong>
-              <em>Today</em>
-            </div>
-            <div>
-              <span>Card</span>
-              <strong>{formatCurrency(2500)}</strong>
-              <em>Yesterday</em>
-            </div>
-            <div>
-              <span>Net banking</span>
-              <strong>{formatCurrency(5000)}</strong>
-              <em>May 18</em>
-            </div>
+            {loadingTopUps && (
+              <div>
+                <span>Loading</span>
+                <strong>{formatCurrency(0)}</strong>
+                <em>--</em>
+              </div>
+            )}
+
+            {!loadingTopUps && topUpsError && (
+              <div>
+                <span>{topUpsError}</span>
+                <strong>{formatCurrency(0)}</strong>
+                <em>Error</em>
+              </div>
+            )}
+
+            {!loadingTopUps && !topUpsError && recentTopUps.length === 0 && (
+              <div>
+                <span>No top-ups yet</span>
+                <strong>{formatCurrency(0)}</strong>
+                <em>Empty</em>
+              </div>
+            )}
+
+            {!loadingTopUps &&
+              !topUpsError &&
+              recentTopUps.map((topUp) => (
+                <div key={topUp.id}>
+                  <span>{topUp.method}</span>
+                  <strong>{formatCurrency(topUp.amount)}</strong>
+                  <em>{formatTopUpDate(topUp.createdAt)}</em>
+                </div>
+              ))}
           </div>
         </article>
       </section>

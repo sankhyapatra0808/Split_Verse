@@ -1,0 +1,180 @@
+import express from "express";
+import { db } from "../config/db.js";
+import {
+  type AuthRequest,
+  verifyFirebaseToken,
+} from "../middleware/verifyFirebaseToken.js";
+
+const router = express.Router();
+const topUpMethods = new Set(["UPI", "Card", "Net banking"]);
+const topUpDescriptionPrefix = "Wallet top-up via ";
+
+async function getDbUserId(firebaseUid: string) {
+  const userResult = await db.query(
+    `
+    SELECT id
+    FROM users
+    WHERE firebase_uid = $1;
+    `,
+    [firebaseUid]
+  );
+
+  return userResult.rows[0]?.id ?? null;
+}
+
+function getTopUpMethod(description: string | null) {
+  if (description?.startsWith(topUpDescriptionPrefix)) {
+    return description.slice(topUpDescriptionPrefix.length);
+  }
+
+  return "Wallet";
+}
+
+router.get("/top-ups", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const dbUserId = await getDbUserId(firebaseUser.uid);
+
+    if (!dbUserId) {
+      return res.status(404).json({
+        message: "User not found in database",
+      });
+    }
+
+    const topUpsResult = await db.query(
+      `
+      SELECT
+        id,
+        amount::float,
+        description,
+        created_at
+      FROM wallet_transactions
+      WHERE user_id = $1
+      AND type = 'credit'
+      AND (
+        description IS NULL
+        OR description LIKE 'Wallet top-up%'
+      )
+      ORDER BY created_at DESC
+      LIMIT 3;
+      `,
+      [dbUserId]
+    );
+
+    return res.json({
+      topUps: topUpsResult.rows.map((topUp) => ({
+        id: topUp.id,
+        amount: Number(topUp.amount),
+        method: getTopUpMethod(topUp.description),
+        createdAt: topUp.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error("Get wallet top-ups failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to load wallet top-ups",
+    });
+  }
+});
+
+router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const { amount, method } = req.body;
+
+    const numericAmount = Number(amount);
+    const paymentMethod =
+      typeof method === "string" && topUpMethods.has(method) ? method : null;
+
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({
+        message: "Top-up amount must be greater than 0",
+      });
+    }
+
+    if (method && !paymentMethod) {
+      return res.status(400).json({
+        message: "Unsupported top-up method",
+      });
+    }
+
+    const dbUserId = await getDbUserId(firebaseUser.uid);
+
+    if (!dbUserId) {
+      return res.status(404).json({
+        message: "User not found in database",
+      });
+    }
+
+    const transactionResult = await db.query(
+      `
+      INSERT INTO wallet_transactions (
+        user_id,
+        type,
+        amount,
+        description
+      )
+      VALUES ($1, 'credit', $2, $3)
+      RETURNING
+        id,
+        type,
+        amount::float,
+        description,
+        created_at;
+      `,
+      [
+        dbUserId,
+        numericAmount,
+        `Wallet top-up${paymentMethod ? ` via ${paymentMethod}` : ""}`,
+      ]
+    );
+
+    const balanceResult = await db.query(
+      `
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN type = 'credit' THEN amount
+              WHEN type = 'debit' THEN -amount
+              ELSE 0
+            END
+          )::float,
+          0
+        ) AS wallet_balance
+      FROM wallet_transactions
+      WHERE user_id = $1;
+      `,
+      [dbUserId]
+    );
+
+    return res.status(201).json({
+      message: "Wallet topped up successfully",
+      transaction: transactionResult.rows[0],
+      walletBalance: Number(balanceResult.rows[0].wallet_balance),
+    });
+  } catch (error) {
+    console.error("Wallet top-up failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to top up wallet",
+    });
+  }
+});
+
+export default router;

@@ -6,6 +6,18 @@ import {
 } from "../middleware/verifyFirebaseToken.js";
 
 const router = express.Router();
+const visibleTransactionLimit = 10;
+const maxExportTransactionLimit = 5000;
+
+function getPositiveInt(value: unknown, fallback: number, max: number) {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return fallback;
+  }
+
+  return Math.min(Math.floor(numericValue), max);
+}
 
 router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
   try {
@@ -19,10 +31,21 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     const search = String(req.query.search || "").trim().toLowerCase();
     const status = String(req.query.status || "all").trim().toLowerCase();
+    const exportMode = String(req.query.exportMode || "count")
+      .trim()
+      .toLowerCase();
+    const isYearExport = exportMode === "year";
+    const limit = isYearExport
+      ? maxExportTransactionLimit
+      : getPositiveInt(
+          req.query.limit,
+          visibleTransactionLimit,
+          maxExportTransactionLimit
+        );
 
     const userResult = await db.query(
       `
-      SELECT id
+      SELECT id, created_at
       FROM users
       WHERE firebase_uid = $1;
       `,
@@ -36,6 +59,22 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
     }
 
     const dbUserId = userResult.rows[0].id;
+    const userCreatedAt = userResult.rows[0].created_at;
+    const accountCreatedAt = new Date(userCreatedAt);
+    const accountYear = Number.isNaN(accountCreatedAt.getTime())
+      ? new Date().getFullYear()
+      : accountCreatedAt.getFullYear();
+    const currentYear = new Date().getFullYear();
+    const requestedYear = Number(req.query.year);
+    const selectedYear = isYearExport
+      ? Math.min(
+          Math.max(
+            Number.isInteger(requestedYear) ? requestedYear : currentYear,
+            accountYear
+          ),
+          currentYear
+        )
+      : null;
 
     const result = await db.query(
       `
@@ -117,29 +156,56 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           settlements.created_at AS created_at
         FROM settlements
         WHERE settlements.to_user_id = $1
+      ),
+
+      filtered_transactions AS (
+        SELECT *
+        FROM combined_transactions
+        WHERE
+          ($2 = '' OR LOWER(title) LIKE '%' || $2 || '%' OR LOWER(room) LIKE '%' || $2 || '%')
+          AND ($3 = 'all' OR status = $3)
+          AND (
+            $4::int IS NULL
+            OR EXTRACT(YEAR FROM created_at)::int = $4::int
+          )
+      ),
+
+      selected_transactions AS (
+        SELECT *
+        FROM filtered_transactions
+        ORDER BY created_at DESC
+        LIMIT $5
+      ),
+
+      transaction_summary AS (
+        SELECT
+          (SELECT COUNT(*)::int FROM filtered_transactions) AS total_count,
+          (SELECT COUNT(*)::int FROM combined_transactions) AS all_transaction_count
       )
 
-      SELECT *
-      FROM combined_transactions
-      WHERE
-        ($2 = '' OR LOWER(title) LIKE '%' || $2 || '%' OR LOWER(room) LIKE '%' || $2 || '%')
-        AND ($3 = 'all' OR status = $3)
-      ORDER BY created_at DESC
-      LIMIT 100;
+      SELECT
+        selected_transactions.*,
+        transaction_summary.total_count,
+        transaction_summary.all_transaction_count
+      FROM transaction_summary
+      LEFT JOIN selected_transactions ON true
+      ORDER BY selected_transactions.created_at DESC NULLS LAST;
       `,
-      [dbUserId, search, status]
+      [dbUserId, search, status, selectedYear, limit]
     );
 
-    const transactions = result.rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      room: row.room,
-      amount: Number(row.signed_amount),
-      status: row.status,
-      displayStatus: row.display_status,
-      type: row.type,
-      createdAt: row.created_at,
-    }));
+    const transactions = result.rows
+      .filter((row) => row.id)
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        room: row.room,
+        amount: Number(row.signed_amount),
+        status: row.status,
+        displayStatus: row.display_status,
+        type: row.type,
+        createdAt: row.created_at,
+      }));
 
     const netMovement = transactions.reduce(
       (sum, transaction) => sum + transaction.amount,
@@ -150,7 +216,10 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       transactions,
       summary: {
         netMovement,
-        count: transactions.length,
+        count: Number(result.rows[0]?.total_count ?? 0),
+        totalTillDate: Number(result.rows[0]?.all_transaction_count ?? 0),
+        visibleCount: transactions.length,
+        accountCreatedAt: userCreatedAt,
       },
     });
   } catch (error) {
