@@ -30,3 +30,5 @@ server/.env.example
 *.njsproj
 *.sln
 *.sw?
+.codex
+.agents
