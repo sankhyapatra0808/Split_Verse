@@ -12,6 +12,7 @@ import {
   type WalletTopUpMethod,
   topUpWallet,
 } from "../lib/api";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
@@ -186,7 +187,7 @@ export default function WalletTopUp() {
               type="submit"
               disabled={submitting}
             >
-              {submitting ? "Adding..." : "Add money to wallet"}
+              {submitting ? <LoadingSkeleton light /> : "Add money to wallet"}
             </button>
             {message && <p className="wallet-success-message">{message}</p>}
             {error && <p className="wallet-error-message">{error}</p>}
@@ -247,7 +248,9 @@ export default function WalletTopUp() {
           <div className="compact-list">
             {loadingTopUps && (
               <div>
-                <span>Loading</span>
+                <span>
+                  <LoadingSkeleton />
+                </span>
                 <strong>{formatCurrency(0)}</strong>
                 <em>--</em>
               </div>

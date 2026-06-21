@@ -177,4 +177,155 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
   }
 });
 
+
+router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const userResult = await db.query(
+      `
+      SELECT id
+      FROM users
+      WHERE firebase_uid = $1;
+      `,
+      [firebaseUser.uid]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        message: "User not found in database",
+      });
+    }
+
+    const dbUserId = userResult.rows[0].id;
+
+    const balanceResult = await db.query(
+      `
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN type = 'credit' THEN amount
+              WHEN type = 'debit' THEN -amount
+              ELSE 0
+            END
+          )::float,
+          0
+        ) AS available_balance
+      FROM wallet_transactions
+      WHERE user_id = $1;
+      `,
+      [dbUserId]
+    );
+
+    const settlementResult = await db.query(
+      `
+      SELECT
+        COALESCE((
+          SELECT SUM(amount)::float
+          FROM settlements
+          WHERE to_user_id = $1
+          AND status = 'pending'
+        ), 0) AS pending_incoming,
+
+        COALESCE((
+          SELECT SUM(amount)::float
+          FROM settlements
+          WHERE from_user_id = $1
+          AND status = 'pending'
+        ), 0) AS pending_outgoing;
+      `,
+      [dbUserId]
+    );
+
+    const recentWalletResult = await db.query(
+      `
+      SELECT
+        id,
+        type,
+        amount::float,
+        description,
+        created_at
+      FROM wallet_transactions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 3;
+      `,
+      [dbUserId]
+    );
+
+    const pendingSettlementResult = await db.query(
+      `
+      SELECT
+        settlements.id,
+        settlements.amount::float,
+        settlements.status,
+        settlements.created_at,
+        from_user.name AS from_name,
+        from_user.email AS from_email,
+        to_user.name AS to_name,
+        to_user.email AS to_email,
+        CASE
+          WHEN settlements.from_user_id = $1 THEN 'outgoing'
+          ELSE 'incoming'
+        END AS direction
+      FROM settlements
+      JOIN users AS from_user ON from_user.id = settlements.from_user_id
+      JOIN users AS to_user ON to_user.id = settlements.to_user_id
+      WHERE
+        (settlements.from_user_id = $1 OR settlements.to_user_id = $1)
+        AND settlements.status = 'pending'
+      ORDER BY settlements.created_at DESC
+      LIMIT 8;
+      `,
+      [dbUserId]
+    );
+
+    const availableBalance = Number(balanceResult.rows[0].available_balance);
+    const pendingIncoming = Number(settlementResult.rows[0].pending_incoming);
+    const pendingOutgoing = Number(settlementResult.rows[0].pending_outgoing);
+
+    return res.json({
+      summary: {
+        availableBalance,
+        pendingIncoming,
+        pendingOutgoing,
+        netPosition: availableBalance + pendingIncoming - pendingOutgoing,
+      },
+
+      recentWalletTransactions: recentWalletResult.rows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        amount: Number(row.amount),
+        description: row.description,
+        createdAt: row.created_at,
+      })),
+
+      pendingSettlements: pendingSettlementResult.rows.map((row) => ({
+        id: row.id,
+        amount: Number(row.amount),
+        status: row.status,
+        direction: row.direction,
+        fromName: row.from_name,
+        fromEmail: row.from_email,
+        toName: row.to_name,
+        toEmail: row.to_email,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error("Wallet summary failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to load wallet summary",
+    });
+  }
+});
+
 export default router;

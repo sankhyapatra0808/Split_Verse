@@ -9,7 +9,6 @@ import friendRoutes from "./routes/friends.routes.js";
 import transactionRoutes from "./routes/transactions.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 
-
 const app = express();
 
 const PORT = Number(process.env.PORT) || 5000;
@@ -218,6 +217,7 @@ app.use("/api/split-rooms", splitRoomRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/wallet", walletRoutes);
+
 
 app.listen(PORT, () => {
   console.log(`SplitVerse backend running on http://localhost:${PORT}`);

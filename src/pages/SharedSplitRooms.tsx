@@ -20,6 +20,8 @@ import {
   type SplitRoom,
 } from "../lib/api";
 import { useAppSettings } from "../context/useAppSettings";
+import Dropdown, { type DropdownOption } from "../components/Dropdown";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
 const categoryOptions = [
@@ -29,7 +31,7 @@ const categoryOptions = [
   { label: "Subscription", value: "subscription" },
 ];
 
-const paymentStatusOptions: { label: string; value: RoomPaymentStatus }[] = [
+const paymentStatusOptions: DropdownOption<RoomPaymentStatus>[] = [
   { label: "No one paid", value: "no_one_paid" },
   { label: "All paid", value: "all_paid" },
   { label: "Complete", value: "complete" },
@@ -73,6 +75,13 @@ export default function SharedSplitRooms() {
     () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0],
     [rooms, selectedRoomId],
   );
+  const roomOptions = useMemo<DropdownOption[]>(
+    () =>
+      rooms.length > 0
+        ? rooms.map((room) => ({ value: room.id, label: room.name }))
+        : [{ value: "", label: "No rooms yet" }],
+    [rooms],
+  );
 
   const sortedMembers = useMemo(() => {
     if (!selectedRoom) {
@@ -91,6 +100,14 @@ export default function SharedSplitRooms() {
       return getMemberName(left).localeCompare(getMemberName(right));
     });
   }, [selectedRoom]);
+  const memberOptions = useMemo<DropdownOption[]>(
+    () =>
+      sortedMembers.map((member) => ({
+        value: member.id,
+        label: member.isMe ? "Me" : getMemberName(member),
+      })),
+    [sortedMembers],
+  );
 
   const loadRooms = async (preferredRoomId?: string) => {
     const data = await getSplitRooms();
@@ -375,20 +392,16 @@ export default function SharedSplitRooms() {
             </label>
             <label>
               <span>Category</span>
-              <select
+              <Dropdown
+                ariaLabel="Room category"
                 value={roomCategory}
-                onChange={(event) => setRoomCategory(event.target.value)}
+                options={categoryOptions}
+                onChange={setRoomCategory}
                 disabled={savingRoom}
-              >
-                {categoryOptions.map((option) => (
-                  <option value={option.value} key={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <button className="dashboard-primary-button" type="submit" disabled={savingRoom}>
-              {savingRoom ? "Creating..." : "Create room"}
+              {savingRoom ? <LoadingSkeleton light /> : "Create room"}
             </button>
           </form>
         </article>
@@ -404,7 +417,11 @@ export default function SharedSplitRooms() {
 
           <div className="room-overview-grid">
             <div className="room-card-list compact">
-              {loading && <p className="dashboard-muted-text">Loading rooms...</p>}
+              {loading && (
+                <p className="dashboard-muted-text">
+                  <LoadingSkeleton wide />
+                </p>
+              )}
               {!loading && rooms.length === 0 && (
                 <p className="dashboard-muted-text">Create your first split room.</p>
               )}
@@ -465,23 +482,18 @@ export default function SharedSplitRooms() {
                 <div className="room-payment-status-control">
                   <span>Payment status</span>
                   {selectedRoom.isOwner ? (
-                    <select
-                      className="polished-select"
+                    <Dropdown
+                      ariaLabel="Room payment status"
                       value={selectedRoom.paymentStatus}
-                      onChange={(event) =>
+                      options={paymentStatusOptions}
+                      onChange={(paymentStatus) =>
                         handlePaymentStatusChange(
                           selectedRoom.id,
-                          event.target.value as RoomPaymentStatus,
+                          paymentStatus,
                         )
                       }
                       disabled={updatingPaymentStatus}
-                    >
-                      {paymentStatusOptions.map((option) => (
-                        <option value={option.value} key={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   ) : (
                     <strong>{selectedRoom.status}</strong>
                   )}
@@ -518,9 +530,11 @@ export default function SharedSplitRooms() {
                           disabled={collectingMemberId === balance.memberId}
                         >
                           <CheckCircle2 size={14} />
-                          {collectingMemberId === balance.memberId
-                            ? "Saving"
-                            : "Mark collected"}
+                          {collectingMemberId === balance.memberId ? (
+                            <LoadingSkeleton light />
+                          ) : (
+                            "Mark collected"
+                          )}
                         </button>
                       )}
                     </div>
@@ -545,19 +559,13 @@ export default function SharedSplitRooms() {
           <form className="assignment-grid" onSubmit={handleAddItem}>
             <label>
               <span>Room</span>
-              <select
-                className="polished-select"
+              <Dropdown
+                ariaLabel="Assignment room"
                 value={selectedRoom?.id || ""}
-                onChange={(event) => setSelectedRoomId(event.target.value)}
+                options={roomOptions}
+                onChange={setSelectedRoomId}
                 disabled={loading || rooms.length === 0}
-              >
-                {rooms.length === 0 && <option value="">No rooms yet</option>}
-                {rooms.map((room) => (
-                  <option value={room.id} key={room.id}>
-                    {room.name}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <label>
               <span>Item</span>
@@ -583,21 +591,17 @@ export default function SharedSplitRooms() {
             </label>
             <label>
               <span>Assign to</span>
-              <select
-                className="polished-select"
+              <Dropdown
+                ariaLabel="Assigned member"
                 value={assignedMemberId}
-                onChange={(event) => setAssignedMemberId(event.target.value)}
+                options={memberOptions}
+                onChange={setAssignedMemberId}
+                placeholder="No members yet"
                 disabled={savingItem || sortedMembers.length === 0}
-              >
-                {sortedMembers.map((member) => (
-                  <option value={member.id} key={member.id}>
-                    {member.isMe ? "Me" : getMemberName(member)}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <button type="submit" disabled={savingItem || !selectedRoom}>
-              {savingItem ? "Adding..." : "Add item"}
+              {savingItem ? <LoadingSkeleton light /> : "Add item"}
             </button>
           </form>
 

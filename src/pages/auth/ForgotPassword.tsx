@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Mail } from "lucide-react";
 
 import logo from "../../assets/Logo.png";
 import "../../styles/AuthPages.css";
+import LoadingSkeleton from "../../components/LoadingSkeleton";
 import { useAuth } from "../../context/useAuth";
 import { getFirebaseErrorMessage } from "../../utils/firebaseError";
 
@@ -86,7 +87,7 @@ export default function ForgotPassword() {
             {message && <p className="auth-success">{message}</p>}
 
             <button type="submit" className="auth-submit" disabled={loading}>
-              {loading ? "Sending..." : "Send reset link"}
+              {loading ? <LoadingSkeleton light /> : "Send reset link"}
               <ArrowRight size={18} />
             </button>
           </form>

@@ -7,6 +7,7 @@ import {
   UserRound,
 } from "lucide-react";
 
+import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import { useAppSettings, type CurrencyCode } from "../context/useAppSettings";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
@@ -37,6 +38,18 @@ export default function AppSettings() {
     converterAmount,
     converterFrom,
     converterTo
+  );
+  const currencyOptions: DropdownOption<CurrencyCode>[] = currencies.map(
+    (currency) => ({
+      value: currency.code,
+      label: `${currency.code} - ${currency.label}`,
+    }),
+  );
+  const compactCurrencyOptions: DropdownOption<CurrencyCode>[] = currencies.map(
+    (currency) => ({
+      value: currency.code,
+      label: currency.code,
+    }),
   );
 
   return (
@@ -80,16 +93,12 @@ export default function AppSettings() {
           </div>
           <label className="settings-field">
             <span>Use this currency across the app</span>
-            <select
+            <Dropdown
+              ariaLabel="Application currency"
               value={appCurrency}
-              onChange={(event) => setAppCurrency(event.target.value as CurrencyCode)}
-            >
-              {currencies.map((currency) => (
-                <option value={currency.code} key={currency.code}>
-                  {currency.code} - {currency.label}
-                </option>
-              ))}
-            </select>
+              options={currencyOptions}
+              onChange={setAppCurrency}
+            />
           </label>
           <div className="settings-preview">
             <span>Example display</span>
@@ -119,33 +128,21 @@ export default function AppSettings() {
             </label>
             <label className="settings-field">
               <span>From</span>
-              <select
+              <Dropdown
+                ariaLabel="Convert from currency"
                 value={converterFrom}
-                onChange={(event) =>
-                  setConverterFrom(event.target.value as CurrencyCode)
-                }
-              >
-                {currencies.map((currency) => (
-                  <option value={currency.code} key={currency.code}>
-                    {currency.code}
-                  </option>
-                ))}
-              </select>
+                options={compactCurrencyOptions}
+                onChange={setConverterFrom}
+              />
             </label>
             <label className="settings-field">
               <span>To</span>
-              <select
+              <Dropdown
+                ariaLabel="Convert to currency"
                 value={converterTo}
-                onChange={(event) =>
-                  setConverterTo(event.target.value as CurrencyCode)
-                }
-              >
-                {currencies.map((currency) => (
-                  <option value={currency.code} key={currency.code}>
-                    {currency.code}
-                  </option>
-                ))}
-              </select>
+                options={compactCurrencyOptions}
+                onChange={setConverterTo}
+              />
             </label>
           </div>
           <div className="settings-preview strong">

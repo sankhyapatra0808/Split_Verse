@@ -17,6 +17,8 @@ import {
   getDashboardSummary,
   type DashboardSummary,
 } from "../lib/api";
+import Dropdown from "../components/Dropdown";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
 
 const TIME_SLOTS = [
@@ -40,6 +42,16 @@ const FALLBACK_MONTHS = [
   "Nov",
   "Dec",
 ].map((label) => ({ label, value: 0, amount: 0 }));
+
+const expenseCategoryOptions = [
+  "Food",
+  "Travel",
+  "Bills",
+  "Shopping",
+  "Subscription",
+  "Shared",
+  "Other",
+].map((category) => ({ label: category, value: category }));
 
 type ExpenseTimeSlots = NonNullable<
   DashboardSummary["expenseTracker"]
@@ -333,23 +345,17 @@ export default function Dashboard() {
 
             <label>
               <span>Category</span>
-              <select
+              <Dropdown
+                ariaLabel="Expense category"
                 value={expenseForm.category}
-                onChange={(event) =>
+                options={expenseCategoryOptions}
+                onChange={(category) =>
                   setExpenseForm((prev) => ({
                     ...prev,
-                    category: event.target.value,
+                    category,
                   }))
                 }
-              >
-                <option value="Food">Food</option>
-                <option value="Travel">Travel</option>
-                <option value="Bills">Bills</option>
-                <option value="Shopping">Shopping</option>
-                <option value="Subscription">Subscription</option>
-                <option value="Shared">Shared</option>
-                <option value="Other">Other</option>
-              </select>
+              />
             </label>
 
             <label>
@@ -375,7 +381,7 @@ export default function Dashboard() {
 
             <button type="submit" disabled={expenseSubmitting}>
               <Check size={17} />
-              {expenseSubmitting ? "Adding..." : "Save Expense"}
+              {expenseSubmitting ? <LoadingSkeleton light /> : "Save Expense"}
             </button>
 
             {expenseFormError && (

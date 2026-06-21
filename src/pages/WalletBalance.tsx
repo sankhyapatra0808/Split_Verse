@@ -1,22 +1,59 @@
-import { ArrowDownRight, ArrowUpRight, CheckCircle2, WalletCards } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CreditCard, RefreshCcw, WalletCards } from "lucide-react";
 
-import { useAppSettings } from "../context/useAppSettings";
 import DashboardLayout from "./dashboard/DashboardLayout";
+import { getWalletSummary, type WalletSummaryResponse } from "../lib/api";
+import LoadingSkeleton from "../components/LoadingSkeleton";
+import { useAppSettings } from "../context/useAppSettings";
 
-const settlementRows = [
-  { name: "Mira", note: "Dinner table", amount: 640, type: "receive" },
-  { name: "Kabir", note: "Taxi split", amount: -280, type: "pay" },
-  { name: "Office Lunch", note: "Team room", amount: 1180, type: "receive" },
-];
+function formatDate(dateValue: string) {
+  const date = new Date(dateValue);
 
-const accountRows = [
-  { label: "Primary wallet", value: 12480 },
-  { label: "Pending incoming", value: 3300 },
-  { label: "Pending outgoing", value: 850 },
-];
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 export default function WalletBalance() {
   const { formatCurrency } = useAppSettings();
+
+  const [walletData, setWalletData] = useState<WalletSummaryResponse | null>(
+    null
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  async function loadWalletSummary() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const data = await getWalletSummary();
+      setWalletData(data);
+    } catch (err) {
+      console.error("Failed to load wallet summary:", err);
+      setError("Could not load wallet details.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadWalletSummary();
+  }, []);
+
+  const summary = walletData?.summary;
+
+  const availableBalance = summary?.availableBalance ?? 0;
+  const pendingIncoming = summary?.pendingIncoming ?? 0;
+  const pendingOutgoing = summary?.pendingOutgoing ?? 0;
+  const netPosition = summary?.netPosition ?? 0;
 
   return (
     <DashboardLayout eyebrow="Wallet">
@@ -24,99 +61,247 @@ export default function WalletBalance() {
         <article className="bento-card page-hero-card">
           <div className="bento-card-head">
             <div>
-              <span>Wallet & balance</span>
-              <h2>Ready money, visible dues.</h2>
+              <span>Wallet Balance</span>
+              <h2>Track your SplitVerse wallet ledger.</h2>
             </div>
             <WalletCards size={24} />
           </div>
+
           <p>
-            See your wallet balance, incoming money, outgoing dues, and room-wise
-            settlement status in one calm financial surface.
+            This balance is calculated from your wallet activity and pending
+            settlements. Real payment-provider wallet support can be added later.
           </p>
         </article>
 
-        <article className="bento-card balance-total-card dark">
-          <div className="balance-total-details">
-            <span>Available balance</span>
-            <strong>{formatCurrency(12480)}</strong>
-            <p>Enough to settle every pending outgoing payment today.</p>
-          </div>
-        </article>
-
-        <article className="bento-card balance-settings-card">
+        <article className="bento-card wallet-balance-overview-card">
           <div className="bento-card-head">
             <div>
-              <span>Preferences</span>
-              <h2>Balance alerts</h2>
+              <span>Available balance</span>
+              <h2>
+                {loading ? (
+                  <LoadingSkeleton />
+                ) : (
+                  formatCurrency(availableBalance)
+                )}
+              </h2>
             </div>
+            <CreditCard size={24} />
           </div>
-          <form className="dashboard-form compact">
-            <label>
-              <span>Low balance alert</span>
-              <input type="text" defaultValue={formatCurrency(1000)} />
-            </label>
-            <label>
-              <span>Reminder cadence</span>
-              <select defaultValue="weekly">
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="manual">Manual only</option>
-              </select>
-            </label>
-            <button className="dashboard-secondary-button" type="button">
-              Save preferences
-            </button>
-          </form>
+
+          <p>
+            Based on wallet credits and debits recorded in your SplitVerse
+            ledger.
+          </p>
+
+          <button
+            type="button"
+            className="dashboard-secondary-button"
+            onClick={loadWalletSummary}
+            disabled={loading}
+          >
+            <RefreshCcw size={18} />
+            Refresh
+          </button>
         </article>
 
-        <article className="bento-card account-breakdown-card">
-          <div className="bento-card-head">
-            <div>
-              <span>Balance stack</span>
-              <h2>Wallet summary</h2>
-            </div>
-          </div>
-          <div className="compact-list">
-            {accountRows.map((row) => (
-              <div key={row.label}>
-                <span>{row.label}</span>
-                <strong>{formatCurrency(row.value)}</strong>
-              </div>
-            ))}
-          </div>
+        <article className="bento-card wallet-mini-card">
+          <span>Pending incoming</span>
+          <strong>
+            {loading ? <LoadingSkeleton /> : formatCurrency(pendingIncoming)}
+          </strong>
+          <p>Money others need to settle with you.</p>
         </article>
 
-        <article className="bento-card settlement-card wallet-settlement-card">
+        <article className="bento-card wallet-mini-card">
+          <span>Pending outgoing</span>
+          <strong>
+            {loading ? <LoadingSkeleton /> : formatCurrency(pendingOutgoing)}
+          </strong>
+          <p>Money you need to settle with others.</p>
+        </article>
+
+        <article className="bento-card wallet-mini-card dark">
+          <span>Net position</span>
+          <strong>
+            {loading
+              ? <LoadingSkeleton light />
+              : formatCurrency(netPosition, { signed: true })}
+          </strong>
+          <p>Available balance + incoming - outgoing.</p>
+        </article>
+
+        <article className="bento-card transaction-table-card wallet-ledger-card">
           <div className="bento-card-head">
             <div>
-              <span>Settlements</span>
-              <h2>Action queue</h2>
+              <span>Wallet Activity</span>
+              <h2>Recent wallet transactions</h2>
             </div>
-            <CheckCircle2 size={23} />
           </div>
-          <div className="settlement-list">
-            {settlementRows.map((row) => (
-              <div className="settlement-row" key={`${row.name}-${row.note}`}>
-                <span className={row.type === "receive" ? "settlement-icon up" : "settlement-icon down"}>
-                  {row.type === "receive" ? (
-                    <ArrowDownRight size={18} />
-                  ) : (
-                    <ArrowUpRight size={18} />
-                  )}
-                </span>
+
+          <div className="transaction-list">
+            {loading && (
+              <div className="transaction-row">
                 <div>
-                  <strong>{row.name}</strong>
-                  <span>{row.note}</span>
+                  <strong>
+                    <LoadingSkeleton />
+                  </strong>
+                  <span>
+                    <LoadingSkeleton wide />
+                  </span>
                 </div>
-                <em>{formatCurrency(row.amount, { signed: true })}</em>
-                <button type="button">
-                  {row.type === "receive" ? "Remind" : "Pay"}
-                </button>
+                <em>--</em>
+                <span className="status-pill pending">
+                  <LoadingSkeleton />
+                </span>
+                <time>--</time>
               </div>
-            ))}
+            )}
+
+            {!loading && error && (
+              <div className="transaction-row">
+                <div>
+                  <strong>{error}</strong>
+                  <span>Check backend and try again.</span>
+                </div>
+                <em>--</em>
+                <span className="status-pill pending">Error</span>
+                <time>--</time>
+              </div>
+            )}
+
+            {!loading &&
+              !error &&
+              walletData?.recentWalletTransactions.length === 0 && (
+                <div className="transaction-row">
+                  <div>
+                    <strong>No wallet activity yet</strong>
+                    <span>Top up your wallet to see entries here.</span>
+                  </div>
+                  <em>{formatCurrency(0)}</em>
+                  <span className="status-pill pending">Empty</span>
+                  <time>--</time>
+                </div>
+              )}
+
+            {!loading &&
+              !error &&
+              walletData?.recentWalletTransactions.map((transaction) => (
+                <div className="transaction-row" key={transaction.id}>
+                  <div>
+                    <strong>
+                      {transaction.description ?? "Wallet transaction"}
+                    </strong>
+                    <span>
+                      {transaction.type === "credit"
+                        ? "Wallet credit"
+                        : "Wallet debit"}
+                    </span>
+                  </div>
+
+                  <em>
+                    {transaction.type === "credit" ? "+" : "-"}
+                    {formatCurrency(transaction.amount)}
+                  </em>
+
+                  <span
+                    className={`status-pill ${
+                      transaction.type === "credit" ? "added" : "paid"
+                    }`}
+                  >
+                    {transaction.type === "credit" ? "Added" : "Paid"}
+                  </span>
+
+                  <time>{formatDate(transaction.createdAt)}</time>
+                </div>
+              ))}
           </div>
         </article>
 
+        <article className="bento-card transaction-table-card wallet-pending-card">
+          <div className="bento-card-head">
+            <div>
+              <span>Settlement Queue</span>
+              <h2>Pending settlements</h2>
+            </div>
+          </div>
+
+          <div className="transaction-list">
+            {loading && (
+              <div className="transaction-row">
+                <div>
+                  <strong>
+                    <LoadingSkeleton />
+                  </strong>
+                  <span>
+                    <LoadingSkeleton wide />
+                  </span>
+                </div>
+                <em>--</em>
+                <span className="status-pill pending">
+                  <LoadingSkeleton />
+                </span>
+                <time>--</time>
+              </div>
+            )}
+
+            {!loading && error && (
+              <div className="transaction-row">
+                <div>
+                  <strong>{error}</strong>
+                  <span>Check backend and try again.</span>
+                </div>
+                <em>--</em>
+                <span className="status-pill pending">Error</span>
+                <time>--</time>
+              </div>
+            )}
+
+            {!loading &&
+              !error &&
+              walletData?.pendingSettlements.length === 0 && (
+                <div className="transaction-row">
+                  <div>
+                    <strong>No pending settlements</strong>
+                    <span>You are all clear for now.</span>
+                  </div>
+                  <em>{formatCurrency(0)}</em>
+                  <span className="status-pill received">Clear</span>
+                  <time>--</time>
+                </div>
+              )}
+
+            {!loading &&
+              !error &&
+              walletData?.pendingSettlements.map((settlement) => {
+                const isIncoming = settlement.direction === "incoming";
+                const personName = isIncoming
+                  ? settlement.fromName || settlement.fromEmail
+                  : settlement.toName || settlement.toEmail;
+
+                return (
+                  <div className="transaction-row" key={settlement.id}>
+                    <div>
+                      <strong>
+                        {isIncoming ? "You will receive" : "You need to pay"}
+                      </strong>
+                      <span>{personName}</span>
+                    </div>
+
+                    <em>
+                      {isIncoming ? "+" : "-"}
+                      {formatCurrency(settlement.amount)}
+                    </em>
+
+                    <span className="status-pill pending">
+                      {isIncoming ? "Incoming" : "Outgoing"}
+                    </span>
+
+                    <time>{formatDate(settlement.createdAt)}</time>
+                  </div>
+                );
+              })}
+          </div>
+        </article>
       </section>
     </DashboardLayout>
   );

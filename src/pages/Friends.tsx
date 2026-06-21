@@ -1,11 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import {
-  Check,
-  Mail,
-  Send,
-  UserPlus,
-  UsersRound,
-} from "lucide-react";
+import { Check, Mail, Send, UserPlus, UsersRound } from "lucide-react";
 
 import DashboardLayout from "./dashboard/DashboardLayout";
 import {
@@ -14,6 +8,7 @@ import {
   sendFriendRequest,
   type FriendsSummary,
 } from "../lib/api";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 
 const emptySummary: FriendsSummary = {
   friends: [],
@@ -25,7 +20,8 @@ function getFriendInitials(name: string | null, email: string) {
   const source = name || email.split("@")[0] || "SV";
   const parts = source.trim().split(/\s+/).filter(Boolean);
   const first = parts[0]?.[0] || "S";
-  const second = parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] || "V";
+  const second =
+    parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] || "V";
 
   return `${first}${second}`.toUpperCase();
 }
@@ -96,7 +92,9 @@ export default function Friends() {
       setMessage(
         response.request.emailStatus === "sent"
           ? "Friend request email sent."
-          : "Friend request created. Email sending needs RESEND_API_KEY on the server.",
+          : response.request.emailStatus === "failed"
+            ? "Friend request created, but email could not be delivered. Check backend email settings."
+            : "Friend request created. Add RESEND_API_KEY in server/.env to send email.",
       );
     } catch (sendError) {
       setError(
@@ -115,8 +113,23 @@ export default function Friends() {
 
     try {
       setAcceptingId(requestId);
+
       await acceptFriendRequest(requestId);
+
+      // Remove accepted request immediately from UI
+      setSummary((prev) => ({
+        ...prev,
+        receivedRequests: prev.receivedRequests.filter(
+          (request) => request.id !== requestId,
+        ),
+        sentRequests: prev.sentRequests.filter(
+          (request) => request.id !== requestId,
+        ),
+      }));
+
+      // Reload from backend so friend list updates too
       await loadFriends();
+
       setMessage("Friend request accepted.");
     } catch (acceptError) {
       setError(
@@ -128,6 +141,14 @@ export default function Friends() {
       setAcceptingId("");
     }
   };
+
+  const pendingReceivedRequests = summary.receivedRequests.filter(
+    (request) => request.status === "pending",
+  );
+
+  const pendingSentRequests = summary.sentRequests.filter(
+    (request) => request.status === "pending",
+  );
 
   return (
     <DashboardLayout eyebrow="Friends">
@@ -166,9 +187,13 @@ export default function Friends() {
                 disabled={sending}
               />
             </label>
-            <button className="dashboard-primary-button" type="submit" disabled={sending}>
+            <button
+              className="dashboard-primary-button"
+              type="submit"
+              disabled={sending}
+            >
               <Send size={17} />
-              {sending ? "Sending..." : "Send request"}
+              {sending ? <LoadingSkeleton light /> : "Send request"}
             </button>
           </form>
         </article>
@@ -183,7 +208,11 @@ export default function Friends() {
           </div>
 
           <div className="friend-list">
-            {loading && <p className="dashboard-muted-text">Loading friends...</p>}
+            {loading && (
+              <p className="dashboard-muted-text">
+                <LoadingSkeleton wide />
+              </p>
+            )}
             {!loading && summary.friends.length === 0 && (
               <p className="dashboard-muted-text">No friends yet.</p>
             )}
@@ -213,13 +242,17 @@ export default function Friends() {
           </div>
 
           <div className="friend-request-list">
-            {summary.receivedRequests.length === 0 && (
-              <p className="dashboard-muted-text">No pending received requests.</p>
+            {pendingReceivedRequests.length === 0 && (
+              <p className="dashboard-muted-text">
+                No pending received requests.
+              </p>
             )}
-            {summary.receivedRequests.map((request) => (
+            {pendingReceivedRequests.map((request) => (
               <div className="friend-request-row" key={request.id}>
                 <div>
-                  <strong>{request.requester_name || request.requester_email}</strong>
+                  <strong>
+                    {request.requester_name || request.requester_email}
+                  </strong>
                   <span>{request.requester_email}</span>
                 </div>
                 <button
@@ -228,7 +261,11 @@ export default function Friends() {
                   disabled={acceptingId === request.id}
                 >
                   <Check size={17} />
-                  {acceptingId === request.id ? "Accepting..." : "Accept"}
+                  {acceptingId === request.id ? (
+                    <LoadingSkeleton light />
+                  ) : (
+                    "Accept"
+                  )}
                 </button>
               </div>
             ))}
@@ -245,10 +282,10 @@ export default function Friends() {
           </div>
 
           <div className="friend-request-list">
-            {summary.sentRequests.length === 0 && (
+            {pendingSentRequests.length === 0 && (
               <p className="dashboard-muted-text">No sent requests.</p>
             )}
-            {summary.sentRequests.map((request) => (
+            {pendingSentRequests.map((request) => (
               <div className="friend-request-row sent" key={request.id}>
                 <div>
                   <strong>{request.recipient_email}</strong>
@@ -265,7 +302,11 @@ export default function Friends() {
         </article>
 
         {(message || error) && (
-          <article className={error ? "bento-card page-alert error" : "bento-card page-alert"}>
+          <article
+            className={
+              error ? "bento-card page-alert error" : "bento-card page-alert"
+            }
+          >
             {error || message}
           </article>
         )}

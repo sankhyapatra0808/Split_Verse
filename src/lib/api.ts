@@ -105,6 +105,8 @@ export type TransactionsResponse = {
   };
 };
 
+// wallet topup integration
+
 export type WalletTopUpMethod = "UPI" | "Card" | "Net banking";
 
 export type WalletTopUpPayload = {
@@ -144,6 +146,40 @@ export async function topUpWallet(payload: WalletTopUpPayload) {
 
 export async function getRecentWalletTopUps() {
   return apiFetch<WalletTopUpsResponse>("/api/wallet/top-ups");
+}
+
+// wallet summary
+export type WalletSummaryResponse = {
+  summary: {
+    availableBalance: number;
+    pendingIncoming: number;
+    pendingOutgoing: number;
+    netPosition: number;
+  };
+
+  recentWalletTransactions: {
+    id: string;
+    type: "credit" | "debit";
+    amount: number;
+    description: string | null;
+    createdAt: string;
+  }[];
+
+  pendingSettlements: {
+    id: string;
+    amount: number;
+    status: string;
+    direction: "incoming" | "outgoing";
+    fromName: string | null;
+    fromEmail: string;
+    toName: string | null;
+    toEmail: string;
+    createdAt: string;
+  }[];
+};
+
+export async function getWalletSummary() {
+  return apiFetch<WalletSummaryResponse>("/api/wallet/summary");
 }
 
 export type SplitRoomMember = {

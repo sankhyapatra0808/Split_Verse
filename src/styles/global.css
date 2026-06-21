@@ -135,3 +135,39 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+.app-loading-skeleton {
+  width: 82px;
+  height: 18px;
+  display: inline-block;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #eef0f3 0%, #fafbfc 44%, #eef0f3 88%);
+  background-size: 220% 100%;
+  animation: appSkeletonShimmer 1.25s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+.app-loading-skeleton.wide {
+  width: 118px;
+}
+
+.app-loading-skeleton.light {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.44) 44%,
+    rgba(255, 255, 255, 0.2) 88%
+  );
+  background-size: 220% 100%;
+}
+
+@keyframes appSkeletonShimmer {
+  from {
+    background-position: 120% 0;
+  }
+
+  to {
+    background-position: -120% 0;
+  }
+}

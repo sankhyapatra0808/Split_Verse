@@ -16,6 +16,7 @@ import {
 import logo from "../../assets/Logo.png";
 import "../../styles/AuthPages.css";
 import { FacebookIcon, GoogleIcon } from "./SocialIcons";
+import LoadingSkeleton from "../../components/LoadingSkeleton";
 import { useAuth, type SocialProvider } from "../../context/useAuth";
 import { getFirebaseErrorMessage } from "../../utils/firebaseError";
 
@@ -162,7 +163,7 @@ export default function Login() {
             {error && <p className="auth-error">{error}</p>}
 
             <button type="submit" className="auth-submit" disabled={loading}>
-              {loading ? "Logging in..." : "Log in"}
+              {loading ? <LoadingSkeleton light /> : "Log in"}
               <ArrowRight size={18} />
             </button>
           </form>

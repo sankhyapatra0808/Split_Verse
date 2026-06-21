@@ -7,6 +7,8 @@ import {
   type TransactionItem,
   type TransactionStatus,
 } from "../lib/api";
+import Dropdown, { type DropdownOption } from "../components/Dropdown";
+import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
 
 function formatTransactionDate(dateValue: string) {
@@ -49,6 +51,19 @@ function formatSignedCurrency(
 }
 
 const visibleTransactionLimit = 10;
+
+const statusOptions: DropdownOption<TransactionStatus>[] = [
+  { value: "all", label: "All activity" },
+  { value: "received", label: "Received" },
+  { value: "paid", label: "Paid" },
+  { value: "pending", label: "Pending" },
+  { value: "added", label: "Added" },
+];
+
+const exportModeOptions: DropdownOption<"count" | "year">[] = [
+  { value: "count", label: "Last transactions" },
+  { value: "year", label: "Previous years" },
+];
 
 export default function TransactionHistory() {
   const { formatCurrency } = useAppSettings();
@@ -232,18 +247,12 @@ export default function TransactionHistory() {
               />
             </label>
 
-            <select
+            <Dropdown
+              ariaLabel="Transaction status filter"
               value={status}
-              onChange={(event) =>
-                setStatus(event.target.value as TransactionStatus)
-              }
-            >
-              <option value="all">All activity</option>
-              <option value="received">Received</option>
-              <option value="paid">Paid</option>
-              <option value="pending">Pending</option>
-              <option value="added">Added</option>
-            </select>
+              options={statusOptions}
+              onChange={setStatus}
+            />
 
             <button className="dashboard-secondary-button" type="submit">
               <Filter size={18} />
@@ -265,7 +274,7 @@ export default function TransactionHistory() {
           </form>
         </article>
 
-        <article className="bento-card transaction-table-card">
+        <article className="bento-card transaction-table-card transaction-ledger-card">
           <div className="bento-card-head">
             <div>
               <span>Ledger</span>
@@ -277,11 +286,17 @@ export default function TransactionHistory() {
             {loading && (
               <div className="transaction-row">
                 <div>
-                  <strong>Loading transactions...</strong>
-                  <span>Please wait</span>
+                  <strong>
+                    <LoadingSkeleton />
+                  </strong>
+                  <span>
+                    <LoadingSkeleton wide />
+                  </span>
                 </div>
                 <em>--</em>
-                <span className="status-pill pending">Loading</span>
+                <span className="status-pill pending">
+                  <LoadingSkeleton />
+                </span>
                 <time>--</time>
               </div>
             )}
@@ -376,15 +391,12 @@ export default function TransactionHistory() {
 
             <label>
               <span>Export menu</span>
-              <select
+              <Dropdown
+                ariaLabel="Export menu"
                 value={exportMode}
-                onChange={(event) =>
-                  setExportMode(event.target.value as "count" | "year")
-                }
-              >
-                <option value="count">Last transactions</option>
-                <option value="year">Previous years</option>
-              </select>
+                options={exportModeOptions}
+                onChange={setExportMode}
+              />
             </label>
 
             {exportMode === "count" ? (
@@ -402,16 +414,15 @@ export default function TransactionHistory() {
             ) : (
               <label>
                 <span>Previous year</span>
-                <select
+                <Dropdown
+                  ariaLabel="Previous year"
                   value={exportYear}
-                  onChange={(event) => setExportYear(event.target.value)}
-                >
-                  {previousYearOptions.map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
+                  options={previousYearOptions.map((year) => ({
+                    value: String(year),
+                    label: String(year),
+                  }))}
+                  onChange={setExportYear}
+                />
               </label>
             )}
 
@@ -432,7 +443,7 @@ export default function TransactionHistory() {
                 type="submit"
                 disabled={exporting}
               >
-                {exporting ? "Exporting..." : "Download CSV"}
+                {exporting ? <LoadingSkeleton light /> : "Download CSV"}
               </button>
             </div>
           </form>
