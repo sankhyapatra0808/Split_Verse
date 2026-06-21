@@ -10,7 +10,6 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-
 import DashboardLayout from "./dashboard/DashboardLayout";
 import {
   createExpense,
@@ -18,7 +17,6 @@ import {
   type DashboardSummary,
 } from "../lib/api";
 import Dropdown from "../components/Dropdown";
-import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
 import { withTopProgress } from "../utils/topProgress";
 
@@ -147,7 +145,6 @@ export default function Dashboard() {
   const [dashboardSummary, setDashboardSummary] =
     useState<DashboardSummary | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
-
   const [expenseFormOpen, setExpenseFormOpen] = useState(false);
   const [expenseSubmitting, setExpenseSubmitting] = useState(false);
   const [expenseFormError, setExpenseFormError] = useState("");
@@ -255,9 +252,17 @@ export default function Dashboard() {
     };
 
     window.addEventListener("splitverse:data-updated", handleDataUpdated);
+    window.addEventListener(
+      "splitverse:pending-dues-updated",
+      handleDataUpdated,
+    );
 
     return () => {
       window.removeEventListener("splitverse:data-updated", handleDataUpdated);
+      window.removeEventListener(
+        "splitverse:pending-dues-updated",
+        handleDataUpdated,
+      );
     };
   }, []);
 
@@ -285,6 +290,7 @@ export default function Dashboard() {
   const walletBalance =
     walletHealth?.availableBalance ?? summaryMetrics?.walletBalance ?? 0;
   const receivable = walletHealth?.receivable ?? 0;
+  const pendingPayment = summaryMetrics?.pendingPayment ?? 0;
   const graphTotal = monthlySpend?.graphTotal ?? 0;
   const spendingInsight =
     dashboardSummary?.spendingInsight?.text ??
@@ -302,12 +308,17 @@ export default function Dashboard() {
     },
     {
       label: "Pending payment",
-      value: formatCurrency(summaryMetrics?.pendingPayment ?? 0),
+      value: formatCurrency(pendingPayment),
       tone: "warn",
     },
     {
+      label: "Receivable",
+      value: formatCurrency(receivable),
+      tone: "up",
+    },
+    {
       label: "Wallet balance",
-      value: formatCurrency(summaryMetrics?.walletBalance ?? 0),
+      value: formatCurrency(walletBalance),
       tone: "blue",
     },
   ];
@@ -362,7 +373,7 @@ export default function Dashboard() {
               />
             </label>
 
-            <label>
+            <label className="expense-category-field">
               <span>Category</span>
               <Dropdown
                 ariaLabel="Expense category"

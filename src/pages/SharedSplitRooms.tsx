@@ -100,6 +100,7 @@ export default function SharedSplitRooms() {
   const [collectingMemberId, setCollectingMemberId] = useState("");
   const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
   const [payingDueId, setPayingDueId] = useState("");
+  const [expandedDueMemberId, setExpandedDueMemberId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const friendDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -286,6 +287,10 @@ export default function SharedSplitRooms() {
       setAssignedMemberId(firstMember?.id || "");
     }
   }, [assignedMemberId, sortedMembers]);
+
+  useEffect(() => {
+    setExpandedDueMemberId("");
+  }, [selectedRoomId]);
 
   function toggleSelectedFriend(email: string) {
     setSelectedFriendEmails((prev) =>
@@ -679,73 +684,131 @@ export default function SharedSplitRooms() {
           </div>
 
           <div className="member-balance-panel">
-            {selectedRoom && selectedRoomPendingDues.length > 0 && (
-              <div className="room-pending-dues-panel">
-                <span>Pay from wallet</span>
-                <div className="room-pending-due-list">
-                  {selectedRoomPendingDues.map((due) => (
-                    <div className="room-pending-due-row" key={due.id}>
-                      <div>
-                        <strong>{due.title}</strong>
-                        <small>
-                          Pay to {due.receiverName || due.receiverEmail}
-                        </small>
-                      </div>
-                      <em>{formatCurrency(due.amount)}</em>
-                      <button
-                        type="button"
-                        onClick={() => handlePayDue(due.id)}
-                        disabled={payingDueId === due.id}
-                      >
-                        {payingDueId === due.id ? "Paying" : "Pay"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
             <div className="member-balance-list">
               {selectedRoom?.balances.length ? (
-                selectedRoom.balances.map((balance) => (
-                  <div
-                    className={
-                      balance.isCollected
-                        ? "member-balance-row collected"
-                        : "member-balance-row"
-                    }
-                    key={balance.memberId}
-                  >
-                    <span>{balance.name}</span>
-                    <strong>{balance.detail}</strong>
-                    <em>
-                      {balance.isMe
-                        ? formatCurrency(balance.amount)
-                        : formatCurrency(balance.outstandingAmount)}
-                    </em>
-                    {!balance.isMe &&
-                      balance.outstandingAmount > 0 &&
-                      selectedRoom.isOwner && (
-                        <button
-                          className="balance-collect-button"
-                          type="button"
-                          onClick={() =>
-                            handleCollectMemberDues(
-                              selectedRoom.id,
-                              balance.memberId,
-                            )
+                selectedRoom.balances.map((balance) => {
+                  const hasWalletDues =
+                    balance.isMe && selectedRoomPendingDues.length > 0;
+                  const hasUnpaidDue =
+                    hasWalletDues ||
+                    (!balance.isMe && balance.outstandingAmount > 0);
+                  const expanded =
+                    hasWalletDues && expandedDueMemberId === balance.memberId;
+                  const rowClassName = [
+                    "member-balance-row",
+                    balance.isCollected ? "collected" : "",
+                    hasUnpaidDue ? "unpaid" : "",
+                    hasWalletDues ? "expandable" : "",
+                    expanded ? "expanded" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+
+                  return (
+                    <div className="member-balance-entry" key={balance.memberId}>
+                      <div
+                        className={rowClassName}
+                        role={hasWalletDues ? "button" : undefined}
+                        tabIndex={hasWalletDues ? 0 : undefined}
+                        onClick={() => {
+                          if (!hasWalletDues) {
+                            return;
                           }
-                          disabled={collectingMemberId === balance.memberId}
-                        >
-                          <CheckCircle2 size={14} />
-                          {collectingMemberId === balance.memberId ? (
-                            "Collecting"
-                          ) : (
-                            "Manual collect"
+
+                          setExpandedDueMemberId((current) =>
+                            current === balance.memberId ? "" : balance.memberId,
+                          );
+                        }}
+                        onKeyDown={(event) => {
+                          if (
+                            !hasWalletDues ||
+                            (event.key !== "Enter" && event.key !== " ")
+                          ) {
+                            return;
+                          }
+
+                          event.preventDefault();
+                          setExpandedDueMemberId((current) =>
+                            current === balance.memberId ? "" : balance.memberId,
+                          );
+                        }}
+                      >
+                        <span className="member-balance-name">
+                          {hasUnpaidDue && (
+                            <i
+                              className="member-unpaid-dot"
+                              aria-label="Unpaid dues"
+                            />
                           )}
-                        </button>
-                    )}
-                  </div>
-                ))
+                          {balance.name}
+                        </span>
+                        <strong>{balance.detail}</strong>
+                        <em>
+                          {balance.isMe
+                            ? formatCurrency(balance.amount)
+                            : formatCurrency(balance.outstandingAmount)}
+                        </em>
+                        {hasWalletDues && (
+                          <ChevronDown
+                            className="member-due-chevron"
+                            size={16}
+                            aria-hidden="true"
+                          />
+                        )}
+                        {!balance.isMe &&
+                          balance.outstandingAmount > 0 &&
+                          selectedRoom.isOwner && (
+                            <button
+                              className="balance-collect-button"
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleCollectMemberDues(
+                                  selectedRoom.id,
+                                  balance.memberId,
+                                );
+                              }}
+                              disabled={collectingMemberId === balance.memberId}
+                            >
+                              <CheckCircle2 size={14} />
+                              {collectingMemberId === balance.memberId ? (
+                                "Collecting"
+                              ) : (
+                                "Manual collect"
+                              )}
+                            </button>
+                        )}
+                      </div>
+
+                      {expanded && (
+                        <div className="room-pending-dues-panel">
+                          <span>Pay from wallet</span>
+                          <div className="room-pending-due-list">
+                            {selectedRoomPendingDues.map((due) => (
+                              <div className="room-pending-due-row" key={due.id}>
+                                <div>
+                                  <strong>{due.title}</strong>
+                                  <small>
+                                    Pay to{" "}
+                                    {due.receiverName || due.receiverEmail}
+                                  </small>
+                                </div>
+                                <em>{formatCurrency(due.amount)}</em>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePayDue(due.id)}
+                                  disabled={payingDueId === due.id}
+                                >
+                                  {payingDueId === due.id ? "Paying" : "Pay"}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               ) : null}
             </div>
           </div>
@@ -761,7 +824,7 @@ export default function SharedSplitRooms() {
           </div>
 
           <form className="assignment-grid" onSubmit={handleAddItem}>
-            <label>
+            <label className="assign-rooms">
               <span>Room</span>
               <Dropdown
                 ariaLabel="Assignment room"
@@ -793,7 +856,7 @@ export default function SharedSplitRooms() {
                 disabled={savingItem || !selectedRoom}
               />
             </label>
-            <label>
+            <label className="assign-category">
               <span>Assign to</span>
               <Dropdown
                 ariaLabel="Assigned member"

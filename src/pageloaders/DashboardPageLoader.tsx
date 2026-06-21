@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type ReactElement,
@@ -289,9 +290,13 @@ export default function DashboardPageLoader({
 }: DashboardPageLoaderProps) {
   const Skeleton = skeletons[variant];
   const [progress, setProgress] = useState(0);
+  const startedVariantRef = useRef<DashboardLoaderVariant | null>(null);
 
   useEffect(() => {
-    setProgress(0);
+    if (startedVariantRef.current !== variant) {
+      startedVariantRef.current = variant;
+      setProgress(0);
+    }
 
     const timer = window.setInterval(() => {
       setProgress((current) => {

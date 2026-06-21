@@ -703,6 +703,7 @@
 .split-rooms-grid .member-balance-card,
 .split-rooms-grid .assignment-card {
   grid-column: span 4;
+  align-content: start;
 }
 
 .split-rooms-grid .bento-card-head {
@@ -732,17 +733,16 @@
 }
 
 .split-rooms-grid .assignment-card .app-dropdown-trigger {
-  border-color: var(--dash-hairline-soft);
-  background: linear-gradient(180deg, var(--dash-canvas), var(--dash-surface-soft));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  border-color: var(--dash-hairline);
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
+  box-shadow: none;
 }
 
 .split-rooms-grid .assignment-card .app-dropdown.open .app-dropdown-trigger,
 .split-rooms-grid .assignment-card .app-dropdown-trigger:focus-visible {
-  border-color: rgba(10, 11, 13, 0.22);
-  box-shadow:
-    0 0 0 3px rgba(10, 11, 13, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border-color: rgba(10, 11, 13, 0.28);
+  box-shadow: 0 0 0 3px rgba(10, 11, 13, 0.06);
 }
 
 .split-rooms-grid .assignment-card .app-dropdown.open .app-dropdown-trigger svg {
@@ -750,20 +750,19 @@
 }
 
 .split-rooms-grid .assignment-card .app-dropdown-menu {
-  border-color: rgba(10, 11, 13, 0.12);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 247, 247, 0.98));
-  box-shadow: 0 16px 36px rgba(10, 11, 13, 0.14);
+  border-color: var(--dash-hairline);
+  background: var(--dash-canvas);
+  box-shadow: 0 12px 28px rgba(10, 11, 13, 0.1);
 }
 
 .split-rooms-grid .assignment-card .app-dropdown-menu button:hover,
 .split-rooms-grid .assignment-card .app-dropdown-menu button:focus-visible {
-  background: var(--dash-surface-strong);
+  background: var(--dash-canvas);
 }
 
 .split-rooms-grid .assignment-card .app-dropdown-menu button.selected {
   color: var(--dash-ink);
-  background: var(--dash-surface-strong);
+  background: var(--dash-canvas);
 }
 
 .split-rooms-grid .assignment-card .app-dropdown-menu button svg {
@@ -783,32 +782,47 @@
 }
 
 .split-rooms-grid .room-card-list.compact {
+  max-height: 206px;
+  align-content: start;
   gap: 7px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .split-rooms-grid .room-card-list.compact .room-row {
-  min-height: 46px;
-  padding: 8px 9px;
+  box-sizing: border-box;
+  padding: 10px 11px;
 }
 
 .split-rooms-grid .room-card-list.compact .room-row .status-pill {
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: 32px;
+  padding: 0 11px;
 }
 
 .split-rooms-grid .member-balance-panel {
+  align-content: start;
   gap: 8px;
-  padding: 10px;
-  border-radius: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .split-rooms-grid .member-balance-list {
+  max-height: 246px;
+  align-content: start;
   gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .split-rooms-grid .member-balance-row {
-  min-height: 36px;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr) auto;
+  min-height: 38px;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr) auto auto;
   gap: 6px;
   padding: 7px 8px;
 }
@@ -1075,7 +1089,7 @@
   border: 1px solid var(--dash-hairline);
   border-radius: 12px;
   outline: 0;
-  padding: 0 12px 0 14px;
+  padding: 0 12px 0 10px;
   color: var(--dash-ink);
   background: var(--dash-canvas);
   cursor: pointer;
@@ -1093,14 +1107,16 @@
 
 .app-dropdown-trigger span {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
 }
 
 .app-dropdown-trigger svg {
   flex: 0 0 auto;
-  color: var(--dash-muted);
+  color: var(--dash-ink);
   transition:
     color 180ms ease,
     transform 180ms ease;
@@ -1108,17 +1124,17 @@
 
 .app-dropdown.open .app-dropdown-trigger,
 .app-dropdown-trigger:focus-visible {
-  border-color: var(--dash-primary);
-  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+  border-color: rgba(10, 11, 13, 0.28);
+  box-shadow: 0 0 0 3px rgba(10, 11, 13, 0.06);
 }
 
 .app-dropdown.open .app-dropdown-trigger svg {
-  color: var(--dash-primary);
+  color: var(--dash-ink);
   transform: rotate(180deg);
 }
 
 .app-dropdown-trigger:hover:not(:disabled) {
-  background: var(--dash-surface-soft);
+  background: var(--dash-canvas);
 }
 
 .app-dropdown-trigger:disabled {
@@ -1154,9 +1170,9 @@
   gap: 10px;
   border: 0;
   border-radius: 12px;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 8px;
   color: var(--dash-ink);
-  background: transparent;
+  background: var(--dash-canvas);
   cursor: pointer;
   font: inherit;
   font-size: 14px;
@@ -1170,23 +1186,26 @@
 
 .app-dropdown-menu button span {
   min-width: 0;
+  flex: 1 1 auto;
   overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .app-dropdown-menu button:hover,
 .app-dropdown-menu button:focus-visible {
   outline: 0;
-  background: var(--dash-surface-soft);
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
 }
 
 .app-dropdown-menu button.selected {
-  color: var(--dash-primary);
-  background: rgba(0, 82, 255, 0.08);
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
 }
 
 .app-dropdown-menu button svg {
   flex: 0 0 auto;
-  color: var(--dash-primary);
+  color: var(--dash-ink);
 }
 
 @keyframes appDropdownIn {
@@ -1229,6 +1248,60 @@
 .assignment-grid button {
   color: #ffffff;
   background: var(--dash-primary);
+}
+
+.assign-category button,
+.assign-category [role="button"] {
+  height: 44px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 12px;
+  color: #000000;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.assign-category button:hover,
+.assign-category [role="button"]:hover,
+.assign-category button:active,
+.assign-category [role="button"]:active,
+.assign-category button:focus,
+.assign-category [role="button"]:focus {
+  color: #000000;
+  background: #ffffff;
+  box-shadow: none;
+  transform: none;
+}
+
+.assign-category button svg,
+.assign-category [role="button"] svg {
+  color: #000000;
+}
+
+.assign-rooms button,
+.assign-rooms [role="button"] {
+  height: 44px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 12px;
+  color: #000000;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.assign-rooms button:hover,
+.assign-rooms [role="button"]:hover,
+.assign-rooms button:active,
+.assign-rooms [role="button"]:active,
+.assign-rooms button:focus,
+.assign-rooms [role="button"]:focus {
+  color: #000000;
+  background: #ffffff;
+  box-shadow: none;
+  transform: none;
+}
+
+.assign-rooms button svg,
+.assign-rooms [role="button"] svg {
+  color: #000000;
 }
 
 .dashboard-secondary-button,
@@ -1434,15 +1507,60 @@
   gap: 8px;
 }
 
+.member-balance-entry {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
 .member-balance-row {
   min-height: 42px;
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
+  border: 1px solid transparent;
   padding: 9px 10px;
   border-radius: 12px;
   background: var(--dash-canvas);
+}
+
+.member-balance-row.expandable {
+  cursor: pointer;
+}
+
+.member-balance-row.expandable:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+}
+
+.member-balance-row.unpaid {
+  border: 1px solid rgba(207, 32, 47, 0.18);
+}
+
+.member-balance-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.member-unpaid-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--dash-danger);
+  box-shadow: 0 0 0 3px rgba(207, 32, 47, 0.12);
+}
+
+.member-due-chevron {
+  color: var(--dash-muted);
+  transition: transform 180ms ease, color 180ms ease;
+}
+
+.member-balance-row.expanded .member-due-chevron {
+  color: var(--dash-danger);
+  transform: rotate(180deg);
 }
 
 .member-balance-row span,
@@ -2952,7 +3070,7 @@
   gap: 16px;
   margin-bottom: 12px;
   padding: 18px;
-  border-color: rgba(0, 82, 255, 0.18);
+  border-color: rgba(0, 76, 255, 0.18);
   background:
     linear-gradient(180deg, rgba(0, 82, 255, 0.035), rgba(255, 255, 255, 0) 44%),
     var(--dash-canvas);
@@ -3008,6 +3126,15 @@
 .expense-amount-field:focus-within {
   border-color: var(--dash-primary);
   box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+}
+
+.dashboard-form select:focus,
+.assignment-grid select:focus,
+.transaction-tools select:focus,
+.transaction-export-dialog select:focus,
+.add-expense-form select:focus {
+  border-color: rgba(10, 11, 13, 0.28);
+  box-shadow: 0 0 0 3px rgba(10, 11, 13, 0.06);
 }
 
 .expense-amount-field {
@@ -3084,6 +3211,33 @@
   .add-expense-form {
     grid-template-columns: 1fr;
   }
+}
+
+.expense-category-field button,
+.expense-category-field [role="button"] {
+  height: 44px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 12px;
+  color: #000000;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.expense-category-field button:hover,
+.expense-category-field [role="button"]:hover,
+.expense-category-field button:active,
+.expense-category-field [role="button"]:active,
+.expense-category-field button:focus,
+.expense-category-field [role="button"]:focus {
+  color: #000000;
+  background: #ffffff;
+  box-shadow: none;
+  transform: none;
+}
+
+.expense-category-field button svg,
+.expense-category-field [role="button"] svg {
+  color: #000000;
 }
 
 .wallet-success-message {
@@ -3194,22 +3348,29 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border: 1px solid var(--dash-hairline-soft);
+  border: 1px solid var(--dash-hairline);
   border-radius: 12px;
-  padding: 0 12px;
+  padding: 0 12px 0 10px;
   color: var(--dash-ink);
-  background: linear-gradient(180deg, var(--dash-canvas), var(--dash-surface-soft));
+  background: var(--dash-canvas);
   cursor: pointer;
   font: inherit;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .friend-dropdown-trigger span {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+}
+
+.friend-dropdown-trigger svg {
+  flex: 0 0 auto;
+  color: var(--dash-ink);
 }
 
 .friend-dropdown-menu {
@@ -3224,16 +3385,16 @@
   max-height: 210px;
   overflow-y: auto;
   padding: 10px;
-  border: 1px solid rgba(10, 11, 13, 0.12);
+  border: 1px solid var(--dash-hairline);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 16px 36px rgba(10, 11, 13, 0.14);
+  background: var(--dash-canvas);
+  box-shadow: 0 12px 28px rgba(10, 11, 13, 0.1);
 }
 
 .friend-picker-chip {
   appearance: none;
   min-width: 0;
-  border: 1px solid var(--dash-hairline-soft);
+  border: 1px solid var(--dash-hairline);
   border-radius: 999px;
   padding: 8px 12px 8px 8px;
   background: var(--dash-canvas);
@@ -3243,7 +3404,7 @@
   gap: 8px;
   cursor: pointer;
   font: inherit;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .friend-picker-chip strong {
@@ -3251,6 +3412,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
 }
 
 .friend-picker-chip span,
@@ -3261,10 +3423,11 @@
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  background: rgba(0, 82, 255, 0.08);
-  color: var(--dash-primary);
+  border: 1px solid var(--dash-hairline);
+  background: var(--dash-canvas);
+  color: var(--dash-ink);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .friend-picker-chip img {
@@ -3272,9 +3435,9 @@
 }
 
 .friend-picker-chip.active {
-  border-color: rgba(0, 82, 255, 0.28);
-  color: var(--dash-primary);
-  background: rgba(0, 82, 255, 0.08);
+  border-color: rgba(10, 11, 13, 0.28);
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
 }
 
 .friend-picker-chip:disabled {

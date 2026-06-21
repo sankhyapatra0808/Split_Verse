@@ -50,6 +50,52 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const dbUserId = userResult.rows[0].id;
     const dbUserEmail = userResult.rows[0].email;
 
+    const pendingSplitDuesResult = await db.query(
+      `
+      SELECT
+        COALESCE(SUM(split_room_items.amount)::float, 0) AS pending_payment
+      FROM split_room_items
+      JOIN split_room_members
+        ON split_room_members.id = split_room_items.assigned_member_id
+      JOIN split_rooms
+        ON split_rooms.id = split_room_items.room_id
+      WHERE (
+        split_room_members.user_id = $1
+        OR LOWER(COALESCE(split_room_members.email, '')) = LOWER($2)
+      )
+      AND split_rooms.owner_user_id <> $1
+      AND split_room_items.collected_at IS NULL;
+      `,
+      [dbUserId, dbUserEmail],
+    );
+
+    const receivableSplitDuesResult = await db.query(
+      `
+      SELECT
+        COALESCE(SUM(split_room_items.amount)::float, 0) AS receivable
+      FROM split_room_items
+      JOIN split_room_members
+        ON split_room_members.id = split_room_items.assigned_member_id
+      JOIN split_rooms
+        ON split_rooms.id = split_room_items.room_id
+      WHERE split_rooms.owner_user_id = $1
+      AND NOT (
+        split_room_members.user_id = $1
+        OR LOWER(COALESCE(split_room_members.email, '')) = LOWER($2)
+      )
+      AND split_room_items.collected_at IS NULL;
+      `,
+      [dbUserId, dbUserEmail],
+    );
+
+    const pendingSplitPayment = Number(
+      pendingSplitDuesResult.rows[0].pending_payment,
+    );
+
+    const receivableSplitAmount = Number(
+      receivableSplitDuesResult.rows[0].receivable,
+    );
+
     const summaryResult = await db.query(
       `
       SELECT
@@ -113,8 +159,6 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const summary = summaryResult.rows[0];
 
     const todayExpense = Number(summary.today_expense);
-    const pendingPayment = Number(summary.pending_payment);
-    const receivable = Number(summary.receivable);
     const walletBalance = Number(summary.wallet_balance);
     const currentMonthNumber = Number(summary.current_month_number);
 
@@ -263,10 +307,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     const maxMonthlyAmount = Math.max(...monthlyAmounts, 1);
     const graphTotal = monthlyAmounts.reduce((sum, amount) => sum + amount, 0);
-    const currentMonthIndex = Math.max(
-      0,
-      Math.min(11, currentMonthNumber - 1),
-    );
+    const currentMonthIndex = Math.max(0, Math.min(11, currentMonthNumber - 1));
     const currentMonthTotal = monthlyAmounts[currentMonthIndex] ?? 0;
     const currentMonthLabel = monthLabels[currentMonthIndex] ?? "This month";
     const peakDaysByMonth = new Map(
@@ -286,7 +327,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     return res.json({
       metrics: {
         todayExpense,
-        pendingPayment,
+        pendingPayment: pendingSplitPayment,
         walletBalance,
       },
 
@@ -297,7 +338,7 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
       walletHealth: {
         availableBalance: walletBalance,
-        receivable,
+        receivable: receivableSplitAmount,
       },
 
       monthlySpend: {
