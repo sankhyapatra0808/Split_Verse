@@ -4,8 +4,10 @@ import {
   type AuthRequest,
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
+import { sendLiveUpdate } from "../liveEvents.js";
 
 const router = express.Router();
+const maxExpensesPerDay = 10;
 
 router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
   try {
@@ -50,6 +52,25 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     const dbUserId = userResult.rows[0].id;
 
+    const expensesCreatedTodayResult = await db.query(
+      `
+      SELECT COUNT(*)::int AS expense_count
+      FROM expenses
+      WHERE user_id = $1
+      AND created_at::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date;
+      `,
+      [dbUserId],
+    );
+    const expensesCreatedToday = Number(
+      expensesCreatedTodayResult.rows[0].expense_count,
+    );
+
+    if (expensesCreatedToday >= maxExpensesPerDay) {
+      return res.status(429).json({
+        message: "You can add up to 10 expenses per day",
+      });
+    }
+
     const expenseResult = await db.query(
       `
       INSERT INTO expenses (
@@ -82,6 +103,11 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
         expenseDate || null,
       ]
     );
+
+    sendLiveUpdate([dbUserId], {
+      type: "money",
+      reason: "expense-created",
+    });
 
     return res.status(201).json({
       message: "Expense created successfully",

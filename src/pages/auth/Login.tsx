@@ -16,15 +16,41 @@ import {
 import logo from "../../assets/Logo.png";
 import "../../styles/AuthPages.css";
 import { FacebookIcon, GoogleIcon } from "./SocialIcons";
-import LoadingSkeleton from "../../components/LoadingSkeleton";
 import { useAuth, type SocialProvider } from "../../context/useAuth";
 import { getFirebaseErrorMessage } from "../../utils/firebaseError";
+import { withTopProgress } from "../../utils/topProgress";
 
 type LocationState = {
   from?: {
     pathname?: string;
   };
 };
+
+const maxDailyLoginAttempts = 5;
+const loginAttemptStoragePrefix = "splitverse-login-attempts";
+
+function getLoginAttemptDay() {
+  return new Date().toLocaleDateString("en-CA");
+}
+
+function getLoginAttemptKey(email: string) {
+  return `${loginAttemptStoragePrefix}:${email.toLowerCase()}:${getLoginAttemptDay()}`;
+}
+
+function getLoginAttemptCount(email: string) {
+  return Number(window.localStorage.getItem(getLoginAttemptKey(email)) || 0);
+}
+
+function recordFailedLoginAttempt(email: string) {
+  const nextCount = getLoginAttemptCount(email) + 1;
+  window.localStorage.setItem(getLoginAttemptKey(email), String(nextCount));
+
+  return nextCount;
+}
+
+function clearLoginAttempts(email: string) {
+  window.localStorage.removeItem(getLoginAttemptKey(email));
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -46,7 +72,7 @@ export default function Login() {
 
     try {
       setLoading(true);
-      await loginWithProvider(provider, remember);
+      await withTopProgress(() => loginWithProvider(provider, remember));
       navigate(from, { replace: true });
     } catch (loginError) {
       setError(getFirebaseErrorMessage(loginError));
@@ -59,17 +85,36 @@ export default function Login() {
     event.preventDefault();
     setError("");
 
-    if (!email.trim() || !password) {
+    const trimmedEmail = email.trim();
+
+    if (!trimmedEmail || !password) {
       setError("Please enter email and password.");
+      return;
+    }
+
+    if (getLoginAttemptCount(trimmedEmail) >= maxDailyLoginAttempts) {
+      setError("Too many login attempts today. Please try again tomorrow.");
       return;
     }
 
     try {
       setLoading(true);
-      await loginWithEmail(email.trim(), password, remember);
+      await withTopProgress(() =>
+        loginWithEmail(trimmedEmail, password, remember),
+      );
+      clearLoginAttempts(trimmedEmail);
       navigate(from, { replace: true });
     } catch (loginError) {
-      setError(getFirebaseErrorMessage(loginError));
+      const attempts = recordFailedLoginAttempt(trimmedEmail);
+      const attemptsLeft = Math.max(0, maxDailyLoginAttempts - attempts);
+
+      setError(
+        attemptsLeft > 0
+          ? `${getFirebaseErrorMessage(loginError)} ${attemptsLeft} login attempt${
+              attemptsLeft === 1 ? "" : "s"
+            } left today.`
+          : "Too many login attempts today. Please try again tomorrow.",
+      );
     } finally {
       setLoading(false);
     }
@@ -163,7 +208,7 @@ export default function Login() {
             {error && <p className="auth-error">{error}</p>}
 
             <button type="submit" className="auth-submit" disabled={loading}>
-              {loading ? <LoadingSkeleton light /> : "Log in"}
+              {loading ? "Logging in" : "Log in"}
               <ArrowRight size={18} />
             </button>
           </form>

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -21,6 +21,9 @@ import logo from "../../assets/Logo.png";
 import "../../styles/Dashboard.css";
 import { useAuth } from "../../context/useAuth";
 import { useAppSettings } from "../../context/useAppSettings";
+import { API_URL, getPendingDues, type PendingDue } from "../../lib/api";
+import LoadingSkeleton from "../../components/LoadingSkeleton";
+import { withTopProgress } from "../../utils/topProgress";
 
 const sidebarLinks = [
   { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard" },
@@ -34,6 +37,12 @@ const sidebarLinks = [
 type DashboardLayoutProps = {
   children: ReactNode;
   eyebrow?: string;
+};
+
+type LiveUpdatePayload = {
+  type: string;
+  reason?: string;
+  roomId?: string;
 };
 
 function getUsername(userName?: string | null, userEmail?: string | null) {
@@ -71,20 +80,156 @@ export default function DashboardLayout({
   const { user, logout } = useAuth();
   const { avatarId, compactMode, formatCurrency } = useAppSettings();
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
+  const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState("");
+  const userId = user?.uid;
   const username = getUsername(user?.displayName, user?.email);
   const initials = getUserInitials(user?.displayName, user?.email);
-  const notifications = [
-    { title: "Mira sent a reminder", detail: "Dinner table is still open" },
-    {
-      title: "Wallet top-up completed",
-      detail: `${formatCurrency(2000)} was added yesterday`,
-    },
-    { title: "Hostel 403 settled", detail: "Aarav cleared one room balance" },
-  ];
+
+  const loadPendingDueNotifications = useCallback(async () => {
+    if (!userId) {
+      setPendingDues([]);
+      setNotificationsError("");
+      setNotificationsLoading(false);
+      return;
+    }
+
+    try {
+      setNotificationsLoading(true);
+      setNotificationsError("");
+      const data = await getPendingDues();
+      setPendingDues(data.dues);
+    } catch (error) {
+      setNotificationsError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load pending split-room dues",
+      );
+      setPendingDues([]);
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    void loadPendingDueNotifications();
+  }, [loadPendingDueNotifications]);
+
+  useEffect(() => {
+    if (profilePanelOpen) {
+      void loadPendingDueNotifications();
+    }
+  }, [loadPendingDueNotifications, profilePanelOpen]);
+
+  useEffect(() => {
+    const handlePendingDuesUpdated = () => {
+      void loadPendingDueNotifications();
+    };
+
+    window.addEventListener(
+      "splitverse:pending-dues-updated",
+      handlePendingDuesUpdated,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "splitverse:pending-dues-updated",
+        handlePendingDuesUpdated,
+      );
+    };
+  }, [loadPendingDueNotifications]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    let retryTimer: number | undefined;
+
+    async function connectLiveUpdates() {
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch(`${API_URL}/api/live/events`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          signal: abortController.signal,
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error("Live update stream failed");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (!abortController.signal.aborted) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const messages = buffer.split("\n\n");
+          buffer = messages.pop() ?? "";
+
+          messages.forEach((message) => {
+            const eventName = message
+              .split("\n")
+              .find((line) => line.startsWith("event:"))
+              ?.replace("event:", "")
+              .trim();
+            const dataLine = message
+              .split("\n")
+              .find((line) => line.startsWith("data:"));
+
+            if (eventName !== "update" || !dataLine) {
+              return;
+            }
+
+            const payload = JSON.parse(
+              dataLine.replace("data:", "").trim(),
+            ) as LiveUpdatePayload;
+
+            void loadPendingDueNotifications();
+            window.dispatchEvent(
+              new CustomEvent<LiveUpdatePayload>("splitverse:data-updated", {
+                detail: payload,
+              }),
+            );
+          });
+        }
+      } catch (error) {
+        if (!abortController.signal.aborted) {
+          console.error("Live updates disconnected:", error);
+          retryTimer = window.setTimeout(connectLiveUpdates, 3000);
+        }
+      }
+    }
+
+    void connectLiveUpdates();
+
+    return () => {
+      abortController.abort();
+
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, [loadPendingDueNotifications, user, userId]);
 
   const handleLogout = async () => {
-    await logout();
+    await withTopProgress(() => logout());
     navigate("/", { replace: true });
+  };
+
+  const handlePendingDueClick = (roomId: string) => {
+    setProfilePanelOpen(false);
+    navigate(`/split-rooms?roomId=${encodeURIComponent(roomId)}`);
   };
 
   const renderAvatar = (size: "button" | "panel" = "button") => {
@@ -159,10 +304,15 @@ export default function DashboardLayout({
             <button
               className="profile-button"
               type="button"
-              aria-label="Open profile panel"
+              aria-label="Open profile and notifications panel"
               onClick={() => setProfilePanelOpen(true)}
             >
               {renderAvatar()}
+              {pendingDues.length > 0 && (
+                <span className="profile-notification-badge">
+                  {pendingDues.length}
+                </span>
+              )}
             </button>
           </div>
         </header>
@@ -206,16 +356,37 @@ export default function DashboardLayout({
         <section className="profile-panel-section">
           <div className="profile-panel-title">
             <Bell size={18} />
-            <span>Recent notifications</span>
+            <span>Pending dues</span>
           </div>
-          <div className="profile-notification-list">
-            {notifications.map((notification) => (
-              <div key={notification.title}>
-                <strong>{notification.title}</strong>
-                <span>{notification.detail}</span>
-              </div>
-            ))}
-          </div>
+          {notificationsLoading ? (
+            <p className="dashboard-muted-text">
+              <LoadingSkeleton wide />
+            </p>
+          ) : notificationsError ? (
+            <p className="dashboard-muted-text">{notificationsError}</p>
+          ) : pendingDues.length === 0 ? (
+            <p className="dashboard-muted-text">
+              You have no pending split-room dues.
+            </p>
+          ) : (
+            <div className="profile-notification-list">
+              {pendingDues.map((due) => (
+                <button
+                  type="button"
+                  key={due.id}
+                  onClick={() => handlePendingDueClick(due.roomId)}
+                >
+                  <strong>
+                    {due.title} - {formatCurrency(due.amount)}
+                  </strong>
+                  <span>
+                    {due.roomName} - Pay to{" "}
+                    {due.receiverName || due.receiverEmail}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
         <div className="profile-panel-actions">

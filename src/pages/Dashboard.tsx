@@ -20,6 +20,7 @@ import {
 import Dropdown from "../components/Dropdown";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
+import { withTopProgress } from "../utils/topProgress";
 
 const TIME_SLOTS = [
   { label: "12 AM - 6 AM", startHour: 0 },
@@ -156,8 +157,10 @@ export default function Dashboard() {
     amount: "",
   });
 
-  async function reloadDashboard() {
-    setDashboardLoading(true);
+  async function reloadDashboard({ silent = false } = {}) {
+    if (!silent) {
+      setDashboardLoading(true);
+    }
 
     try {
       const data = await getDashboardSummary();
@@ -165,7 +168,9 @@ export default function Dashboard() {
     } catch (error) {
       console.error("Failed to reload dashboard summary:", error);
     } finally {
-      setDashboardLoading(false);
+      if (!silent) {
+        setDashboardLoading(false);
+      }
     }
   }
 
@@ -189,21 +194,23 @@ export default function Dashboard() {
     setExpenseSubmitting(true);
 
     try {
-      await createExpense({
-        title,
-        category: expenseForm.category,
-        amount,
+      await withTopProgress(async () => {
+        await createExpense({
+          title,
+          category: expenseForm.category,
+          amount,
+        });
+
+        setExpenseForm({
+          title: "",
+          category: "Food",
+          amount: "",
+        });
+
+        setExpenseFormOpen(false);
+
+        await reloadDashboard({ silent: true });
       });
-
-      setExpenseForm({
-        title: "",
-        category: "Food",
-        amount: "",
-      });
-
-      setExpenseFormOpen(false);
-
-      await reloadDashboard();
     } catch (error) {
       console.error("Failed to create expense:", error);
       setExpenseFormError(
@@ -235,10 +242,22 @@ export default function Dashboard() {
       }
     }
 
-    loadDashboardSummary();
+    void loadDashboardSummary();
 
     return () => {
       isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleDataUpdated = () => {
+      void reloadDashboard({ silent: true });
+    };
+
+    window.addEventListener("splitverse:data-updated", handleDataUpdated);
+
+    return () => {
+      window.removeEventListener("splitverse:data-updated", handleDataUpdated);
     };
   }, []);
 
@@ -381,7 +400,7 @@ export default function Dashboard() {
 
             <button type="submit" disabled={expenseSubmitting}>
               <Check size={17} />
-              {expenseSubmitting ? <LoadingSkeleton light /> : "Save Expense"}
+              {expenseSubmitting ? "Saving Expense" : "Save Expense"}
             </button>
 
             {expenseFormError && (

@@ -1,6 +1,6 @@
 import { auth } from "../config/firebase";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export type DbUser = {
   id: string;
@@ -182,6 +182,8 @@ export async function getWalletSummary() {
   return apiFetch<WalletSummaryResponse>("/api/wallet/summary");
 }
 
+// split roommembers
+
 export type SplitRoomMember = {
   id: string;
   room_id: string;
@@ -249,6 +251,36 @@ export type CreateSplitRoomItemPayload = {
   assignedMemberId: string;
 };
 
+export type PendingDue = {
+  id: string;
+  title: string;
+  amount: number;
+  roomId: string;
+  roomName: string;
+  receiverName: string | null;
+  receiverEmail: string;
+  createdAt: string;
+};
+
+export async function getPendingDues() {
+  return apiFetch<{ dues: PendingDue[] }>("/api/split-rooms/pending-dues");
+}
+
+export async function paySplitRoomDue(itemId: string) {
+  return apiFetch<{
+    message: string;
+    paidItem: {
+      id: string;
+      roomId: string;
+      title: string;
+      amount: number;
+      expenseId: string;
+    };
+  }>(`/api/split-rooms/items/${itemId}/pay`, {
+    method: "POST",
+  });
+}
+
 export type Friend = {
   id: string;
   name: string | null;
@@ -313,6 +345,13 @@ export async function getDashboardSummary() {
 export async function syncCurrentUser() {
   return apiFetch<{ message: string; user: DbUser }>("/api/auth/sync-user", {
     method: "POST",
+  });
+}
+
+export async function deleteAccount(confirmationText: string) {
+  return apiFetch<{ message: string }>("/api/auth/account", {
+    method: "DELETE",
+    body: JSON.stringify({ confirmationText }),
   });
 }
 

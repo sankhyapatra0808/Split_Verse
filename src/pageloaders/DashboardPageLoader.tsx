@@ -1,4 +1,9 @@
-import type { CSSProperties, ReactElement } from "react";
+import {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+} from "react";
 
 import "../styles/DashboardPageLoader.css";
 
@@ -28,7 +33,9 @@ function Shimmer({
   className?: string;
   style?: CSSProperties;
 }) {
-  return <span className={`dashboard-loader-shimmer ${className}`} style={style} />;
+  return (
+    <span className={`dashboard-loader-shimmer ${className}`} style={style} />
+  );
 }
 
 function LoaderCardHead() {
@@ -281,9 +288,33 @@ export default function DashboardPageLoader({
   variant = "dashboard",
 }: DashboardPageLoaderProps) {
   const Skeleton = skeletons[variant];
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    setProgress(0);
+
+    const timer = window.setInterval(() => {
+      setProgress((current) => {
+        if (current >= 92) {
+          return current;
+        }
+
+        const nextStep = Math.max(0.16, (92 - current) * 0.035);
+        return Math.min(92, current + nextStep);
+      });
+    }, 180);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [variant]);
 
   return (
     <main className="dashboard-loader" aria-label="Loading dashboard page">
+      <span className="dashboard-loader-progress" aria-hidden="true">
+        <i style={{ width: `${progress}%` }} />
+      </span>
+
       <aside className="dashboard-loader-sidebar">
         <div className="dashboard-loader-brand">
           <Shimmer className="loader-logo" />

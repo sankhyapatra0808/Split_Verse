@@ -8,6 +8,11 @@ import splitRoomRoutes from "./routes/splitRooms.routes.js";
 import friendRoutes from "./routes/friends.routes.js";
 import transactionRoutes from "./routes/transactions.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
+import { registerLiveClient } from "./liveEvents.js";
+import {
+  type AuthRequest,
+  verifyFirebaseToken,
+} from "./middleware/verifyFirebaseToken.js";
 
 const app = express();
 
@@ -52,6 +57,41 @@ app.get("/api/db-test", async (_req, res) => {
       status: "error",
       message: "Database connection failed",
     });
+  }
+});
+
+app.get("/api/live/events", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const userResult = await db.query(
+      `
+      SELECT id
+      FROM users
+      WHERE firebase_uid = $1;
+      `,
+      [firebaseUser.uid],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "User not found in database" });
+    }
+
+    registerLiveClient(userResult.rows[0].id, res);
+  } catch (error) {
+    console.error("Live update stream failed:", error);
+
+    if (!res.headersSent) {
+      return res.status(500).json({
+        message: "Failed to open live update stream",
+      });
+    }
+
+    res.end();
   }
 });
 

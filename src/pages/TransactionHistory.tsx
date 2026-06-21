@@ -10,6 +10,7 @@ import {
 import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
+import { withTopProgress } from "../utils/topProgress";
 
 function formatTransactionDate(dateValue: string) {
   const date = new Date(dateValue);
@@ -83,8 +84,11 @@ export default function TransactionHistory() {
   const [transactionTotal, setTransactionTotal] = useState(0);
   const [accountCreatedAt, setAccountCreatedAt] = useState("");
 
-  async function loadTransactions() {
-    setLoading(true);
+  async function loadTransactions({ silent = false } = {}) {
+    if (!silent) {
+      setLoading(true);
+    }
+
     setError("");
 
     try {
@@ -102,14 +106,29 @@ export default function TransactionHistory() {
       console.error("Failed to load transactions:", err);
       setError("Could not load transaction history.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
-    loadTransactions();
+    void loadTransactions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
+
+  useEffect(() => {
+    const handleDataUpdated = () => {
+      void loadTransactions({ silent: true });
+    };
+
+    window.addEventListener("splitverse:data-updated", handleDataUpdated);
+
+    return () => {
+      window.removeEventListener("splitverse:data-updated", handleDataUpdated);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, status]);
 
   const visibleTransactions = useMemo(
     () => transactions.slice(0, visibleTransactionLimit),
@@ -134,7 +153,7 @@ export default function TransactionHistory() {
 
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    loadTransactions();
+    void withTopProgress(() => loadTransactions());
   }
 
   async function handleExportCsv(event: FormEvent<HTMLFormElement>) {
@@ -164,52 +183,54 @@ export default function TransactionHistory() {
     setExportError("");
 
     try {
-      const data = await getTransactions({
-        search,
-        status,
-        exportMode,
-        limit:
-          exportMode === "count" ? Math.floor(numericExportCount) : undefined,
-        year: exportMode === "year" ? numericExportYear : undefined,
+      await withTopProgress(async () => {
+        const data = await getTransactions({
+          search,
+          status,
+          exportMode,
+          limit:
+            exportMode === "count" ? Math.floor(numericExportCount) : undefined,
+          year: exportMode === "year" ? numericExportYear : undefined,
+        });
+
+        if (data.transactions.length === 0) {
+          setExportError("No transactions found for that export range.");
+          return;
+        }
+
+        const header = ["Title", "Room", "Amount", "Status", "Type", "Date"];
+
+        const rows = data.transactions.map((transaction) => [
+          transaction.title,
+          transaction.room,
+          String(transaction.amount),
+          transaction.displayStatus,
+          transaction.type,
+          transaction.createdAt,
+        ]);
+
+        const csvContent = [header, ...rows]
+          .map((row) =>
+            row
+              .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+              .join(",")
+          )
+          .join("\n");
+
+        const blob = new Blob([csvContent], {
+          type: "text/csv;charset=utf-8;",
+        });
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download = "splitverse-transactions.csv";
+        link.click();
+
+        URL.revokeObjectURL(url);
+        setExportDialogOpen(false);
       });
-
-      if (data.transactions.length === 0) {
-        setExportError("No transactions found for that export range.");
-        return;
-      }
-
-      const header = ["Title", "Room", "Amount", "Status", "Type", "Date"];
-
-      const rows = data.transactions.map((transaction) => [
-        transaction.title,
-        transaction.room,
-        String(transaction.amount),
-        transaction.displayStatus,
-        transaction.type,
-        transaction.createdAt,
-      ]);
-
-      const csvContent = [header, ...rows]
-        .map((row) =>
-          row
-            .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-            .join(",")
-        )
-        .join("\n");
-
-      const blob = new Blob([csvContent], {
-        type: "text/csv;charset=utf-8;",
-      });
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-
-      link.href = url;
-      link.download = "splitverse-transactions.csv";
-      link.click();
-
-      URL.revokeObjectURL(url);
-      setExportDialogOpen(false);
     } catch (err) {
       console.error("Failed to export transactions:", err);
       setExportError("Could not export transactions.");
@@ -443,7 +464,7 @@ export default function TransactionHistory() {
                 type="submit"
                 disabled={exporting}
               >
-                {exporting ? <LoadingSkeleton light /> : "Download CSV"}
+                {exporting ? "Preparing CSV" : "Download CSV"}
               </button>
             </div>
           </form>

@@ -17,9 +17,33 @@ import {
 import logo from "../../assets/Logo.png";
 import "../../styles/AuthPages.css";
 import { FacebookIcon, GoogleIcon } from "./SocialIcons";
-import LoadingSkeleton from "../../components/LoadingSkeleton";
 import { useAuth, type SocialProvider } from "../../context/useAuth";
 import { getFirebaseErrorMessage } from "../../utils/firebaseError";
+import { withTopProgress } from "../../utils/topProgress";
+
+function getPasswordStrength(password: string) {
+  let score = 0;
+
+  if (password.length >= 6) score += 1;
+  if (password.length >= 10) score += 1;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+  if (!password) {
+    return { label: "Password strength", level: "empty", score: 0 };
+  }
+
+  if (score <= 2) {
+    return { label: "Weak password", level: "weak", score };
+  }
+
+  if (score <= 4) {
+    return { label: "Good password", level: "good", score };
+  }
+
+  return { label: "Strong password", level: "strong", score };
+}
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -31,13 +55,14 @@ export default function Signup() {
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const passwordStrength = getPasswordStrength(password);
 
   const handleSocialSignup = async (provider: SocialProvider) => {
     setError("");
 
     try {
       setLoading(true);
-      await loginWithProvider(provider, true);
+      await withTopProgress(() => loginWithProvider(provider, true));
       navigate("/dashboard", { replace: true });
     } catch (signupError) {
       setError(getFirebaseErrorMessage(signupError));
@@ -62,7 +87,9 @@ export default function Signup() {
 
     try {
       setLoading(true);
-      await signupWithEmail(name.trim(), email.trim(), password);
+      await withTopProgress(() =>
+        signupWithEmail(name.trim(), email.trim(), password),
+      );
       navigate("/dashboard", { replace: true });
     } catch (signupError) {
       setError(getFirebaseErrorMessage(signupError));
@@ -155,12 +182,28 @@ export default function Signup() {
                   {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+              <div
+                className={`password-strength-meter ${passwordStrength.level}`}
+                aria-live="polite"
+              >
+                <span>
+                  <i
+                    style={{
+                      width:
+                        passwordStrength.score === 0
+                          ? "0%"
+                          : `${Math.max(passwordStrength.score, 1) * 20}%`,
+                    }}
+                  />
+                </span>
+                <small>{passwordStrength.label}</small>
+              </div>
             </label>
 
             {error && <p className="auth-error">{error}</p>}
 
             <button type="submit" className="auth-submit" disabled={loading}>
-              {loading ? <LoadingSkeleton light /> : "Create account"}
+              {loading ? "Creating account" : "Create account"}
               <ArrowRight size={18} />
             </button>
           </form>

@@ -4,10 +4,13 @@ import {
   type AuthRequest,
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
+import { sendLiveUpdate } from "../liveEvents.js";
 
 const router = express.Router();
 const topUpMethods = new Set(["UPI", "Card", "Net banking"]);
 const topUpDescriptionPrefix = "Wallet top-up via ";
+const maxTopUpPerTransaction = 10000;
+const maxTopUpPerDay = 100000;
 
 async function getDbUserId(firebaseUid: string) {
   const userResult = await db.query(
@@ -107,6 +110,12 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
       });
     }
 
+    if (numericAmount > maxTopUpPerTransaction) {
+      return res.status(400).json({
+        message: "Wallet top-up cannot exceed Rs. 10,000 per transaction",
+      });
+    }
+
     if (method && !paymentMethod) {
       return res.status(400).json({
         message: "Unsupported top-up method",
@@ -118,6 +127,28 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
     if (!dbUserId) {
       return res.status(404).json({
         message: "User not found in database",
+      });
+    }
+
+    const topUpTodayResult = await db.query(
+      `
+      SELECT COALESCE(SUM(amount), 0)::float AS top_up_total
+      FROM wallet_transactions
+      WHERE user_id = $1
+      AND type = 'credit'
+      AND (
+        description IS NULL
+        OR description LIKE 'Wallet top-up%'
+      )
+      AND created_at::date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date;
+      `,
+      [dbUserId],
+    );
+    const topUpToday = Number(topUpTodayResult.rows[0].top_up_total);
+
+    if (topUpToday + numericAmount > maxTopUpPerDay) {
+      return res.status(429).json({
+        message: "Wallet top-up limit is Rs. 100,000 per day",
       });
     }
 
@@ -162,6 +193,11 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
       `,
       [dbUserId]
     );
+
+    sendLiveUpdate([dbUserId], {
+      type: "money",
+      reason: "wallet-top-up",
+    });
 
     return res.status(201).json({
       message: "Wallet topped up successfully",

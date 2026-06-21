@@ -1,17 +1,29 @@
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import {
+  AlertTriangle,
   BellRing,
   Coins,
   EyeOff,
   Shield,
   SlidersHorizontal,
+  Trash2,
   UserRound,
+  X,
 } from "lucide-react";
 
 import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import { useAppSettings, type CurrencyCode } from "../context/useAppSettings";
+import { useAuth } from "../context/useAuth";
+import { deleteAccount } from "../lib/api";
+import { withTopProgress } from "../utils/topProgress";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
+const deleteAccountConfirmationText = "/DeleteAccount";
+
 export default function AppSettings() {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
   const {
     appCurrency,
     avatarId,
@@ -33,6 +45,10 @@ export default function AppSettings() {
     setPrivacyMode,
     setSettlementReminders,
   } = useAppSettings();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const convertedAmount = convertCurrency(
     converterAmount,
@@ -51,6 +67,35 @@ export default function AppSettings() {
       label: currency.code,
     }),
   );
+  const canDeleteAccount = deleteConfirmation === deleteAccountConfirmationText;
+
+  async function handleDeleteAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!canDeleteAccount) {
+      setDeleteError(`Type ${deleteAccountConfirmationText} to continue.`);
+      return;
+    }
+
+    setDeletingAccount(true);
+    setDeleteError("");
+
+    try {
+      await withTopProgress(async () => {
+        await deleteAccount(deleteConfirmation);
+        await logout();
+      });
+      navigate("/", { replace: true });
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error
+          ? error.message
+          : "Could not delete account. Please try again.",
+      );
+    } finally {
+      setDeletingAccount(false);
+    }
+  }
 
   return (
     <DashboardLayout eyebrow="Settings">
@@ -206,7 +251,103 @@ export default function AppSettings() {
             </label>
           </div>
         </article>
+
+        <article className="bento-card settings-card danger-zone-card">
+          <div className="bento-card-head">
+            <div>
+              <span>Account control</span>
+              <h2>Delete account</h2>
+            </div>
+            <AlertTriangle size={22} />
+          </div>
+          <p>
+            Delete your SplitVerse account from Firebase and Neon. This is only
+            allowed when your wallet balance is zero and all pending dues are
+            cleared.
+          </p>
+          <button
+            className="dashboard-danger-button"
+            type="button"
+            onClick={() => {
+              setDeleteConfirmation("");
+              setDeleteError("");
+              setDeleteDialogOpen(true);
+            }}
+          >
+            <Trash2 size={17} />
+            Delete account
+          </button>
+        </article>
       </section>
+
+      {deleteDialogOpen && (
+        <div className="transaction-export-backdrop" role="presentation">
+          <form
+            className="transaction-export-dialog account-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="account-delete-title"
+            onSubmit={handleDeleteAccount}
+          >
+            <div className="transaction-export-head">
+              <div>
+                <span>Delete account</span>
+                <h2 id="account-delete-title">Confirm permanent deletion</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close delete account dialog"
+                onClick={() => setDeleteDialogOpen(false)}
+                disabled={deletingAccount}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="account-delete-warning">
+              <AlertTriangle size={18} />
+              <p>
+                Your account can be deleted only after your wallet balance is
+                zero and all pending dues are cleared.
+              </p>
+            </div>
+
+            <label>
+              <span>Type {deleteAccountConfirmationText}</span>
+              <input
+                type="text"
+                value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                disabled={deletingAccount}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+
+            {deleteError && (
+              <p className="transaction-export-message">{deleteError}</p>
+            )}
+
+            <div className="transaction-export-actions">
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                onClick={() => setDeleteDialogOpen(false)}
+                disabled={deletingAccount}
+              >
+                Cancel
+              </button>
+              <button
+                className="dashboard-danger-button"
+                type="submit"
+                disabled={deletingAccount || !canDeleteAccount}
+              >
+                {deletingAccount ? "Deleting account" : "Delete account"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

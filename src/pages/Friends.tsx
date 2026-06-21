@@ -9,6 +9,7 @@ import {
   type FriendsSummary,
 } from "../lib/api";
 import LoadingSkeleton from "../components/LoadingSkeleton";
+import { withTopProgress } from "../utils/topProgress";
 
 const emptySummary: FriendsSummary = {
   friends: [],
@@ -67,10 +68,22 @@ export default function Friends() {
       }
     }
 
-    loadInitialFriends();
+    void loadInitialFriends();
 
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleDataUpdated = () => {
+      void loadFriends();
+    };
+
+    window.addEventListener("splitverse:data-updated", handleDataUpdated);
+
+    return () => {
+      window.removeEventListener("splitverse:data-updated", handleDataUpdated);
     };
   }, []);
 
@@ -86,16 +99,18 @@ export default function Friends() {
 
     try {
       setSending(true);
-      const response = await sendFriendRequest(email.trim());
-      await loadFriends();
-      setEmail("");
-      setMessage(
-        response.request.emailStatus === "sent"
-          ? "Friend request email sent."
-          : response.request.emailStatus === "failed"
-            ? "Friend request created, but email could not be delivered. Check backend email settings."
-            : "Friend request created. Add RESEND_API_KEY in server/.env to send email.",
-      );
+      await withTopProgress(async () => {
+        const response = await sendFriendRequest(email.trim());
+        await loadFriends();
+        setEmail("");
+        setMessage(
+          response.request.emailStatus === "sent"
+            ? "Friend request email sent."
+            : response.request.emailStatus === "failed"
+              ? "Friend request created, but email could not be delivered. Check backend email settings."
+              : "Friend request created. Add RESEND_API_KEY in server/.env to send email.",
+        );
+      });
     } catch (sendError) {
       setError(
         sendError instanceof Error
@@ -114,23 +129,25 @@ export default function Friends() {
     try {
       setAcceptingId(requestId);
 
-      await acceptFriendRequest(requestId);
+      await withTopProgress(async () => {
+        await acceptFriendRequest(requestId);
 
-      // Remove accepted request immediately from UI
-      setSummary((prev) => ({
-        ...prev,
-        receivedRequests: prev.receivedRequests.filter(
-          (request) => request.id !== requestId,
-        ),
-        sentRequests: prev.sentRequests.filter(
-          (request) => request.id !== requestId,
-        ),
-      }));
+        // Remove accepted request immediately from UI
+        setSummary((prev) => ({
+          ...prev,
+          receivedRequests: prev.receivedRequests.filter(
+            (request) => request.id !== requestId,
+          ),
+          sentRequests: prev.sentRequests.filter(
+            (request) => request.id !== requestId,
+          ),
+        }));
 
-      // Reload from backend so friend list updates too
-      await loadFriends();
+        // Reload from backend so friend list updates too
+        await loadFriends();
 
-      setMessage("Friend request accepted.");
+        setMessage("Friend request accepted.");
+      });
     } catch (acceptError) {
       setError(
         acceptError instanceof Error
@@ -193,7 +210,7 @@ export default function Friends() {
               disabled={sending}
             >
               <Send size={17} />
-              {sending ? <LoadingSkeleton light /> : "Send request"}
+              {sending ? "Sending request" : "Send request"}
             </button>
           </form>
         </article>
@@ -261,11 +278,7 @@ export default function Friends() {
                   disabled={acceptingId === request.id}
                 >
                   <Check size={17} />
-                  {acceptingId === request.id ? (
-                    <LoadingSkeleton light />
-                  ) : (
-                    "Accept"
-                  )}
+                  {acceptingId === request.id ? "Accepting" : "Accept"}
                 </button>
               </div>
             ))}
@@ -291,11 +304,7 @@ export default function Friends() {
                   <strong>{request.recipient_email}</strong>
                   <span>{request.status}</span>
                 </div>
-                {request.acceptUrl && (
-                  <a href={request.acceptUrl} target="_blank" rel="noreferrer">
-                    Accept link
-                  </a>
-                )}
+                <span className="dashboard-muted-text">Waiting for acceptance</span>
               </div>
             ))}
           </div>

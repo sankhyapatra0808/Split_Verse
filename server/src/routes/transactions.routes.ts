@@ -91,6 +91,19 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           expenses.created_at AS created_at
         FROM expenses
         WHERE expenses.user_id = $1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM split_room_items item
+          INNER JOIN split_rooms room
+            ON room.id = item.room_id
+          INNER JOIN wallet_transactions wallet
+            ON wallet.user_id = expenses.user_id
+            AND wallet.type = 'debit'
+            AND wallet.amount = expenses.amount
+            AND wallet.description = 'Paid ' || item.title || ' in ' || room.name
+            AND ABS(EXTRACT(EPOCH FROM (wallet.created_at - expenses.created_at))) < 60
+          WHERE item.expense_id = expenses.id
+        )
 
         UNION ALL
 

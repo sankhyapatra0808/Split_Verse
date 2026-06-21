@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Routes, Route } from "react-router-dom";
 import ProtectedRoute from "./components/ProtectedRoute";
+import TopProgressBar from "./components/TopProgressBar";
 import DashboardPageLoader from "./pageloaders/DashboardPageLoader";
 import type { DashboardLoaderVariant } from "./pageloaders/DashboardPageLoader";
 import { useAuth } from "./context/useAuth";
@@ -55,20 +56,23 @@ function dashboardPage(page: ReactNode, loaderVariant: DashboardLoaderVariant) {
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={homePage(<Home />)} />
-      <Route path="/login" element={publicPage(<Login />)} />
-      <Route path="/signup" element={publicPage(<Signup />)} />
-      <Route path="/forgot-password" element={publicPage(<ForgotPassword />)} />
+    <>
+      <TopProgressBar />
+      <Routes>
+        <Route path="/" element={homePage(<Home />)} />
+        <Route path="/login" element={publicPage(<Login />)} />
+        <Route path="/signup" element={publicPage(<Signup />)} />
+        <Route path="/forgot-password" element={publicPage(<ForgotPassword />)} />
 
-      <Route path="/dashboard" element={dashboardPage(<Dashboard />, "dashboard")} />
-      <Route path="/split-rooms" element={dashboardPage(<SharedSplitRooms />, "splitRooms")} />
-      <Route path="/wallet" element={dashboardPage(<WalletBalance />, "wallet")} />
-      <Route path="/wallet-top-up" element={dashboardPage(<WalletTopUp />, "walletTopUp")} />
-      <Route path="/transactions" element={dashboardPage(<TransactionHistory />, "transactions")} />
-      <Route path="/friends" element={dashboardPage(<Friends />, "friends")} />
-      <Route path="/settings" element={dashboardPage(<AppSettings />, "settings")} />
-    </Routes>
+        <Route path="/dashboard" element={dashboardPage(<Dashboard />, "dashboard")} />
+        <Route path="/split-rooms" element={dashboardPage(<SharedSplitRooms />, "splitRooms")} />
+        <Route path="/wallet" element={dashboardPage(<WalletBalance />, "wallet")} />
+        <Route path="/wallet-top-up" element={dashboardPage(<WalletTopUp />, "walletTopUp")} />
+        <Route path="/transactions" element={dashboardPage(<TransactionHistory />, "transactions")} />
+        <Route path="/friends" element={dashboardPage(<Friends />, "friends")} />
+        <Route path="/settings" element={dashboardPage(<AppSettings />, "settings")} />
+      </Routes>
+    </>
   );
 }
 

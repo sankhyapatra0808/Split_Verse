@@ -14,6 +14,7 @@ import {
 } from "../lib/api";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
+import { withTopProgress } from "../utils/topProgress";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
 const amounts = [500, 1000, 2000, 5000];
@@ -92,6 +93,18 @@ export default function WalletTopUp() {
     void loadRecentTopUps();
   }, []);
 
+  useEffect(() => {
+    const handleDataUpdated = () => {
+      void loadRecentTopUps({ silent: true });
+    };
+
+    window.addEventListener("splitverse:data-updated", handleDataUpdated);
+
+    return () => {
+      window.removeEventListener("splitverse:data-updated", handleDataUpdated);
+    };
+  }, []);
+
   async function handleTopUp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -106,22 +119,28 @@ export default function WalletTopUp() {
     setMessage("");
 
     try {
-      const response = await topUpWallet({
-        amount: topUpAmount,
-        method: selectedMethod,
+      await withTopProgress(async () => {
+        const response = await topUpWallet({
+          amount: topUpAmount,
+          method: selectedMethod,
+        });
+
+        setMessage(
+          `Wallet topped up successfully. New balance: ${formatCurrency(
+            response.walletBalance,
+          )}`,
+        );
+
+        setCustomAmount("");
+        await loadRecentTopUps({ silent: true });
       });
-
-      setMessage(
-        `Wallet topped up successfully. New balance: ${formatCurrency(
-          response.walletBalance,
-        )}`,
-      );
-
-      setCustomAmount("");
-      await loadRecentTopUps({ silent: true });
     } catch (err) {
       console.error("Wallet top-up failed:", err);
-      setError("Could not top up wallet. Please try again.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not top up wallet. Please try again.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -175,6 +194,7 @@ export default function WalletTopUp() {
               <input
                 type="number"
                 min="1"
+                max="10000"
                 step="0.01"
                 inputMode="decimal"
                 placeholder="Custom amount"
@@ -187,7 +207,7 @@ export default function WalletTopUp() {
               type="submit"
               disabled={submitting}
             >
-              {submitting ? <LoadingSkeleton light /> : "Add money to wallet"}
+              {submitting ? "Adding money" : "Add money to wallet"}
             </button>
             {message && <p className="wallet-success-message">{message}</p>}
             {error && <p className="wallet-error-message">{error}</p>}

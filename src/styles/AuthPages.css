@@ -319,6 +319,46 @@ input {
   animation: authError 220ms ease both;
 }
 
+.password-strength-meter {
+  display: grid;
+  gap: 6px;
+}
+
+.password-strength-meter span {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--auth-hairline-soft);
+}
+
+.password-strength-meter i {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--auth-muted);
+  transition:
+    width 220ms ease,
+    background-color 220ms ease;
+}
+
+.password-strength-meter small {
+  color: var(--auth-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.password-strength-meter.weak i {
+  background: var(--auth-danger);
+}
+
+.password-strength-meter.good i {
+  background: #f4b000;
+}
+
+.password-strength-meter.strong i {
+  background: #05b169;
+}
+
 .auth-submit {
   height: 48px;
   width: 100%;

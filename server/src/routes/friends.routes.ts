@@ -5,6 +5,7 @@ import {
   type AuthRequest,
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
+import { sendLiveUpdate } from "../liveEvents.js";
 
 const router = express.Router();
 
@@ -339,6 +340,11 @@ router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
       requesterName: dbUser.name || dbUser.email,
     });
 
+    sendLiveUpdate([dbUser.id, recipientUser?.id], {
+      type: "friends",
+      reason: "friend-request-sent",
+    });
+
     return res.status(201).json({
       message: "Friend request sent",
       request: {
@@ -407,6 +413,11 @@ router.post(
         [friendRequest.id],
       );
 
+      sendLiveUpdate([dbUser.id, friendRequest.requester_user_id], {
+        type: "friends",
+        reason: "friend-request-accepted",
+      });
+
       return res.json({
         message: "Friend request accepted",
       });
@@ -474,6 +485,11 @@ router.get("/accept/:token", async (req, res) => {
       `,
       [friendRequest.id],
     );
+
+    sendLiveUpdate([recipientUser.id, friendRequest.requester_user_id], {
+      type: "friends",
+      reason: "friend-request-accepted",
+    });
 
     return res.send(renderAcceptPage("Friend request accepted. You can open SplitVerse now."));
   } catch (error) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CreditCard, RefreshCcw, WalletCards } from "lucide-react";
+import { CreditCard, WalletCards } from "lucide-react";
 
 import DashboardLayout from "./dashboard/DashboardLayout";
 import { getWalletSummary, type WalletSummaryResponse } from "../lib/api";
@@ -29,8 +29,11 @@ export default function WalletBalance() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadWalletSummary() {
-    setLoading(true);
+  async function loadWalletSummary({ silent = false } = {}) {
+    if (!silent) {
+      setLoading(true);
+    }
+
     setError("");
 
     try {
@@ -40,12 +43,26 @@ export default function WalletBalance() {
       console.error("Failed to load wallet summary:", err);
       setError("Could not load wallet details.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
-    loadWalletSummary();
+    void loadWalletSummary();
+  }, []);
+
+  useEffect(() => {
+    const handleDataUpdated = () => {
+      void loadWalletSummary({ silent: true });
+    };
+
+    window.addEventListener("splitverse:data-updated", handleDataUpdated);
+
+    return () => {
+      window.removeEventListener("splitverse:data-updated", handleDataUpdated);
+    };
   }, []);
 
   const summary = walletData?.summary;
@@ -93,15 +110,6 @@ export default function WalletBalance() {
             ledger.
           </p>
 
-          <button
-            type="button"
-            className="dashboard-secondary-button"
-            onClick={loadWalletSummary}
-            disabled={loading}
-          >
-            <RefreshCcw size={18} />
-            Refresh
-          </button>
         </article>
 
         <article className="bento-card wallet-mini-card">
