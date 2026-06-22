@@ -1,9 +1,73 @@
 import type { NextFunction, Request, Response } from "express";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { adminAuth } from "../config/firebaseAdmin.js";
+import {
+  CircuitBreaker,
+  CircuitBreakerOpenError,
+  DependencyConcurrencyLimitError,
+  DependencyTimeoutError,
+} from "../utils/circuitBreaker.js";
 
 export interface AuthRequest extends Request {
   user?: DecodedIdToken;
+}
+
+const firebaseAuthTimeoutMs = Number(process.env.FIREBASE_AUTH_TIMEOUT_MS || 3000);
+const firebaseAuthMaxConcurrent = Number(
+  process.env.FIREBASE_AUTH_MAX_CONCURRENT || 50,
+);
+const firebaseAuthFailureThreshold = Number(
+  process.env.FIREBASE_AUTH_FAILURE_THRESHOLD || 5,
+);
+const firebaseAuthRecoveryTimeoutMs = Number(
+  process.env.FIREBASE_AUTH_RECOVERY_TIMEOUT_MS || 15000,
+);
+const firebaseAuthSuccessThreshold = Number(
+  process.env.FIREBASE_AUTH_SUCCESS_THRESHOLD || 2,
+);
+
+function getFirebaseErrorCode(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code ?? "")
+    : "";
+}
+
+function isFirebaseDependencyFailure(error: unknown) {
+  const code = getFirebaseErrorCode(error).toLowerCase();
+
+  return (
+    code.includes("internal") ||
+    code.includes("network") ||
+    code.includes("timeout") ||
+    code.includes("unavailable")
+  );
+}
+
+const firebaseAuthCircuitBreaker = new CircuitBreaker({
+  name: "firebase-auth",
+  timeoutMs: firebaseAuthTimeoutMs,
+  maxConcurrent: firebaseAuthMaxConcurrent,
+  failureThreshold: firebaseAuthFailureThreshold,
+  recoveryTimeoutMs: firebaseAuthRecoveryTimeoutMs,
+  successThreshold: firebaseAuthSuccessThreshold,
+  shouldRecordFailure: isFirebaseDependencyFailure,
+});
+
+export function getFirebaseAuthDependencyHealth() {
+  return {
+    timeoutMs: firebaseAuthTimeoutMs,
+    maxConcurrent: firebaseAuthMaxConcurrent,
+    circuitBreaker: firebaseAuthCircuitBreaker.getSnapshot(),
+  };
+}
+
+function isDependencyUnavailable(error: unknown) {
+  return (
+    error instanceof CircuitBreakerOpenError ||
+    error instanceof DependencyConcurrencyLimitError ||
+    error instanceof DependencyTimeoutError ||
+    isFirebaseDependencyFailure(error)
+  );
 }
 
 export async function verifyFirebaseToken(
@@ -22,13 +86,21 @@ export async function verifyFirebaseToken(
 
     const token = authHeader.split("Bearer ")[1];
 
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    const decodedToken = await firebaseAuthCircuitBreaker.execute(() =>
+      adminAuth.verifyIdToken(token),
+    );
 
     req.user = decodedToken;
 
     next();
   } catch (error) {
     console.error("Firebase token verification failed:", error);
+
+    if (isDependencyUnavailable(error)) {
+      return res.status(503).json({
+        message: "Authentication service is temporarily unavailable",
+      });
+    }
 
     return res.status(401).json({
       message: "Invalid or expired token",

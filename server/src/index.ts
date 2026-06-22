@@ -5,12 +5,16 @@ import { testDbConnection, db } from "./config/db.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import expenseRoutes from "./routes/expenses.routes.js";
 import splitRoomRoutes from "./routes/splitRooms.routes.js";
-import friendRoutes from "./routes/friends.routes.js";
+import friendRoutes, {
+  getAcceptPageCacheStats,
+} from "./routes/friends.routes.js";
 import transactionRoutes from "./routes/transactions.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 import { registerLiveClient } from "./liveEvents.js";
+import { compressResponses } from "./middleware/compressResponses.js";
 import {
   type AuthRequest,
+  getFirebaseAuthDependencyHealth,
   verifyFirebaseToken,
 } from "./middleware/verifyFirebaseToken.js";
 
@@ -26,6 +30,7 @@ app.use(
   })
 );
 
+app.use(compressResponses());
 app.use(express.json());
 
 app.get("/", (_req, res) => {
@@ -39,6 +44,12 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     service: "splitverse-api",
     timestamp: new Date().toISOString(),
+    dependencies: {
+      firebaseAuth: getFirebaseAuthDependencyHealth(),
+    },
+    renderCaches: {
+      friendAcceptPage: getAcceptPageCacheStats(),
+    },
   });
 });
 

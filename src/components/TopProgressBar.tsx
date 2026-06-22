@@ -104,15 +104,20 @@ export default function TopProgressBar() {
       return;
     }
 
-    setFinishing(true);
-    setProgress(100);
-    const timer = window.setTimeout(() => {
+    const finishTimer = window.setTimeout(() => {
+      setFinishing(true);
+      setProgress(100);
+    }, 0);
+    const hideTimer = window.setTimeout(() => {
       setVisible(false);
       setFinishing(false);
       setProgress(0);
     }, 320);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(finishTimer);
+      window.clearTimeout(hideTimer);
+    };
   }, [activeCount, visible]);
 
   if (!visible) {

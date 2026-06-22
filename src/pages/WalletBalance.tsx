@@ -7,17 +7,34 @@ import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
 
 function formatDate(dateValue: string) {
-  const date = new Date(dateValue);
+  if (!dateValue) {
+    return "Unknown";
+  }
+
+  const rawValue = String(dateValue);
+
+  // If the backend sends a date-only value, display that exact calendar date.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+    const [year, month, day] = rawValue.split("-");
+    return `${day}-${month}-${year}`;
+  }
+
+  const normalizedValue = rawValue.replace(" ", "T");
+  const hasTimezone = /z$|[+-]\d{2}:?\d{2}$/i.test(normalizedValue);
+  const date = new Date(hasTimezone ? normalizedValue : `${normalizedValue}Z`);
 
   if (Number.isNaN(date.getTime())) {
     return "Unknown";
   }
 
-  return date.toLocaleDateString("en-IN", {
+  return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
-    month: "short",
+    month: "2-digit",
     year: "numeric",
-  });
+    timeZone: "Asia/Kolkata",
+  })
+    .format(date)
+    .replaceAll("/", "-");
 }
 
 export default function WalletBalance() {
@@ -50,7 +67,11 @@ export default function WalletBalance() {
   }
 
   useEffect(() => {
-    void loadWalletSummary();
+    const timer = window.setTimeout(() => {
+      void loadWalletSummary();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -219,7 +240,7 @@ export default function WalletBalance() {
                     {transaction.type === "credit" ? "Added" : "Paid"}
                   </span>
 
-                  <time>{formatDate(transaction.createdAt)}</time>
+                  <time>{transaction.displayDate || formatDate(transaction.createdAt)}</time>
                 </div>
               ))}
           </div>
@@ -304,7 +325,7 @@ export default function WalletBalance() {
                       {isIncoming ? "Incoming" : "Outgoing"}
                     </span>
 
-                    <time>{formatDate(settlement.createdAt)}</time>
+                    <time>{settlement.displayDate || formatDate(settlement.createdAt)}</time>
                   </div>
                 );
               })}

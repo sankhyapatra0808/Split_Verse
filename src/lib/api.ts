@@ -92,6 +92,7 @@ export type TransactionItem = {
   displayStatus: string;
   type: string;
   createdAt: string;
+  displayDate?: string;
 };
 
 export type TransactionsResponse = {
@@ -163,6 +164,7 @@ export type WalletSummaryResponse = {
     amount: number;
     description: string | null;
     createdAt: string;
+    displayDate?: string;
   }[];
 
   pendingSettlements: {
@@ -170,11 +172,14 @@ export type WalletSummaryResponse = {
     amount: number;
     status: string;
     direction: "incoming" | "outgoing";
+    title?: string;
+    roomName?: string;
     fromName: string | null;
     fromEmail: string;
     toName: string | null;
     toEmail: string;
     createdAt: string;
+    displayDate?: string;
   }[];
 };
 
@@ -286,6 +291,8 @@ export type Friend = {
   name: string | null;
   email: string;
   photo_url: string | null;
+  friendship_created_at: string;
+  friendship_days: number;
 };
 
 export type FriendRequest = {
@@ -348,13 +355,42 @@ export async function syncCurrentUser() {
   });
 }
 
+export type EmailLoginOtpSession = {
+  sessionId: string;
+  email: string;
+  expiresAt: string;
+};
+
+export async function requestEmailLoginOtp() {
+  return apiFetch<EmailLoginOtpSession>("/api/auth/email-login-otp/request", {
+    method: "POST",
+  });
+}
+
+export async function verifyEmailLoginOtp(sessionId: string, otp: string) {
+  const response = await fetch(`${API_URL}/api/auth/email-login-otp/verify`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sessionId, otp }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || "Failed to verify login code");
+  }
+
+  return data as { verified: boolean };
+}
+
 export async function deleteAccount(confirmationText: string) {
   return apiFetch<{ message: string }>("/api/auth/account", {
     method: "DELETE",
     body: JSON.stringify({ confirmationText }),
   });
 }
-
 
 export async function createExpense(payload: CreateExpensePayload) {
   return apiFetch<{ message: string; expense: Expense }>("/api/expenses", {
@@ -441,6 +477,12 @@ export async function acceptFriendRequest(requestId: string) {
   );
 }
 
+export async function deleteFriend(friendId: string) {
+  return apiFetch<{ message: string }>(`/api/friends/${friendId}`, {
+    method: "DELETE",
+  });
+}
+
 // Transaction History Export function
 
 export async function getTransactions(params?: {
@@ -475,7 +517,7 @@ export async function getTransactions(params?: {
   const queryString = searchParams.toString();
 
   return apiFetch<TransactionsResponse>(
-    `/api/transactions${queryString ? `?${queryString}` : ""}`
+    `/api/transactions${queryString ? `?${queryString}` : ""}`,
   );
 }
 

@@ -19,10 +19,22 @@ async function getDbUserId(firebaseUid: string) {
     FROM users
     WHERE firebase_uid = $1;
     `,
-    [firebaseUid]
+    [firebaseUid],
   );
 
   return userResult.rows[0]?.id ?? null;
+}
+
+function toIsoString(value: unknown) {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return new Date(String(value)).toISOString();
 }
 
 function getTopUpMethod(description: string | null) {
@@ -57,7 +69,11 @@ router.get("/top-ups", verifyFirebaseToken, async (req: AuthRequest, res) => {
         id,
         amount::float,
         description,
-        created_at
+        created_at,
+        TO_CHAR(
+          created_at + INTERVAL '5 hours 30 minutes',
+          'DD-MM-YYYY'
+        ) AS display_date
       FROM wallet_transactions
       WHERE user_id = $1
       AND type = 'credit'
@@ -68,7 +84,7 @@ router.get("/top-ups", verifyFirebaseToken, async (req: AuthRequest, res) => {
       ORDER BY created_at DESC
       LIMIT 3;
       `,
-      [dbUserId]
+      [dbUserId],
     );
 
     return res.json({
@@ -76,7 +92,8 @@ router.get("/top-ups", verifyFirebaseToken, async (req: AuthRequest, res) => {
         id: topUp.id,
         amount: Number(topUp.amount),
         method: getTopUpMethod(topUp.description),
-        createdAt: topUp.created_at,
+        createdAt: toIsoString(topUp.created_at),
+        displayDate: topUp.display_date,
       })),
     });
   } catch (error) {
@@ -172,7 +189,7 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
         dbUserId,
         numericAmount,
         `Wallet top-up${paymentMethod ? ` via ${paymentMethod}` : ""}`,
-      ]
+      ],
     );
 
     const balanceResult = await db.query(
@@ -191,7 +208,7 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
       FROM wallet_transactions
       WHERE user_id = $1;
       `,
-      [dbUserId]
+      [dbUserId],
     );
 
     sendLiveUpdate([dbUserId], {
@@ -201,7 +218,10 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     return res.status(201).json({
       message: "Wallet topped up successfully",
-      transaction: transactionResult.rows[0],
+      transaction: {
+        ...transactionResult.rows[0],
+        created_at: toIsoString(transactionResult.rows[0].created_at),
+      },
       walletBalance: Number(balanceResult.rows[0].wallet_balance),
     });
   } catch (error) {
@@ -213,7 +233,6 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
   }
 });
 
-
 router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
   try {
     const firebaseUser = req.user;
@@ -224,22 +243,13 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
       });
     }
 
-    const userResult = await db.query(
-      `
-      SELECT id
-      FROM users
-      WHERE firebase_uid = $1;
-      `,
-      [firebaseUser.uid]
-    );
+    const dbUserId = await getDbUserId(firebaseUser.uid);
 
-    if (userResult.rows.length === 0) {
+    if (!dbUserId) {
       return res.status(404).json({
         message: "User not found in database",
       });
     }
-
-    const dbUserId = userResult.rows[0].id;
 
     const balanceResult = await db.query(
       `
@@ -257,27 +267,37 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
       FROM wallet_transactions
       WHERE user_id = $1;
       `,
-      [dbUserId]
+      [dbUserId],
     );
 
-    const settlementResult = await db.query(
+    const splitDuesSummaryResult = await db.query(
       `
       SELECT
         COALESCE((
-          SELECT SUM(amount)::float
-          FROM settlements
-          WHERE to_user_id = $1
-          AND status = 'pending'
+          SELECT SUM(item.amount)::float
+          FROM split_room_items item
+          INNER JOIN split_room_members member
+            ON member.id = item.assigned_member_id
+          INNER JOIN split_rooms room
+            ON room.id = item.room_id
+          WHERE room.owner_user_id = $1
+          AND member.user_id <> $1
+          AND item.collected_at IS NULL
         ), 0) AS pending_incoming,
 
         COALESCE((
-          SELECT SUM(amount)::float
-          FROM settlements
-          WHERE from_user_id = $1
-          AND status = 'pending'
+          SELECT SUM(item.amount)::float
+          FROM split_room_items item
+          INNER JOIN split_room_members member
+            ON member.id = item.assigned_member_id
+          INNER JOIN split_rooms room
+            ON room.id = item.room_id
+          WHERE member.user_id = $1
+          AND room.owner_user_id <> $1
+          AND item.collected_at IS NULL
         ), 0) AS pending_outgoing;
       `,
-      [dbUserId]
+      [dbUserId],
     );
 
     const recentWalletResult = await db.query(
@@ -287,45 +307,71 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
         type,
         amount::float,
         description,
-        created_at
+        created_at,
+        TO_CHAR(
+          created_at + INTERVAL '5 hours 30 minutes',
+          'DD-MM-YYYY'
+        ) AS display_date
       FROM wallet_transactions
       WHERE user_id = $1
       ORDER BY created_at DESC
-      LIMIT 3;
+      LIMIT 8;
       `,
-      [dbUserId]
+      [dbUserId],
     );
 
     const pendingSettlementResult = await db.query(
       `
       SELECT
-        settlements.id,
-        settlements.amount::float,
-        settlements.status,
-        settlements.created_at,
-        from_user.name AS from_name,
-        from_user.email AS from_email,
-        to_user.name AS to_name,
-        to_user.email AS to_email,
+        item.id,
+        item.amount::float,
+        item.created_at,
+        TO_CHAR(
+          item.created_at + INTERVAL '5 hours 30 minutes',
+          'DD-MM-YYYY'
+        ) AS display_date,
+        item.title,
+        room.name AS room_name,
+
+        owner_user.name AS owner_name,
+        owner_user.email AS owner_email,
+
+        assigned_user.name AS assigned_name,
+        assigned_user.email AS assigned_email,
+
         CASE
-          WHEN settlements.from_user_id = $1 THEN 'outgoing'
-          ELSE 'incoming'
+          WHEN room.owner_user_id = $1 THEN 'incoming'
+          ELSE 'outgoing'
         END AS direction
-      FROM settlements
-      JOIN users AS from_user ON from_user.id = settlements.from_user_id
-      JOIN users AS to_user ON to_user.id = settlements.to_user_id
+      FROM split_room_items item
+      INNER JOIN split_room_members member
+        ON member.id = item.assigned_member_id
+      INNER JOIN split_rooms room
+        ON room.id = item.room_id
+      INNER JOIN users AS owner_user
+        ON owner_user.id = room.owner_user_id
+      LEFT JOIN users AS assigned_user
+        ON assigned_user.id = member.user_id
       WHERE
-        (settlements.from_user_id = $1 OR settlements.to_user_id = $1)
-        AND settlements.status = 'pending'
-      ORDER BY settlements.created_at DESC
+        (
+          room.owner_user_id = $1
+          OR member.user_id = $1
+        )
+        AND room.owner_user_id <> COALESCE(member.user_id, room.owner_user_id)
+        AND item.collected_at IS NULL
+      ORDER BY item.created_at DESC
       LIMIT 8;
       `,
-      [dbUserId]
+      [dbUserId],
     );
 
     const availableBalance = Number(balanceResult.rows[0].available_balance);
-    const pendingIncoming = Number(settlementResult.rows[0].pending_incoming);
-    const pendingOutgoing = Number(settlementResult.rows[0].pending_outgoing);
+    const pendingIncoming = Number(
+      splitDuesSummaryResult.rows[0].pending_incoming,
+    );
+    const pendingOutgoing = Number(
+      splitDuesSummaryResult.rows[0].pending_outgoing,
+    );
 
     return res.json({
       summary: {
@@ -340,19 +386,27 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
         type: row.type,
         amount: Number(row.amount),
         description: row.description,
-        createdAt: row.created_at,
+        createdAt: toIsoString(row.created_at),
+        displayDate: row.display_date,
       })),
 
       pendingSettlements: pendingSettlementResult.rows.map((row) => ({
         id: row.id,
         amount: Number(row.amount),
-        status: row.status,
+        status: "pending",
         direction: row.direction,
-        fromName: row.from_name,
-        fromEmail: row.from_email,
-        toName: row.to_name,
-        toEmail: row.to_email,
-        createdAt: row.created_at,
+        title: row.title,
+        roomName: row.room_name,
+        fromName:
+          row.direction === "incoming" ? row.assigned_name : row.owner_name,
+        fromEmail:
+          row.direction === "incoming" ? row.assigned_email : row.owner_email,
+        toName:
+          row.direction === "incoming" ? row.owner_name : row.assigned_name,
+        toEmail:
+          row.direction === "incoming" ? row.owner_email : row.assigned_email,
+        createdAt: toIsoString(row.created_at),
+        displayDate: row.display_date,
       })),
     });
   } catch (error) {

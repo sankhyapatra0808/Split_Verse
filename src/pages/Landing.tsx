@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 import editorialImage from "../assets/SplitVerse_Landing.png";
-import iconimage from "../assets/Logo.png";
+import iconimage from "../assets/Logo-v2.png";
 import "../styles/Landing.css";
 
 const navLinks = [

@@ -310,12 +310,40 @@ input {
   transform: rotate(-45deg);
 }
 
+.otp-input-shell input {
+  letter-spacing: 0.26em;
+  font-weight: 800;
+}
+
+.otp-actions {
+  align-items: center;
+}
+
+.auth-text-button {
+  border: 0;
+  padding: 0;
+  color: var(--auth-primary);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.auth-status,
 .auth-error {
   margin: 0;
-  color: var(--auth-danger);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.45;
+}
+
+.auth-status {
+  color: #04784a;
+}
+
+.auth-error {
+  color: var(--auth-danger);
   animation: authError 220ms ease both;
 }
 
@@ -879,6 +907,7 @@ input {
 .auth-social-btn:disabled,
 .auth-back:disabled,
 .auth-icon-btn:disabled,
+.auth-text-button:disabled,
 .auth-input-shell input:disabled {
   cursor: not-allowed;
   opacity: 0.68;

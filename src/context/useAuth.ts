@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 import type { User } from "firebase/auth";
 
-import type { DbUser } from "../lib/api";
+import type { DbUser, EmailLoginOtpSession } from "../lib/api";
 
 export type SocialProvider = "google" | "facebook" | "twitter";
 
@@ -13,6 +13,18 @@ export type AuthContextValue = {
     email: string,
     password: string,
     remember?: boolean
+  ) => Promise<void>;
+  startEmailLoginOtp: (
+    email: string,
+    password: string,
+    remember?: boolean
+  ) => Promise<EmailLoginOtpSession>;
+  completeEmailLoginWithOtp: (
+    email: string,
+    password: string,
+    remember: boolean,
+    sessionId: string,
+    otp: string
   ) => Promise<void>;
   signupWithEmail: (
     name: string,

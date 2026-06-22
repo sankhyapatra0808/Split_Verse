@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Check, Mail, Send, UserPlus, UsersRound } from "lucide-react";
 
 import DashboardLayout from "./dashboard/DashboardLayout";
@@ -27,14 +28,33 @@ function getFriendInitials(name: string | null, email: string) {
   return `${first}${second}`.toUpperCase();
 }
 
+function getFriendLabel(name: string | null, email: string) {
+  return name || email.split("@")[0] || email;
+}
+
+function formatFriendshipAge(days: number) {
+  if (days <= 0) {
+    return "Friends today";
+  }
+
+  if (days === 1) {
+    return "Friends for 1 day";
+  }
+
+  return `Friends for ${days} days`;
+}
+
 export default function Friends() {
+  const [searchParams] = useSearchParams();
   const [summary, setSummary] = useState<FriendsSummary>(emptySummary);
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [acceptingId, setAcceptingId] = useState("");
+  const [friendSearch, setFriendSearch] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const optimisticIdRef = useRef(0);
 
   const loadFriends = async () => {
     const data = await getFriendsSummary();
@@ -87,36 +107,75 @@ export default function Friends() {
     };
   }, []);
 
+  function getOptimisticId(prefix: string) {
+    optimisticIdRef.current += 1;
+    return `optimistic-${prefix}-${Date.now()}-${optimisticIdRef.current}`;
+  }
+
   const handleSendRequest = async (event: FormEvent) => {
     event.preventDefault();
     setMessage("");
     setError("");
 
-    if (!email.trim()) {
+    const recipientEmail = email.trim().toLowerCase();
+
+    if (!recipientEmail) {
       setError("Enter your friend's email.");
       return;
     }
 
+    const previousSummary = summary;
+    const previousEmail = email;
+    const optimisticRequest = {
+      id: getOptimisticId("friend-request"),
+      requester_user_id: "optimistic",
+      requester_name: null,
+      requester_email: "",
+      recipient_email: recipientEmail,
+      status: "pending",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
     try {
       setSending(true);
+      setSummary((prev) => ({
+        ...prev,
+        sentRequests: [optimisticRequest, ...prev.sentRequests],
+      }));
+      setEmail("");
+      setMessage("Friend request added instantly. Sending invite...");
+
       await withTopProgress(async () => {
-        const response = await sendFriendRequest(email.trim());
+        const response = await sendFriendRequest(recipientEmail);
+        setSummary((prev) => ({
+          ...prev,
+          sentRequests: prev.sentRequests.map((request) =>
+            request.id === optimisticRequest.id ? response.request : request,
+          ),
+        }));
         await loadFriends();
-        setEmail("");
         setMessage(
           response.request.emailStatus === "sent"
             ? "Friend request email sent."
-            : response.request.emailStatus === "failed"
-              ? "Friend request created, but email could not be delivered. Check backend email settings."
-              : "Friend request created. Add RESEND_API_KEY in server/.env to send email.",
+            : response.request.emailStatus === "degraded"
+              ? "Friend request created, but email delivery is temporarily degraded."
+              : response.request.emailStatus === "failed"
+                ? "Friend request created, but email could not be delivered. Check backend email settings."
+                : "Friend request created. Add Brevo SMTP settings in server/.env to send email.",
         );
       });
     } catch (sendError) {
+      setSummary(previousSummary);
+      setEmail(previousEmail);
       setError(
-        sendError instanceof Error
-          ? sendError.message
-          : "Failed to send friend request",
+        `${
+          sendError instanceof Error
+            ? sendError.message
+            : "Failed to send friend request"
+        } The instant request was removed.`,
       );
+      setMessage("");
     } finally {
       setSending(false);
     }
@@ -126,34 +185,56 @@ export default function Friends() {
     setMessage("");
     setError("");
 
+    const previousSummary = summary;
+    const request = summary.receivedRequests.find(
+      (item) => item.id === requestId,
+    );
+
     try {
       setAcceptingId(requestId);
+      if (request) {
+        setSummary((prev) => ({
+          ...prev,
+          friends: [
+            {
+              id: request.requester_user_id,
+              name: request.requester_name,
+              email: request.requester_email,
+              photo_url: null,
+              friendship_created_at: new Date().toISOString(),
+              friendship_days: 0,
+            },
+            ...prev.friends.filter(
+              (friend) => friend.id !== request.requester_user_id,
+            ),
+          ],
+          receivedRequests: prev.receivedRequests.filter(
+            (item) => item.id !== requestId,
+          ),
+          sentRequests: prev.sentRequests.filter(
+            (item) => item.id !== requestId,
+          ),
+        }));
+      }
+      setMessage("Friend request accepted instantly. Confirming...");
 
       await withTopProgress(async () => {
         await acceptFriendRequest(requestId);
 
-        // Remove accepted request immediately from UI
-        setSummary((prev) => ({
-          ...prev,
-          receivedRequests: prev.receivedRequests.filter(
-            (request) => request.id !== requestId,
-          ),
-          sentRequests: prev.sentRequests.filter(
-            (request) => request.id !== requestId,
-          ),
-        }));
-
-        // Reload from backend so friend list updates too
         await loadFriends();
 
         setMessage("Friend request accepted.");
       });
     } catch (acceptError) {
+      setSummary(previousSummary);
       setError(
-        acceptError instanceof Error
-          ? acceptError.message
-          : "Failed to accept friend request",
+        `${
+          acceptError instanceof Error
+            ? acceptError.message
+            : "Failed to accept friend request"
+        } The request was restored to your inbox.`,
       );
+      setMessage("");
     } finally {
       setAcceptingId("");
     }
@@ -166,6 +247,30 @@ export default function Friends() {
   const pendingSentRequests = summary.sentRequests.filter(
     (request) => request.status === "pending",
   );
+  const trimmedFriendSearch = friendSearch.trim();
+  const normalizedFriendSearch = trimmedFriendSearch.toLowerCase();
+  const visibleFriends = normalizedFriendSearch
+    ? summary.friends.filter((friend) =>
+        `${friend.name ?? ""} ${friend.email}`
+          .toLowerCase()
+          .includes(normalizedFriendSearch),
+      )
+    : summary.friends;
+  const focusedRequestId = searchParams.get("requestId") ?? "";
+
+  useEffect(() => {
+    if (!focusedRequestId || loading) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(`friend-request-${focusedRequestId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [focusedRequestId, loading, pendingReceivedRequests.length]);
 
   return (
     <DashboardLayout eyebrow="Friends">
@@ -224,6 +329,16 @@ export default function Friends() {
             <UsersRound size={23} />
           </div>
 
+          <label className="friend-search-field">
+            <span>Search friends</span>
+            <input
+              type="search"
+              placeholder="Search by name or email"
+              value={friendSearch}
+              onChange={(event) => setFriendSearch(event.target.value)}
+            />
+          </label>
+
           <div className="friend-list">
             {loading && (
               <p className="dashboard-muted-text">
@@ -233,7 +348,14 @@ export default function Friends() {
             {!loading && summary.friends.length === 0 && (
               <p className="dashboard-muted-text">No friends yet.</p>
             )}
-            {summary.friends.map((friend) => (
+            {!loading &&
+              summary.friends.length > 0 &&
+              visibleFriends.length === 0 && (
+                <p className="dashboard-muted-text">
+                  You are not friends with {trimmedFriendSearch}.
+                </p>
+              )}
+            {visibleFriends.map((friend) => (
               <div className="friend-row" key={friend.id}>
                 {friend.photo_url ? (
                   <img src={friend.photo_url} alt="" />
@@ -241,8 +363,9 @@ export default function Friends() {
                   <span>{getFriendInitials(friend.name, friend.email)}</span>
                 )}
                 <div>
-                  <strong>{friend.name || friend.email.split("@")[0]}</strong>
+                  <strong>{getFriendLabel(friend.name, friend.email)}</strong>
                   <small>{friend.email}</small>
+                  <em>{formatFriendshipAge(friend.friendship_days)}</em>
                 </div>
               </div>
             ))}
@@ -265,7 +388,15 @@ export default function Friends() {
               </p>
             )}
             {pendingReceivedRequests.map((request) => (
-              <div className="friend-request-row" key={request.id}>
+              <div
+                className={
+                  request.id === focusedRequestId
+                    ? "friend-request-row highlighted"
+                    : "friend-request-row"
+                }
+                id={`friend-request-${request.id}`}
+                key={request.id}
+              >
                 <div>
                   <strong>
                     {request.requester_name || request.requester_email}

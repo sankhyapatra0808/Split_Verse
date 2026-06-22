@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 import {
   AppSettingsContext,
@@ -60,7 +60,7 @@ function getCurrency(currencyCode: CurrencyCode) {
 }
 
 export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
-  const storedSettings = useMemo(loadStoredSettings, []);
+  const storedSettings = useMemo(() => loadStoredSettings(), []);
   const [avatarId, setAvatarIdState] = useState<AvatarId>(
     isAvatarId(storedSettings.avatarId) ? storedSettings.avatarId : "current"
   );
@@ -86,7 +86,7 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
     storedSettings.converterAmount ?? 1000
   );
 
-  const persist = (updates: StoredSettings) => {
+  const persist = useCallback((updates: StoredSettings) => {
     saveSettings({
       avatarId,
       compactMode,
@@ -98,7 +98,16 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
       converterAmount,
       ...updates,
     });
-  };
+  }, [
+    appCurrency,
+    avatarId,
+    compactMode,
+    converterAmount,
+    converterFrom,
+    converterTo,
+    privacyMode,
+    settlementReminders,
+  ]);
 
   const value = useMemo<AppSettingsValue>(
     () => ({
@@ -178,6 +187,7 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
       converterFrom,
       converterTo,
       privacyMode,
+      persist,
       settlementReminders,
     ]
   );

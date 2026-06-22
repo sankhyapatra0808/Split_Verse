@@ -11,17 +11,24 @@ import {
   PlusCircle,
   Send,
   Settings,
+  UserPlus,
   UserCircle,
   UsersRound,
   WalletCards,
   X,
 } from "lucide-react";
 
-import logo from "../../assets/Logo.png";
+import logo from "../../assets/Logo-v2.png";
 import "../../styles/Dashboard.css";
 import { useAuth } from "../../context/useAuth";
 import { useAppSettings } from "../../context/useAppSettings";
-import { API_URL, getPendingDues, type PendingDue } from "../../lib/api";
+import {
+  API_URL,
+  getFriendsSummary,
+  getPendingDues,
+  type FriendRequest,
+  type PendingDue,
+} from "../../lib/api";
 import LoadingSkeleton from "../../components/LoadingSkeleton";
 import { withTopProgress } from "../../utils/topProgress";
 
@@ -81,15 +88,20 @@ export default function DashboardLayout({
   const { avatarId, compactMode, formatCurrency } = useAppSettings();
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
+  const [pendingFriendRequests, setPendingFriendRequests] = useState<
+    FriendRequest[]
+  >([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState("");
   const userId = user?.uid;
   const username = getUsername(user?.displayName, user?.email);
   const initials = getUserInitials(user?.displayName, user?.email);
+  const notificationCount = pendingDues.length + pendingFriendRequests.length;
 
-  const loadPendingDueNotifications = useCallback(async () => {
+  const loadProfileNotifications = useCallback(async () => {
     if (!userId) {
       setPendingDues([]);
+      setPendingFriendRequests([]);
       setNotificationsError("");
       setNotificationsLoading(false);
       return;
@@ -98,33 +110,50 @@ export default function DashboardLayout({
     try {
       setNotificationsLoading(true);
       setNotificationsError("");
-      const data = await getPendingDues();
-      setPendingDues(data.dues);
+      const [duesData, friendsData] = await Promise.all([
+        getPendingDues(),
+        getFriendsSummary(),
+      ]);
+      setPendingDues(duesData.dues);
+      setPendingFriendRequests(
+        friendsData.receivedRequests.filter(
+          (request) => request.status === "pending",
+        ),
+      );
     } catch (error) {
       setNotificationsError(
         error instanceof Error
           ? error.message
-          : "Failed to load pending split-room dues",
+          : "Failed to load notifications",
       );
       setPendingDues([]);
+      setPendingFriendRequests([]);
     } finally {
       setNotificationsLoading(false);
     }
   }, [userId]);
 
   useEffect(() => {
-    void loadPendingDueNotifications();
-  }, [loadPendingDueNotifications]);
+    const timer = window.setTimeout(() => {
+      void loadProfileNotifications();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadProfileNotifications]);
 
   useEffect(() => {
     if (profilePanelOpen) {
-      void loadPendingDueNotifications();
+      const timer = window.setTimeout(() => {
+        void loadProfileNotifications();
+      }, 0);
+
+      return () => window.clearTimeout(timer);
     }
-  }, [loadPendingDueNotifications, profilePanelOpen]);
+  }, [loadProfileNotifications, profilePanelOpen]);
 
   useEffect(() => {
     const handlePendingDuesUpdated = () => {
-      void loadPendingDueNotifications();
+      void loadProfileNotifications();
     };
 
     window.addEventListener(
@@ -138,19 +167,20 @@ export default function DashboardLayout({
         handlePendingDuesUpdated,
       );
     };
-  }, [loadPendingDueNotifications]);
+  }, [loadProfileNotifications]);
 
   useEffect(() => {
     if (!user) {
       return;
     }
 
+    const liveUpdatesUser = user;
     const abortController = new AbortController();
     let retryTimer: number | undefined;
 
     async function connectLiveUpdates() {
       try {
-        const token = await user.getIdToken();
+        const token = await liveUpdatesUser.getIdToken();
         const response = await fetch(`${API_URL}/api/live/events`, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -195,7 +225,7 @@ export default function DashboardLayout({
               dataLine.replace("data:", "").trim(),
             ) as LiveUpdatePayload;
 
-            void loadPendingDueNotifications();
+            void loadProfileNotifications();
             window.dispatchEvent(
               new CustomEvent<LiveUpdatePayload>("splitverse:data-updated", {
                 detail: payload,
@@ -220,7 +250,7 @@ export default function DashboardLayout({
         window.clearTimeout(retryTimer);
       }
     };
-  }, [loadPendingDueNotifications, user, userId]);
+  }, [loadProfileNotifications, user]);
 
   const handleLogout = async () => {
     await withTopProgress(() => logout());
@@ -230,6 +260,11 @@ export default function DashboardLayout({
   const handlePendingDueClick = (roomId: string) => {
     setProfilePanelOpen(false);
     navigate(`/split-rooms?roomId=${encodeURIComponent(roomId)}`);
+  };
+
+  const handleFriendRequestClick = (requestId: string) => {
+    setProfilePanelOpen(false);
+    navigate(`/friends?requestId=${encodeURIComponent(requestId)}`);
   };
 
   const renderAvatar = (size: "button" | "panel" = "button") => {
@@ -282,7 +317,7 @@ export default function DashboardLayout({
         </nav>
 
         <div className="dashboard-sidebar-actions">
-          <NavLink className="sidebar-action secondary" to="/transactions">
+          <NavLink className="sidebar-action secondary" to="/split-rooms">
             <Send size={18} />
             <span>Send Money</span>
           </NavLink>
@@ -308,9 +343,9 @@ export default function DashboardLayout({
               onClick={() => setProfilePanelOpen(true)}
             >
               {renderAvatar()}
-              {pendingDues.length > 0 && (
+              {notificationCount > 0 && (
                 <span className="profile-notification-badge">
-                  {pendingDues.length}
+                  {notificationCount}
                 </span>
               )}
             </button>
@@ -356,7 +391,7 @@ export default function DashboardLayout({
         <section className="profile-panel-section">
           <div className="profile-panel-title">
             <Bell size={18} />
-            <span>Pending dues</span>
+            <span>Notifications</span>
           </div>
           {notificationsLoading ? (
             <p className="dashboard-muted-text">
@@ -364,12 +399,26 @@ export default function DashboardLayout({
             </p>
           ) : notificationsError ? (
             <p className="dashboard-muted-text">{notificationsError}</p>
-          ) : pendingDues.length === 0 ? (
+          ) : notificationCount === 0 ? (
             <p className="dashboard-muted-text">
-              You have no pending split-room dues.
+              You have no pending notifications.
             </p>
           ) : (
             <div className="profile-notification-list">
+              {pendingFriendRequests.map((request) => (
+                <button
+                  type="button"
+                  key={request.id}
+                  onClick={() => handleFriendRequestClick(request.id)}
+                >
+                  <strong className="profile-notification-heading">
+                    <UserPlus size={16} />
+                    Friend request from{" "}
+                    {request.requester_name || request.requester_email}
+                  </strong>
+                  <span>{request.requester_email} wants to add you.</span>
+                </button>
+              ))}
               {pendingDues.map((due) => (
                 <button
                   type="button"

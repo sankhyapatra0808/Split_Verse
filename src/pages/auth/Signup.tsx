@@ -14,7 +14,7 @@ import {
   WalletCards,
 } from "lucide-react";
 
-import logo from "../../assets/Logo.png";
+import logo from "../../assets/Logo-v2.png";
 import "../../styles/AuthPages.css";
 import { FacebookIcon, GoogleIcon } from "./SocialIcons";
 import { useAuth, type SocialProvider } from "../../context/useAuth";

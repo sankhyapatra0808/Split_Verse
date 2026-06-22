@@ -90,7 +90,11 @@ export default function WalletTopUp() {
   }
 
   useEffect(() => {
-    void loadRecentTopUps();
+    const timer = window.setTimeout(() => {
+      void loadRecentTopUps();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -124,6 +128,8 @@ export default function WalletTopUp() {
           amount: topUpAmount,
           method: selectedMethod,
         });
+
+        window.dispatchEvent(new Event("splitverse:data-updated"));
 
         setMessage(
           `Wallet topped up successfully. New balance: ${formatCurrency(

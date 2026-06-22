@@ -27,7 +27,9 @@ import {
 
 import {
   getCurrentDbUser,
+  requestEmailLoginOtp,
   syncCurrentUser,
+  verifyEmailLoginOtp,
   type DbUser,
 } from "../lib/api";
 import {
@@ -124,6 +126,54 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       async loginWithEmail(email, password, remember = true) {
         assertFirebaseConfigured();
+
+        await setPersistence(
+          auth,
+          remember ? browserLocalPersistence : browserSessionPersistence
+        );
+
+        await signInWithEmailAndPassword(auth, email, password);
+        setRememberedSession(remember);
+
+        const response = await syncCurrentUser();
+        setDbUser(response.user);
+      },
+
+      async startEmailLoginOtp(email, password, remember = true) {
+        assertFirebaseConfigured();
+
+        await setPersistence(
+          auth,
+          remember ? browserLocalPersistence : browserSessionPersistence
+        );
+
+        let signedInForOtp = false;
+
+        try {
+          await signInWithEmailAndPassword(auth, email, password);
+          signedInForOtp = true;
+
+          return await requestEmailLoginOtp();
+        } finally {
+          if (signedInForOtp) {
+            window.localStorage.removeItem(rememberedSessionExpiryKey);
+            setUser(null);
+            setDbUser(null);
+            await signOut(auth);
+          }
+        }
+      },
+
+      async completeEmailLoginWithOtp(
+        email,
+        password,
+        remember,
+        sessionId,
+        otp,
+      ) {
+        assertFirebaseConfigured();
+
+        await verifyEmailLoginOtp(sessionId, otp);
 
         await setPersistence(
           auth,

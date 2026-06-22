@@ -13,39 +13,39 @@ import { useAppSettings } from "../context/useAppSettings";
 import { withTopProgress } from "../utils/topProgress";
 
 function formatTransactionDate(dateValue: string) {
-  const date = new Date(dateValue);
+  if (!dateValue) {
+    return "Unknown";
+  }
+
+  const rawValue = String(dateValue);
+
+  // If the backend sends a date-only value, display that exact calendar date.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+    const [year, month, day] = rawValue.split("-");
+    return `${day}-${month}-${year}`;
+  }
+
+  const normalizedValue = rawValue.replace(" ", "T");
+  const hasTimezone = /z$|[+-]\d{2}:?\d{2}$/i.test(normalizedValue);
+  const date = new Date(hasTimezone ? normalizedValue : `${normalizedValue}Z`);
 
   if (Number.isNaN(date.getTime())) {
     return "Unknown";
   }
 
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-
-  const isSameDate = (first: Date, second: Date) =>
-    first.getFullYear() === second.getFullYear() &&
-    first.getMonth() === second.getMonth() &&
-    first.getDate() === second.getDate();
-
-  if (isSameDate(date, today)) {
-    return "Today";
-  }
-
-  if (isSameDate(date, yesterday)) {
-    return "Yesterday";
-  }
-
-  return date.toLocaleDateString("en-IN", {
+  return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
-    month: "short",
+    month: "2-digit",
     year: "numeric",
-  });
+    timeZone: "Asia/Kolkata",
+  })
+    .format(date)
+    .replaceAll("/", "-");
 }
 
 function formatSignedCurrency(
   amount: number,
-  formatCurrency: (amount: number) => string
+  formatCurrency: (amount: number) => string,
 ) {
   const prefix = amount >= 0 ? "+" : "-";
   return `${prefix}${formatCurrency(Math.abs(amount))}`;
@@ -78,7 +78,9 @@ export default function TransactionHistory() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportMode, setExportMode] = useState<"count" | "year">("count");
   const [exportCount, setExportCount] = useState("100");
-  const [exportYear, setExportYear] = useState(String(new Date().getFullYear()));
+  const [exportYear, setExportYear] = useState(
+    String(new Date().getFullYear()),
+  );
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const [transactionTotal, setTransactionTotal] = useState(0);
@@ -113,7 +115,11 @@ export default function TransactionHistory() {
   }
 
   useEffect(() => {
-    void loadTransactions();
+    const timer = window.setTimeout(() => {
+      void loadTransactions();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
@@ -132,7 +138,7 @@ export default function TransactionHistory() {
 
   const visibleTransactions = useMemo(
     () => transactions.slice(0, visibleTransactionLimit),
-    [transactions]
+    [transactions],
   );
   const currentYear = new Date().getFullYear();
   const accountYear = useMemo(() => {
@@ -146,9 +152,9 @@ export default function TransactionHistory() {
     () =>
       Array.from(
         { length: Math.max(currentYear - accountYear + 1, 1) },
-        (_, index) => currentYear - index
+        (_, index) => currentYear - index,
       ),
-    [accountYear, currentYear]
+    [accountYear, currentYear],
   );
 
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
@@ -206,14 +212,15 @@ export default function TransactionHistory() {
           String(transaction.amount),
           transaction.displayStatus,
           transaction.type,
-          transaction.createdAt,
+          transaction.displayDate ||
+            formatTransactionDate(transaction.createdAt),
         ]);
 
         const csvContent = [header, ...rows]
           .map((row) =>
             row
               .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
-              .join(",")
+              .join(","),
           )
           .join("\n");
 
@@ -360,7 +367,10 @@ export default function TransactionHistory() {
                   <span className={`status-pill ${transaction.status}`}>
                     {transaction.displayStatus}
                   </span>
-                  <time>{formatTransactionDate(transaction.createdAt)}</time>
+                  <time>
+                    {transaction.displayDate ||
+                      formatTransactionDate(transaction.createdAt)}
+                  </time>
                 </div>
               ))}
           </div>

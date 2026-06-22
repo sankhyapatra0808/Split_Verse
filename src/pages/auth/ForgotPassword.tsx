@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Mail } from "lucide-react";
 
-import logo from "../../assets/Logo.png";
+import logo from "../../assets/Logo-v2.png";
 import "../../styles/AuthPages.css";
 import { useAuth } from "../../context/useAuth";
 import { getFirebaseErrorMessage } from "../../utils/firebaseError";

@@ -8,6 +8,7 @@ import { sendLiveUpdate } from "../liveEvents.js";
 
 const router = express.Router();
 const maxSplitRoomsPerDay = 10;
+const splitRoomMemberInsertChunkSize = 500;
 let splitRoomTablesReady: Promise<void> | null = null;
 
 type DbUserRow = {
@@ -38,6 +39,29 @@ type RoomItemRow = {
 };
 
 type RoomPaymentStatus = "no_one_paid" | "all_paid" | "complete";
+
+type Queryable = {
+  query: typeof db.query;
+};
+
+type SplitRoomMemberInsertRow = {
+  roomId: string;
+  userId: string | null;
+  displayName: string | null;
+  email: string | null;
+  role: "owner" | "member";
+  status: "active" | "invited";
+};
+
+function chunkArray<T>(values: T[], chunkSize: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+
+  return chunks;
+}
 
 async function getRoomUserIds(roomId: string) {
   const result = await db.query<{ user_id: string | null }>(
@@ -149,6 +173,66 @@ function memberToIdentity(member: string) {
     displayName: isEmail ? member.split("@")[0] : member,
     email: isEmail ? member.toLowerCase() : null,
   };
+}
+
+async function findUsersByEmail(client: Queryable, emails: string[]) {
+  if (emails.length === 0) {
+    return new Map<string, DbUserRow>();
+  }
+
+  const result = await client.query<DbUserRow>(
+    `
+    SELECT id, name, email
+    FROM users
+    WHERE LOWER(email) = ANY($1::text[]);
+    `,
+    [emails],
+  );
+
+  return new Map(
+    result.rows.map((user) => [user.email.toLowerCase(), user] as const),
+  );
+}
+
+async function insertSplitRoomMembers(
+  client: Queryable,
+  rows: SplitRoomMemberInsertRow[],
+) {
+  for (const chunk of chunkArray(rows, splitRoomMemberInsertChunkSize)) {
+    const values: Array<string | null> = [];
+    const placeholders = chunk
+      .map((row, rowIndex) => {
+        const paramIndex = rowIndex * 6;
+
+        values.push(
+          row.roomId,
+          row.userId,
+          row.displayName,
+          row.email,
+          row.role,
+          row.status,
+        );
+
+        return `($${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, $${paramIndex + 5}, $${paramIndex + 6})`;
+      })
+      .join(",\n");
+
+    await client.query(
+      `
+      INSERT INTO split_room_members (
+        room_id,
+        user_id,
+        display_name,
+        email,
+        role,
+        status
+      )
+      VALUES ${placeholders}
+      ON CONFLICT DO NOTHING;
+      `,
+      values,
+    );
+  }
 }
 
 function serializeRoom(
@@ -435,62 +519,43 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     const room = roomResult.rows[0];
 
-    await client.query(
-      `
-      INSERT INTO split_room_members (
-        room_id,
-        user_id,
-        display_name,
-        email,
-        role,
-        status
-      )
-      VALUES ($1, $2, $3, $4, 'owner', 'active');
-      `,
-      [room.id, dbUser.id, dbUser.name || "Me", dbUser.email],
-    );
+    const memberIdentities = members
+      .map(memberToIdentity)
+      .filter((identity) => identity.email !== dbUser.email.toLowerCase());
+    const memberEmails = [
+      ...new Set(
+        memberIdentities
+          .map((identity) => identity.email)
+          .filter((email): email is string => Boolean(email)),
+      ),
+    ];
+    const usersByEmail = await findUsersByEmail(client, memberEmails);
+    const memberRows: SplitRoomMemberInsertRow[] = [
+      {
+        roomId: room.id,
+        userId: dbUser.id,
+        displayName: dbUser.name || "Me",
+        email: dbUser.email,
+        role: "owner",
+        status: "active",
+      },
+      ...memberIdentities.map((identity) => {
+        const matchedUser = identity.email
+          ? usersByEmail.get(identity.email)
+          : null;
 
-    for (const member of members) {
-      const identity = memberToIdentity(member);
+        return {
+          roomId: room.id,
+          userId: matchedUser?.id ?? null,
+          displayName: matchedUser?.name || identity.displayName,
+          email: matchedUser?.email || identity.email,
+          role: "member" as const,
+          status: matchedUser ? ("active" as const) : ("invited" as const),
+        };
+      }),
+    ];
 
-      if (identity.email === dbUser.email.toLowerCase()) {
-        continue;
-      }
-
-      const existingUser = identity.email
-        ? await client.query<DbUserRow>(
-            `
-            SELECT id, name, email
-            FROM users
-            WHERE LOWER(email) = LOWER($1);
-            `,
-            [identity.email],
-          )
-        : null;
-      const matchedUser = existingUser?.rows[0];
-
-      await client.query(
-        `
-        INSERT INTO split_room_members (
-          room_id,
-          user_id,
-          display_name,
-          email,
-          role,
-          status
-        )
-        VALUES ($1, $2, $3, $4, 'member', $5)
-        ON CONFLICT DO NOTHING;
-        `,
-        [
-          room.id,
-          matchedUser?.id ?? null,
-          matchedUser?.name || identity.displayName,
-          matchedUser?.email || identity.email,
-          matchedUser ? "active" : "invited",
-        ],
-      );
-    }
+    await insertSplitRoomMembers(client, memberRows);
 
     await client.query("COMMIT");
 

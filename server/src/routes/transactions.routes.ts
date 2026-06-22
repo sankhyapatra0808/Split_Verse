@@ -29,8 +29,12 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       });
     }
 
-    const search = String(req.query.search || "").trim().toLowerCase();
-    const status = String(req.query.status || "all").trim().toLowerCase();
+    const search = String(req.query.search || "")
+      .trim()
+      .toLowerCase();
+    const status = String(req.query.status || "all")
+      .trim()
+      .toLowerCase();
     const exportMode = String(req.query.exportMode || "count")
       .trim()
       .toLowerCase();
@@ -40,7 +44,7 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       : getPositiveInt(
           req.query.limit,
           visibleTransactionLimit,
-          maxExportTransactionLimit
+          maxExportTransactionLimit,
         );
 
     const userResult = await db.query(
@@ -49,7 +53,7 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       FROM users
       WHERE firebase_uid = $1;
       `,
-      [firebaseUser.uid]
+      [firebaseUser.uid],
     );
 
     if (userResult.rows.length === 0) {
@@ -70,9 +74,9 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       ? Math.min(
           Math.max(
             Number.isInteger(requestedYear) ? requestedYear : currentYear,
-            accountYear
+            accountYear,
           ),
-          currentYear
+          currentYear,
         )
       : null;
 
@@ -179,7 +183,7 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           AND ($3 = 'all' OR status = $3)
           AND (
             $4::int IS NULL
-            OR EXTRACT(YEAR FROM created_at)::int = $4::int
+            OR EXTRACT(YEAR FROM (created_at + INTERVAL '5 hours 30 minutes'))::int = $4::int
           )
       ),
 
@@ -198,13 +202,20 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
       SELECT
         selected_transactions.*,
+        CASE
+          WHEN selected_transactions.created_at IS NULL THEN NULL
+          ELSE TO_CHAR(
+            selected_transactions.created_at + INTERVAL '5 hours 30 minutes',
+            'DD-MM-YYYY'
+          )
+        END AS display_date,
         transaction_summary.total_count,
         transaction_summary.all_transaction_count
       FROM transaction_summary
       LEFT JOIN selected_transactions ON true
       ORDER BY selected_transactions.created_at DESC NULLS LAST;
       `,
-      [dbUserId, search, status, selectedYear, limit]
+      [dbUserId, search, status, selectedYear, limit],
     );
 
     const transactions = result.rows
@@ -217,12 +228,16 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
         status: row.status,
         displayStatus: row.display_status,
         type: row.type,
-        createdAt: row.created_at,
+        createdAt:
+          row.created_at instanceof Date
+            ? row.created_at.toISOString()
+            : row.created_at,
+        displayDate: row.display_date,
       }));
 
     const netMovement = transactions.reduce(
       (sum, transaction) => sum + transaction.amount,
-      0
+      0,
     );
 
     return res.json({

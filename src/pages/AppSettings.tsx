@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -9,17 +9,39 @@ import {
   SlidersHorizontal,
   Trash2,
   UserRound,
+  UsersRound,
   X,
 } from "lucide-react";
 
 import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import { useAppSettings, type CurrencyCode } from "../context/useAppSettings";
 import { useAuth } from "../context/useAuth";
-import { deleteAccount } from "../lib/api";
+import {
+  deleteAccount,
+  deleteFriend,
+  getFriendsSummary,
+  type Friend,
+} from "../lib/api";
 import { withTopProgress } from "../utils/topProgress";
 import DashboardLayout from "./dashboard/DashboardLayout";
 
 const deleteAccountConfirmationText = "/DeleteAccount";
+
+function getFriendLabel(friend: Friend) {
+  return friend.name || friend.email.split("@")[0] || friend.email;
+}
+
+function formatFriendshipAge(days: number) {
+  if (days <= 0) {
+    return "Friends today";
+  }
+
+  if (days === 1) {
+    return "Friends for 1 day";
+  }
+
+  return `Friends for ${days} days`;
+}
 
 export default function AppSettings() {
   const navigate = useNavigate();
@@ -49,6 +71,12 @@ export default function AppSettings() {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(true);
+  const [friendSearch, setFriendSearch] = useState("");
+  const [deletingFriendId, setDeletingFriendId] = useState("");
+  const [friendDeleteMessage, setFriendDeleteMessage] = useState("");
+  const [friendDeleteError, setFriendDeleteError] = useState("");
 
   const convertedAmount = convertCurrency(
     converterAmount,
@@ -68,6 +96,79 @@ export default function AppSettings() {
     }),
   );
   const canDeleteAccount = deleteConfirmation === deleteAccountConfirmationText;
+  const trimmedFriendSearch = friendSearch.trim();
+  const visibleFriends = useMemo(() => {
+    const normalizedSearch = trimmedFriendSearch.toLowerCase();
+
+    if (!normalizedSearch) {
+      return friends;
+    }
+
+    return friends.filter((friend) =>
+      `${friend.name ?? ""} ${friend.email}`
+        .toLowerCase()
+        .includes(normalizedSearch),
+    );
+  }, [friends, trimmedFriendSearch]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadFriends() {
+      try {
+        setFriendsLoading(true);
+        setFriendDeleteError("");
+        const data = await getFriendsSummary();
+
+        if (active) {
+          setFriends(data.friends);
+        }
+      } catch (error) {
+        if (active) {
+          setFriendDeleteError(
+            error instanceof Error ? error.message : "Could not load friends.",
+          );
+        }
+      } finally {
+        if (active) {
+          setFriendsLoading(false);
+        }
+      }
+    }
+
+    void loadFriends();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleDeleteFriend(friend: Friend) {
+    const previousFriends = friends;
+
+    setDeletingFriendId(friend.id);
+    setFriendDeleteMessage("");
+    setFriendDeleteError("");
+    setFriends((prev) => prev.filter((item) => item.id !== friend.id));
+
+    try {
+      await withTopProgress(async () => {
+        await deleteFriend(friend.id);
+      });
+
+      window.dispatchEvent(new Event("splitverse:data-updated"));
+      setFriendDeleteMessage(`${getFriendLabel(friend)} was removed.`);
+    } catch (error) {
+      setFriends(previousFriends);
+      setFriendDeleteError(
+        `${
+          error instanceof Error ? error.message : "Could not delete friend."
+        } ${getFriendLabel(friend)} was restored to your list.`,
+      );
+    } finally {
+      setDeletingFriendId("");
+    }
+  }
 
   async function handleDeleteAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -250,6 +351,70 @@ export default function AppSettings() {
               />
             </label>
           </div>
+        </article>
+
+        <article className="bento-card settings-card friend-delete-card">
+          <div className="bento-card-head">
+            <div>
+              <span>Friend control</span>
+              <h2>Delete a friend</h2>
+            </div>
+            <UsersRound size={22} />
+          </div>
+
+          <label className="settings-field friend-search-field">
+            <span>Search friend to delete</span>
+            <input
+              type="search"
+              placeholder="Search by name or email"
+              value={friendSearch}
+              onChange={(event) => setFriendSearch(event.target.value)}
+            />
+          </label>
+
+          <div className="settings-friend-delete-list">
+            {friendsLoading && (
+              <p className="dashboard-muted-text">Loading friends...</p>
+            )}
+            {!friendsLoading && friends.length === 0 && (
+              <p className="dashboard-muted-text">No friends to delete.</p>
+            )}
+            {!friendsLoading &&
+              friends.length > 0 &&
+              visibleFriends.length === 0 && (
+                <p className="dashboard-muted-text">
+                  You are not friends with {trimmedFriendSearch}.
+                </p>
+              )}
+            {visibleFriends.map((friend) => (
+              <div className="settings-friend-delete-row" key={friend.id}>
+                <span>
+                  <strong>{getFriendLabel(friend)}</strong>
+                </span>
+                <button
+                  className="dashboard-danger-button"
+                  type="button"
+                  onClick={() => handleDeleteFriend(friend)}
+                  disabled={deletingFriendId === friend.id}
+                >
+                  <Trash2 size={15} />
+                  {deletingFriendId === friend.id ? "Deleting" : "Delete"}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {(friendDeleteMessage || friendDeleteError) && (
+            <p
+              className={
+                friendDeleteError
+                  ? "settings-inline-message error"
+                  : "settings-inline-message"
+              }
+            >
+              {friendDeleteError || friendDeleteMessage}
+            </p>
+          )}
         </article>
 
         <article className="bento-card settings-card danger-zone-card">

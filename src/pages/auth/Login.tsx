@@ -13,10 +13,11 @@ import {
   WalletCards,
 } from "lucide-react";
 
-import logo from "../../assets/Logo.png";
+import logo from "../../assets/Logo-v2.png";
 import "../../styles/AuthPages.css";
 import { FacebookIcon, GoogleIcon } from "./SocialIcons";
 import { useAuth, type SocialProvider } from "../../context/useAuth";
+import type { EmailLoginOtpSession } from "../../lib/api";
 import { getFirebaseErrorMessage } from "../../utils/firebaseError";
 import { withTopProgress } from "../../utils/topProgress";
 
@@ -52,23 +53,49 @@ function clearLoginAttempts(email: string) {
   window.localStorage.removeItem(getLoginAttemptKey(email));
 }
 
+function isFirebaseAuthError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    String((error as { code?: unknown }).code).startsWith("auth/")
+  );
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { loginWithEmail, loginWithProvider } = useAuth();
+  const {
+    completeEmailLoginWithOtp,
+    loginWithProvider,
+    startEmailLoginOtp,
+  } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSession, setOtpSession] = useState<EmailLoginOtpSession | null>(
+    null,
+  );
   const [showPass, setShowPass] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
   const from =
     (location.state as LocationState | null)?.from?.pathname || "/dashboard";
+  const otpActive = Boolean(otpSession);
+
+  const resetOtpStep = () => {
+    setOtp("");
+    setOtpSession(null);
+    setStatus("");
+  };
 
   const handleSocialLogin = async (provider: SocialProvider) => {
     setError("");
+    setStatus("");
 
     try {
       setLoading(true);
@@ -84,8 +111,39 @@ export default function Login() {
   const handleLogin = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
+    setStatus("");
 
     const trimmedEmail = email.trim();
+
+    if (otpSession) {
+      const sanitizedOtp = otp.replace(/\D/g, "");
+
+      if (sanitizedOtp.length !== 6) {
+        setError("Enter the 6-digit login code.");
+        return;
+      }
+
+      try {
+        setLoading(true);
+        await withTopProgress(() =>
+          completeEmailLoginWithOtp(
+            trimmedEmail,
+            password,
+            remember,
+            otpSession.sessionId,
+            sanitizedOtp,
+          ),
+        );
+        clearLoginAttempts(trimmedEmail);
+        navigate(from, { replace: true });
+      } catch (loginError) {
+        setError(getFirebaseErrorMessage(loginError));
+      } finally {
+        setLoading(false);
+      }
+
+      return;
+    }
 
     if (!trimmedEmail || !password) {
       setError("Please enter email and password.");
@@ -99,12 +157,20 @@ export default function Login() {
 
     try {
       setLoading(true);
-      await withTopProgress(() =>
-        loginWithEmail(trimmedEmail, password, remember),
+      const session = await withTopProgress(() =>
+        startEmailLoginOtp(trimmedEmail, password, remember),
       );
-      clearLoginAttempts(trimmedEmail);
-      navigate(from, { replace: true });
+      setOtpSession(session);
+      setOtp("");
+      setStatus(
+        `We sent a 6-digit login code to ${session.email}. It expires in 10 minutes.`,
+      );
     } catch (loginError) {
+      if (!isFirebaseAuthError(loginError)) {
+        setError(getFirebaseErrorMessage(loginError));
+        return;
+      }
+
       const attempts = recordFailedLoginAttempt(trimmedEmail);
       const attemptsLeft = Math.max(0, maxDailyLoginAttempts - attempts);
 
@@ -115,6 +181,25 @@ export default function Login() {
             } left today.`
           : "Too many login attempts today. Please try again tomorrow.",
       );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setError("");
+    setStatus("");
+
+    try {
+      setLoading(true);
+      const session = await withTopProgress(() =>
+        startEmailLoginOtp(email.trim(), password, remember),
+      );
+      setOtpSession(session);
+      setOtp("");
+      setStatus(`We sent a new 6-digit login code to ${session.email}.`);
+    } catch (resendError) {
+      setError(getFirebaseErrorMessage(resendError));
     } finally {
       setLoading(false);
     }
@@ -147,7 +232,11 @@ export default function Login() {
           <div className="auth-heading">
             <span className="auth-kicker">Secure access</span>
             <h1 id="login-title">Log in to SplitVerse.</h1>
-            <p>Review room balances, pending dues, and recent settlements.</p>
+            <p>
+              {otpActive
+                ? "Enter the code from your email to finish signing in."
+                : "Review room balances, pending dues, and recent settlements."}
+            </p>
           </div>
 
           <form onSubmit={handleLogin} className="auth-form">
@@ -159,9 +248,12 @@ export default function Login() {
                   type="email"
                   placeholder="you@example.com"
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  onChange={(event) => {
+                    setEmail(event.target.value);
+                    resetOtpStep();
+                  }}
                   autoComplete="email"
-                  disabled={loading}
+                  disabled={loading || otpActive}
                 />
               </div>
             </label>
@@ -174,41 +266,96 @@ export default function Login() {
                   type={showPass ? "text" : "password"}
                   placeholder="Enter password"
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    resetOtpStep();
+                  }}
                   autoComplete="current-password"
-                  disabled={loading}
+                  disabled={loading || otpActive}
                 />
                 <button
                   type="button"
                   className="auth-icon-btn"
                   onClick={() => setShowPass((current) => !current)}
                   aria-label={showPass ? "Hide password" : "Show password"}
-                  disabled={loading}
+                  disabled={loading || otpActive}
                 >
                   {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </label>
 
-            <div className="auth-options">
-              <label className="remember">
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(event) => setRemember(event.target.checked)}
-                  disabled={loading}
-                />
-                <span aria-hidden="true" />
-                Remember me
+            {otpActive && (
+              <label className="auth-field">
+                <span>Email login code</span>
+                <div className="auth-input-shell otp-input-shell">
+                  <ShieldCheck size={18} />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    placeholder="6-digit code"
+                    value={otp}
+                    onChange={(event) =>
+                      setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))
+                    }
+                    autoComplete="one-time-code"
+                    disabled={loading}
+                  />
+                </div>
               </label>
+            )}
 
-              <Link to="/forgot-password">Forgot password?</Link>
-            </div>
+            {!otpActive && (
+              <div className="auth-options">
+                <label className="remember">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
+                    disabled={loading}
+                  />
+                  <span aria-hidden="true" />
+                  Remember me
+                </label>
 
+                <Link to="/forgot-password">Forgot password?</Link>
+              </div>
+            )}
+
+            {otpActive && (
+              <div className="auth-options otp-actions">
+                <button
+                  type="button"
+                  className="auth-text-button"
+                  onClick={handleResendOtp}
+                  disabled={loading}
+                >
+                  Resend code
+                </button>
+                <button
+                  type="button"
+                  className="auth-text-button"
+                  onClick={resetOtpStep}
+                  disabled={loading}
+                >
+                  Change email
+                </button>
+              </div>
+            )}
+
+            {status && <p className="auth-status">{status}</p>}
             {error && <p className="auth-error">{error}</p>}
 
             <button type="submit" className="auth-submit" disabled={loading}>
-              {loading ? "Logging in" : "Log in"}
+              {loading
+                ? otpActive
+                  ? "Verifying code"
+                  : "Sending code"
+                : otpActive
+                  ? "Verify and log in"
+                  : "Send login code"}
               <ArrowRight size={18} />
             </button>
           </form>
