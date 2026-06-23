@@ -685,7 +685,7 @@
 }
 
 .split-rooms-grid .page-hero-card {
-  min-height: 150px;
+  min-height: 302px;
   gap: 12px;
   padding: 16px;
 }
@@ -702,7 +702,7 @@
 .split-rooms-grid .room-list-card,
 .split-rooms-grid .member-balance-card,
 .split-rooms-grid .assignment-card {
-  min-height: 160px;
+  min-height: 260px;
 }
 
 .split-rooms-grid .room-list-card,
@@ -3804,4 +3804,54 @@
   .split-room-item-list.polished .item-status-pill {
     justify-self: start;
   }
+}
+
+.friend-search-field {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 999px;
+  background: var(--dash-canvas);
+  box-shadow: 0 8px 22px rgba(10, 11, 13, 0.04);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.friend-search-field:focus-within {
+  border-color: rgba(0, 82, 255, 0.38);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.09);
+}
+
+.friend-search-field svg {
+  flex: 0 0 auto;
+  color: var(--dash-muted);
+}
+
+.friend-search-field input {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--dash-ink);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.friend-search-field input::placeholder {
+  color: var(--dash-muted);
+  font-weight: 500;
+}
+
+.friend-search-field span {
+  display: none;
 }
