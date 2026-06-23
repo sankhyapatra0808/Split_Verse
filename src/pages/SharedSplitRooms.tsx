@@ -4,9 +4,12 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
+  Pencil,
   Plus,
   ReceiptText,
   Trash2,
+  UserMinus,
+  X,
   UsersRound,
 } from "lucide-react";
 
@@ -15,10 +18,13 @@ import {
   createSplitRoom,
   createSplitRoomItem,
   deleteSplitRoom,
+  deleteSplitRoomItem,
   getFriendsSummary,
   getPendingDues,
   getSplitRooms,
   paySplitRoomDue,
+  removeSplitRoomMember,
+  updateSplitRoomItem,
   type Friend,
   type PendingDue,
   type SplitRoom,
@@ -29,6 +35,7 @@ import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { withTopProgress } from "../utils/topProgress";
 import DashboardLayout from "./dashboard/DashboardLayout";
+import "../styles/SharedSplitRooms.css";
 
 const categoryOptions = [
   { label: "Restaurant", value: "restaurant" },
@@ -89,7 +96,7 @@ function getItemPlaceholder(category?: string | null) {
 }
 
 export default function SharedSplitRooms() {
-  const { formatCurrency } = useAppSettings();
+  const { confirmBeforeWalletPayment, formatCurrency } = useAppSettings();
   const [searchParams] = useSearchParams();
   const roomIdFromNotification = searchParams.get("roomId") || "";
   const [rooms, setRooms] = useState<SplitRoom[]>([]);
@@ -108,6 +115,14 @@ export default function SharedSplitRooms() {
   const [loading, setLoading] = useState(true);
   const [savingRoom, setSavingRoom] = useState(false);
   const [savingItem, setSavingItem] = useState(false);
+  const [editingItemId, setEditingItemId] = useState("");
+  const [editItemTitle, setEditItemTitle] = useState("");
+  const [editItemAmount, setEditItemAmount] = useState("");
+  const [updatingItemId, setUpdatingItemId] = useState("");
+  const [deletingItemId, setDeletingItemId] = useState("");
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
+  const [removingMemberId, setRemovingMemberId] = useState("");
   const [deletingRoomId, setDeletingRoomId] = useState("");
   const [collectingMemberId, setCollectingMemberId] = useState("");
   const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
@@ -187,6 +202,25 @@ export default function SharedSplitRooms() {
     );
   }, [friends, trimmedFriendSearch]);
   const itemPlaceholder = getItemPlaceholder(selectedRoom?.category);
+  const selectedRoomItems = selectedRoom?.items ?? [];
+  const removableMemberCount = useMemo(
+    () =>
+      selectedRoom
+        ? sortedMembers.filter((member) => {
+            const assignedItemCount = selectedRoomItems.filter(
+              (item) => item.assigned_member_id === member.id,
+            ).length;
+
+            return (
+              selectedRoom.isOwner &&
+              !member.isMe &&
+              !member.isOwner &&
+              assignedItemCount === 0
+            );
+          }).length
+        : 0,
+    [selectedRoom, selectedRoomItems, sortedMembers],
+  );
 
   const reloadSplitRoomData = async (preferredRoomId?: string) => {
     const [roomData, duesData] = await Promise.all([
@@ -374,8 +408,7 @@ export default function SharedSplitRooms() {
       };
     });
     const outstandingAmount = updatedBalances.reduce(
-      (sum, balance) =>
-        sum + (balance.isMe ? 0 : balance.outstandingAmount),
+      (sum, balance) => sum + (balance.isMe ? 0 : balance.outstandingAmount),
       0,
     );
     const collectedAmount = updatedBalances.reduce(
@@ -437,15 +470,13 @@ export default function SharedSplitRooms() {
             : balance.detail,
         amount: nextAmount,
         outstandingAmount: nextOutstandingAmount,
-        isCollected: !assignedMember?.isMe && nextAmount > 0
-          ? false
-          : balance.isCollected,
+        isCollected:
+          !assignedMember?.isMe && nextAmount > 0 ? false : balance.isCollected,
         itemCount: balance.itemCount + 1,
       };
     });
     const outstandingAmount = updatedBalances.reduce(
-      (sum, balance) =>
-        sum + (balance.isMe ? 0 : balance.outstandingAmount),
+      (sum, balance) => sum + (balance.isMe ? 0 : balance.outstandingAmount),
       0,
     );
 
@@ -488,6 +519,258 @@ export default function SharedSplitRooms() {
           : room,
       ),
     );
+  }
+
+  function getRoomItemMemberName(memberId: string) {
+    const member = selectedRoom?.members.find((item) => item.id === memberId);
+
+    if (!member) {
+      return "Member";
+    }
+
+    return getMemberName(member);
+  }
+
+  function startEditingItem(item: SplitRoom["items"][number]) {
+    setHistoryDialogOpen(true);
+    setEditingItemId(item.id);
+    setEditItemTitle(item.title);
+    setEditItemAmount(String(item.amount));
+    setMessage("");
+    setError("");
+  }
+
+  function cancelEditingItem() {
+    setEditingItemId("");
+    setEditItemTitle("");
+    setEditItemAmount("");
+  }
+
+  function closeHistoryDialog() {
+    setHistoryDialogOpen(false);
+    cancelEditingItem();
+  }
+
+  function closeMembersDialog() {
+    setMembersDialogOpen(false);
+  }
+
+  function getMemberAssignedItemCount(memberId: string) {
+    return selectedRoomItems.filter((item) => item.assigned_member_id === memberId)
+      .length;
+  }
+
+  function getMemberPendingItemCount(memberId: string) {
+    return selectedRoomItems.filter(
+      (item) => item.assigned_member_id === memberId && !item.isCollected,
+    ).length;
+  }
+
+  function canRemoveMember(member: SplitRoom["members"][number]) {
+    return Boolean(
+      selectedRoom?.isOwner &&
+        !member.isMe &&
+        !member.isOwner &&
+        getMemberAssignedItemCount(member.id) === 0,
+    );
+  }
+
+  function getMemberRemoveReason(member: SplitRoom["members"][number]) {
+    const assignedItemCount = getMemberAssignedItemCount(member.id);
+
+    if (!selectedRoom?.isOwner) {
+      return "Only the room host can remove members.";
+    }
+
+    if (member.isMe || member.isOwner) {
+      return "The room host cannot be removed.";
+    }
+
+    if (assignedItemCount > 0) {
+      return "This member has room history, so removing them would affect previous split records.";
+    }
+
+    return "Remove member from this room.";
+  }
+
+  async function handleRemoveRoomMember(member: SplitRoom["members"][number]) {
+    setMessage("");
+    setError("");
+
+    if (!selectedRoom) {
+      setError("Choose a room first.");
+      return;
+    }
+
+    if (!canRemoveMember(member)) {
+      setError(getMemberRemoveReason(member));
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Remove ${getMemberName(member)} from ${selectedRoom.name}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setRemovingMemberId(member.id);
+      setMessage("Removing member...");
+
+      await withTopProgress(async () => {
+        await removeSplitRoomMember(selectedRoom.id, member.id);
+
+        window.dispatchEvent(new Event("splitverse:data-updated"));
+        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
+
+        await reloadSplitRoomData(selectedRoom.id);
+        setMessage("Member removed from the room.");
+      });
+    } catch (removeError) {
+      setError(
+        removeError instanceof Error
+          ? removeError.message
+          : "Failed to remove member",
+      );
+      setMessage("");
+    } finally {
+      setRemovingMemberId("");
+    }
+  }
+
+  async function handleUpdateItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+    setError("");
+
+    const title = editItemTitle.trim();
+    const amount = Number(editItemAmount);
+
+    if (!selectedRoom) {
+      setError("Choose a room first.");
+      return;
+    }
+
+    if (!editingItemId) {
+      setError("Choose an item to edit.");
+      return;
+    }
+
+    if (!title) {
+      setError("Item name is required.");
+      return;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Amount must be greater than 0.");
+      return;
+    }
+
+    const previousRooms = rooms;
+    const previousPendingDues = pendingDues;
+
+    try {
+      setUpdatingItemId(editingItemId);
+
+      setRooms((prev) =>
+        prev.map((room) =>
+          room.id === selectedRoom.id
+            ? {
+                ...room,
+                items: room.items.map((item) =>
+                  item.id === editingItemId
+                    ? {
+                        ...item,
+                        title,
+                        amount,
+                      }
+                    : item,
+                ),
+              }
+            : room,
+        ),
+      );
+
+      await withTopProgress(async () => {
+        await updateSplitRoomItem(editingItemId, {
+          title,
+          amount,
+        });
+
+        window.dispatchEvent(new Event("splitverse:data-updated"));
+        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
+
+        await reloadSplitRoomData(selectedRoom.id);
+
+        setMessage("Split item updated.");
+        cancelEditingItem();
+      });
+    } catch (updateError) {
+      setRooms(previousRooms);
+      setPendingDues(previousPendingDues);
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Failed to update item",
+      );
+    } finally {
+      setUpdatingItemId("");
+    }
+  }
+
+  async function handleDeleteItem(item: SplitRoom["items"][number]) {
+    setMessage("");
+    setError("");
+
+    if (!selectedRoom) {
+      setError("Choose a room first.");
+      return;
+    }
+
+    const previousRooms = rooms;
+    const previousPendingDues = pendingDues;
+
+    try {
+      setDeletingItemId(item.id);
+
+      setRooms((prev) =>
+        prev.map((room) =>
+          room.id === selectedRoom.id
+            ? {
+                ...room,
+                items: room.items.filter((roomItem) => roomItem.id !== item.id),
+              }
+            : room,
+        ),
+      );
+
+      await withTopProgress(async () => {
+        await deleteSplitRoomItem(item.id);
+
+        window.dispatchEvent(new Event("splitverse:data-updated"));
+        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
+
+        await reloadSplitRoomData(selectedRoom.id);
+
+        if (editingItemId === item.id) {
+          cancelEditingItem();
+        }
+
+        setMessage("Split item deleted.");
+      });
+    } catch (deleteError) {
+      setRooms(previousRooms);
+      setPendingDues(previousPendingDues);
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Failed to delete item",
+      );
+    } finally {
+      setDeletingItemId("");
+    }
   }
 
   const handleCreateRoom = async (event: FormEvent) => {
@@ -584,11 +867,7 @@ export default function SharedSplitRooms() {
       );
       setItemTitle("");
       setItemAmount("");
-      setMessage(
-        assignedMember?.isMe
-          ? "Expense item added instantly. Saving to the server..."
-          : "Due added instantly. Saving to the server...",
-      );
+      setMessage(assignedMember?.isMe ? "Expense item added" : "Due added");
 
       await withTopProgress(async () => {
         await createSplitRoomItem(selectedRoom.id, {
@@ -602,8 +881,8 @@ export default function SharedSplitRooms() {
         await reloadSplitRoomData(selectedRoom.id);
         setMessage(
           assignedMember?.isMe
-            ? "Expense item added to the room and today's dashboard spend."
-            : "Expense item added as a due to collect from this member.",
+            ? "Expense item added"
+            : "Expense item added as a due",
         );
       });
     } catch (itemError) {
@@ -649,7 +928,7 @@ export default function SharedSplitRooms() {
       setRooms((prev) => prev.filter((item) => item.id !== room.id));
       setPendingDues((prev) => prev.filter((due) => due.roomId !== room.id));
       setSelectedRoomId(nextSelectedRoomId);
-      setMessage("Room removed instantly. Deleting on the server...");
+      setMessage("Deleting the Room...");
 
       await withTopProgress(async () => {
         await deleteSplitRoom(room.id);
@@ -686,18 +965,25 @@ export default function SharedSplitRooms() {
       setCollectingMemberId(memberId);
       setRooms((prev) =>
         prev.map((room) =>
-          room.id === roomId ? markRoomMemberDuesCollected(room, memberId) : room,
+          room.id === roomId
+            ? markRoomMemberDuesCollected(room, memberId)
+            : room,
         ),
       );
-      setMessage("Dues marked collected instantly. Saving to the server...");
+      setMessage("Dues marked collected.");
 
       await withTopProgress(async () => {
         const response = await collectSplitRoomMemberDues(roomId, memberId);
+
+        window.dispatchEvent(new Event("splitverse:data-updated"));
+        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
+
         await reloadSplitRoomData(roomId);
+
         setMessage(
           response.updatedCount > 0
             ? "Dues marked as collected."
-          : "There were no pending dues for this member.",
+            : "There were no pending dues for this member.",
         );
       });
     } catch (collectError) {
@@ -720,13 +1006,27 @@ export default function SharedSplitRooms() {
     setMessage("");
     setError("");
 
+    const dueToPay = pendingDues.find((due) => due.id === itemId);
+
+    if (confirmBeforeWalletPayment) {
+      const confirmed = window.confirm(
+        `Pay ${dueToPay ? formatCurrency(dueToPay.amount) : "this due"} from your wallet${
+          dueToPay ? ` for ${dueToPay.title} in ${dueToPay.roomName}` : ""
+        }?`,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
     const previousRooms = rooms;
     const previousPendingDues = pendingDues;
 
     try {
       setPayingDueId(itemId);
       markPendingDuePaid(itemId);
-      setMessage("Due paid instantly. Confirming wallet payment...");
+      setMessage("Due paid.");
 
       await withTopProgress(async () => {
         await paySplitRoomDue(itemId);
@@ -821,7 +1121,9 @@ export default function SharedSplitRooms() {
                           type="search"
                           placeholder="Search by name or email"
                           value={friendSearch}
-                          onChange={(event) => setFriendSearch(event.target.value)}
+                          onChange={(event) =>
+                            setFriendSearch(event.target.value)
+                          }
                           onClick={(event) => event.stopPropagation()}
                         />
                       </label>
@@ -973,131 +1275,141 @@ export default function SharedSplitRooms() {
 
           <div className="member-balance-panel">
             <div className="member-balance-list">
-              {selectedRoom?.balances.length ? (
-                selectedRoom.balances.map((balance) => {
-                  const hasWalletDues =
-                    balance.isMe && selectedRoomPendingDues.length > 0;
-                  const hasUnpaidDue =
-                    hasWalletDues ||
-                    (!balance.isMe && balance.outstandingAmount > 0);
-                  const expanded =
-                    hasWalletDues && expandedDueMemberId === balance.memberId;
-                  const rowClassName = [
-                    "member-balance-row",
-                    balance.isCollected ? "collected" : "",
-                    hasUnpaidDue ? "unpaid" : "",
-                    hasWalletDues ? "expandable" : "",
-                    expanded ? "expanded" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ");
+              {selectedRoom?.balances.length
+                ? selectedRoom.balances.map((balance) => {
+                    const hasWalletDues =
+                      balance.isMe && selectedRoomPendingDues.length > 0;
+                    const hasUnpaidDue =
+                      hasWalletDues ||
+                      (!balance.isMe && balance.outstandingAmount > 0);
+                    const expanded =
+                      hasWalletDues && expandedDueMemberId === balance.memberId;
+                    const rowClassName = [
+                      "member-balance-row",
+                      balance.isCollected ? "collected" : "",
+                      hasUnpaidDue ? "unpaid" : "",
+                      hasWalletDues ? "expandable" : "",
+                      expanded ? "expanded" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
 
-                  return (
-                    <div className="member-balance-entry" key={balance.memberId}>
+                    return (
                       <div
-                        className={rowClassName}
-                        role={hasWalletDues ? "button" : undefined}
-                        tabIndex={hasWalletDues ? 0 : undefined}
-                        onClick={() => {
-                          if (!hasWalletDues) {
-                            return;
-                          }
-
-                          setExpandedDueMemberId((current) =>
-                            current === balance.memberId ? "" : balance.memberId,
-                          );
-                        }}
-                        onKeyDown={(event) => {
-                          if (
-                            !hasWalletDues ||
-                            (event.key !== "Enter" && event.key !== " ")
-                          ) {
-                            return;
-                          }
-
-                          event.preventDefault();
-                          setExpandedDueMemberId((current) =>
-                            current === balance.memberId ? "" : balance.memberId,
-                          );
-                        }}
+                        className="member-balance-entry"
+                        key={balance.memberId}
                       >
-                        <span className="member-balance-name">
-                          {hasUnpaidDue && (
-                            <i
-                              className="member-unpaid-dot"
-                              aria-label="Unpaid dues"
+                        <div
+                          className={rowClassName}
+                          role={hasWalletDues ? "button" : undefined}
+                          tabIndex={hasWalletDues ? 0 : undefined}
+                          onClick={() => {
+                            if (!hasWalletDues) {
+                              return;
+                            }
+
+                            setExpandedDueMemberId((current) =>
+                              current === balance.memberId
+                                ? ""
+                                : balance.memberId,
+                            );
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              !hasWalletDues ||
+                              (event.key !== "Enter" && event.key !== " ")
+                            ) {
+                              return;
+                            }
+
+                            event.preventDefault();
+                            setExpandedDueMemberId((current) =>
+                              current === balance.memberId
+                                ? ""
+                                : balance.memberId,
+                            );
+                          }}
+                        >
+                          <span className="member-balance-name">
+                            {hasUnpaidDue && (
+                              <i
+                                className="member-unpaid-dot"
+                                aria-label="Unpaid dues"
+                              />
+                            )}
+                            {balance.name}
+                          </span>
+                          <strong>{balance.detail}</strong>
+                          <em>
+                            {balance.isMe
+                              ? formatCurrency(balance.amount)
+                              : formatCurrency(balance.outstandingAmount)}
+                          </em>
+                          {hasWalletDues && (
+                            <ChevronDown
+                              className="member-due-chevron"
+                              size={16}
+                              aria-hidden="true"
                             />
                           )}
-                          {balance.name}
-                        </span>
-                        <strong>{balance.detail}</strong>
-                        <em>
-                          {balance.isMe
-                            ? formatCurrency(balance.amount)
-                            : formatCurrency(balance.outstandingAmount)}
-                        </em>
-                        {hasWalletDues && (
-                          <ChevronDown
-                            className="member-due-chevron"
-                            size={16}
-                            aria-hidden="true"
-                          />
-                        )}
-                        {!balance.isMe &&
-                          balance.outstandingAmount > 0 &&
-                          selectedRoom.isOwner && (
-                            <button
-                              className="balance-collect-button"
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleCollectMemberDues(
-                                  selectedRoom.id,
-                                  balance.memberId,
-                                );
-                              }}
-                              disabled={collectingMemberId === balance.memberId}
-                            >
-                              <CheckCircle2 size={14} />
-                              {collectingMemberId === balance.memberId ? (
-                                "Collecting"
-                              ) : (
-                                "Manual collect"
-                              )}
-                            </button>
+                          {!balance.isMe &&
+                            balance.outstandingAmount > 0 &&
+                            selectedRoom.isOwner && (
+                              <button
+                                className="balance-collect-button"
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleCollectMemberDues(
+                                    selectedRoom.id,
+                                    balance.memberId,
+                                  );
+                                }}
+                                disabled={
+                                  collectingMemberId === balance.memberId
+                                }
+                              >
+                                <CheckCircle2 size={14} />
+                                {collectingMemberId === balance.memberId
+                                  ? "Collecting"
+                                  : "Manual collect"}
+                              </button>
+                            )}
+                        </div>
+
+                        {expanded && (
+                          <div className="room-pending-dues-panel">
+                            <span>Pay from wallet</span>
+                            <div className="room-pending-due-list">
+                              {selectedRoomPendingDues.map((due) => (
+                                <div
+                                  className="room-pending-due-row"
+                                  key={due.id}
+                                >
+                                  <div>
+                                    <strong>{due.title}</strong>
+                                    <small>
+                                      Pay to{" "}
+                                      {due.receiverName || due.receiverEmail}
+                                    </small>
+                                  </div>
+                                  <em>{formatCurrency(due.amount)}</em>
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePayDue(due.id)}
+                                    disabled={payingDueId === due.id}
+                                  >
+                                    {payingDueId === due.id ? "Paying" : "Pay"}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </div>
-
-                      {expanded && (
-                        <div className="room-pending-dues-panel">
-                          <span>Pay from wallet</span>
-                          <div className="room-pending-due-list">
-                            {selectedRoomPendingDues.map((due) => (
-                              <div className="room-pending-due-row" key={due.id}>
-                                <div>
-                                  <strong>{due.title}</strong>
-                                  <small>
-                                    Pay to{" "}
-                                    {due.receiverName || due.receiverEmail}
-                                  </small>
-                                </div>
-                                <em>{formatCurrency(due.amount)}</em>
-                                <button
-                                  type="button"
-                                  onClick={() => handlePayDue(due.id)}
-                                  disabled={payingDueId === due.id}
-                                >
-                                  {payingDueId === due.id ? "Paying" : "Pay"}
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              ) : null}
+                    );
+                  })
+                : null}
             </div>
           </div>
         </article>
@@ -1161,6 +1473,63 @@ export default function SharedSplitRooms() {
           </form>
         </article>
 
+        <article className="bento-card room-items-card split-room-history-card">
+          <div className="bento-card-head">
+            <div>
+              <span>Split history</span>
+              <h2>{selectedRoom ? selectedRoom.name : "No room selected"}</h2>
+            </div>
+            <ReceiptText size={23} />
+          </div>
+
+          <p className="dashboard-muted-text">
+            View the full split history or manage room members from one place
+            without changing the room layout.
+          </p>
+
+          <div className="split-room-history-preview">
+            <div>
+              <span>Items</span>
+              <strong>{selectedRoomItems.length}</strong>
+            </div>
+            <div>
+              <span>Members</span>
+              <strong>{selectedRoom?.memberCount ?? 0}</strong>
+            </div>
+            <div>
+              <span>Total</span>
+              <strong>{formatCurrency(selectedRoom?.totalAmount ?? 0)}</strong>
+            </div>
+          </div>
+
+          <div className="split-room-history-actions">
+            <button
+              className="dashboard-secondary-button split-room-history-open-button"
+              type="button"
+              onClick={() => setHistoryDialogOpen(true)}
+              disabled={!selectedRoom}
+            >
+              <ReceiptText size={16} />
+              Open room history
+            </button>
+
+            <button
+              className="dashboard-secondary-button split-room-members-open-button"
+              type="button"
+              onClick={() => setMembersDialogOpen(true)}
+              disabled={!selectedRoom || !selectedRoom.isOwner}
+              title={
+                selectedRoom?.isOwner
+                  ? "Manage room members"
+                  : "Only the room host can manage members"
+              }
+            >
+              <UsersRound size={16} />
+              Manage members
+            </button>
+          </div>
+        </article>
+
         {(message || error) && (
           <article
             className={
@@ -1171,6 +1540,311 @@ export default function SharedSplitRooms() {
           </article>
         )}
       </section>
+
+      {historyDialogOpen && selectedRoom && (
+        <div className="split-room-history-backdrop" role="presentation">
+          <div
+            className="split-room-history-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="split-room-history-title"
+          >
+            <div className="split-room-history-head">
+              <div>
+                <span>Split room history</span>
+                <h2 id="split-room-history-title">{selectedRoom.name}</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close split room history"
+                onClick={closeHistoryDialog}
+                disabled={Boolean(updatingItemId || deletingItemId)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="split-room-history-stats">
+              <div>
+                <span>Total items</span>
+                <strong>{selectedRoomItems.length}</strong>
+              </div>
+              <div>
+                <span>Room total</span>
+                <strong>{formatCurrency(selectedRoom.totalAmount)}</strong>
+              </div>
+            </div>
+
+            <div className="split-room-history-list">
+              {selectedRoomItems.length === 0 && (
+                <p className="dashboard-muted-text">
+                  No items added in this room yet.
+                </p>
+              )}
+
+              {selectedRoomItems.map((item) => {
+                const canManageItem =
+                  Boolean(selectedRoom.isOwner) && !item.isCollected;
+                const isEditing = editingItemId === item.id;
+
+                return (
+                  <div
+                    className={[
+                      "split-room-history-row",
+                      item.isCollected ? "collected" : "",
+                      isEditing ? "editing" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={item.id}
+                  >
+                    {isEditing ? (
+                      <form
+                        className="split-room-history-edit-form"
+                        onSubmit={handleUpdateItem}
+                      >
+                        <label>
+                          <span>Item name</span>
+                          <input
+                            type="text"
+                            value={editItemTitle}
+                            onChange={(event) =>
+                              setEditItemTitle(event.target.value)
+                            }
+                            disabled={updatingItemId === item.id}
+                          />
+                        </label>
+
+                        <label>
+                          <span>Amount</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editItemAmount}
+                            onChange={(event) =>
+                              setEditItemAmount(event.target.value)
+                            }
+                            disabled={updatingItemId === item.id}
+                          />
+                        </label>
+
+                        <div className="split-room-history-edit-actions">
+                          <button
+                            className="split-room-history-delete-button"
+                            type="button"
+                            onClick={() => handleDeleteItem(item)}
+                            disabled={
+                              deletingItemId === item.id ||
+                              updatingItemId === item.id
+                            }
+                          >
+                            <Trash2 size={14} />
+                            {deletingItemId === item.id ? "Deleting" : "Delete"}
+                          </button>
+
+                          <div>
+                            <button
+                              className="dashboard-secondary-button"
+                              type="button"
+                              onClick={cancelEditingItem}
+                              disabled={
+                                deletingItemId === item.id ||
+                                updatingItemId === item.id
+                              }
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              className="dashboard-primary-button"
+                              type="submit"
+                              disabled={
+                                deletingItemId === item.id ||
+                                updatingItemId === item.id
+                              }
+                            >
+                              {updatingItemId === item.id
+                                ? "Saving"
+                                : "Save changes"}
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <ReceiptText size={16} />
+                        <div className="room-item-meta">
+                          <span>{item.title}</span>
+                          <strong>
+                            Assigned to{" "}
+                            {getRoomItemMemberName(item.assigned_member_id)}
+                          </strong>
+                        </div>
+                        <em>{formatCurrency(item.amount)}</em>
+                        <span
+                          className={
+                            item.isCollected
+                              ? "item-status-pill paid"
+                              : "item-status-pill pending"
+                          }
+                        >
+                          {item.isCollected ? "Collected" : "Pending"}
+                        </span>
+                        <button
+                          className="split-room-history-manage-button"
+                          type="button"
+                          onClick={() => startEditingItem(item)}
+                          disabled={
+                            !canManageItem || deletingItemId === item.id
+                          }
+                          title={
+                            canManageItem
+                              ? "Manage item"
+                              : "Collected items cannot be changed"
+                          }
+                        >
+                          <Pencil size={14} />
+                          Manage
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="split-room-history-footer">
+              <p>
+                Pending items can be edited or deleted. Collected items stay
+                locked so expenses, wallet payments, and room balances remain
+                safe.
+              </p>
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                onClick={closeHistoryDialog}
+                disabled={Boolean(updatingItemId || deletingItemId)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {membersDialogOpen && selectedRoom && (
+        <div className="split-room-history-backdrop" role="presentation">
+          <div
+            className="split-room-history-dialog split-room-members-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="split-room-members-title"
+          >
+            <div className="split-room-history-head">
+              <div>
+                <span>Room member management</span>
+                <h2 id="split-room-members-title">
+                  Members ({selectedRoom.memberCount})
+                </h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close member management"
+                onClick={closeMembersDialog}
+                disabled={Boolean(removingMemberId)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="split-room-history-stats split-room-members-stats">
+              <div>
+                <span>Total members</span>
+                <strong>{selectedRoom.memberCount}</strong>
+              </div>
+              <div>
+                <span>Can remove</span>
+                <strong>{removableMemberCount}</strong>
+              </div>
+            </div>
+
+            <div className="split-room-members-list">
+              {sortedMembers.map((member) => {
+                const assignedItemCount = getMemberAssignedItemCount(member.id);
+                const pendingItemCount = getMemberPendingItemCount(member.id);
+                const removable = canRemoveMember(member);
+
+                return (
+                  <div
+                    className={[
+                      "split-room-member-row",
+                      member.isOwner ? "host" : "",
+                      removable ? "removable" : "locked",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={member.id}
+                  >
+                    <UsersRound size={16} />
+                    <div className="split-room-member-meta">
+                      <strong>{getMemberName(member)}</strong>
+                      <span>{member.email || "No email saved"}</span>
+                      <small>
+                        {member.isOwner
+                          ? "Room host"
+                          : assignedItemCount > 0
+                            ? `${assignedItemCount} room item${
+                                assignedItemCount === 1 ? "" : "s"
+                              }${
+                                pendingItemCount > 0
+                                  ? ` • ${pendingItemCount} pending`
+                                  : ""
+                              }`
+                            : "No room items yet"}
+                      </small>
+                    </div>
+                    <span
+                      className={
+                        removable
+                          ? "split-room-member-status removable"
+                          : "split-room-member-status locked"
+                      }
+                    >
+                      {removable ? "Removable" : "Locked"}
+                    </span>
+                    <button
+                      className="split-room-member-remove-button"
+                      type="button"
+                      onClick={() => handleRemoveRoomMember(member)}
+                      disabled={!removable || removingMemberId === member.id}
+                      title={getMemberRemoveReason(member)}
+                    >
+                      <UserMinus size={14} />
+                      {removingMemberId === member.id ? "Removing" : "Remove"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="split-room-history-footer">
+              <p>
+                Members can only be removed when they have no room items. This
+                keeps split history, dues, wallet payments, and dashboard totals
+                safe.
+              </p>
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                onClick={closeMembersDialog}
+                disabled={Boolean(removingMemberId)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

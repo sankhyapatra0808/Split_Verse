@@ -5,6 +5,7 @@ import DashboardLayout from "./dashboard/DashboardLayout";
 import { getWalletSummary, type WalletSummaryResponse } from "../lib/api";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
+import "../styles/WalletBalance.css";
 
 function formatDate(dateValue: string) {
   if (!dateValue) {

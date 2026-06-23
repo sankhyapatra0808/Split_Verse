@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
   AppSettingsContext,
@@ -6,6 +6,8 @@ import {
   type AvatarId,
   type CurrencyCode,
   type CurrencyOption,
+  type NotificationPreferences,
+  type WalletTopUpMethod,
 } from "./useAppSettings";
 
 const settingsStorageKey = "splitverse-app-settings";
@@ -19,6 +21,13 @@ const currencies: CurrencyOption[] = [
   { code: "AED", label: "UAE Dirham", symbol: "د.إ", rateFromInr: 0.044 },
 ];
 
+const defaultNotificationPreferences: NotificationPreferences = {
+  friendRequestEmails: true,
+  loginOtpEmails: true,
+  settlementReminderEmails: true,
+  roomDueNotifications: true,
+};
+
 type StoredSettings = Partial<{
   avatarId: AvatarId;
   compactMode: boolean;
@@ -28,6 +37,9 @@ type StoredSettings = Partial<{
   converterFrom: CurrencyCode;
   converterTo: CurrencyCode;
   converterAmount: number;
+  defaultTopUpMethod: WalletTopUpMethod;
+  confirmBeforeWalletPayment: boolean;
+  notificationPreferences: Partial<NotificationPreferences>;
 }>;
 
 type AppSettingsProviderProps = {
@@ -51,6 +63,19 @@ function isAvatarId(value: unknown): value is AvatarId {
   return value === "current" || value === "initials";
 }
 
+function isWalletTopUpMethod(value: unknown): value is WalletTopUpMethod {
+  return value === "UPI" || value === "Card" || value === "Net banking";
+}
+
+function normalizeNotificationPreferences(
+  value: StoredSettings["notificationPreferences"],
+): NotificationPreferences {
+  return {
+    ...defaultNotificationPreferences,
+    ...(value ?? {}),
+  };
+}
+
 function saveSettings(settings: StoredSettings) {
   window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings));
 }
@@ -60,33 +85,45 @@ function getCurrency(currencyCode: CurrencyCode) {
 }
 
 export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
-  const storedSettings = useMemo(() => loadStoredSettings(), []);
+  const storedSettings = useMemo(loadStoredSettings, []);
   const [avatarId, setAvatarIdState] = useState<AvatarId>(
-    isAvatarId(storedSettings.avatarId) ? storedSettings.avatarId : "current"
+    isAvatarId(storedSettings.avatarId) ? storedSettings.avatarId : "current",
   );
   const [compactMode, setCompactModeState] = useState(
-    storedSettings.compactMode ?? false
+    storedSettings.compactMode ?? false,
   );
   const [privacyMode, setPrivacyModeState] = useState(
-    storedSettings.privacyMode ?? false
+    storedSettings.privacyMode ?? false,
   );
   const [settlementReminders, setSettlementRemindersState] = useState(
-    storedSettings.settlementReminders ?? true
+    storedSettings.settlementReminders ?? true,
   );
   const [appCurrency, setAppCurrencyState] = useState<CurrencyCode>(
-    isCurrencyCode(storedSettings.appCurrency) ? storedSettings.appCurrency : "INR"
+    isCurrencyCode(storedSettings.appCurrency) ? storedSettings.appCurrency : "INR",
   );
   const [converterFrom, setConverterFromState] = useState<CurrencyCode>(
-    isCurrencyCode(storedSettings.converterFrom) ? storedSettings.converterFrom : "INR"
+    isCurrencyCode(storedSettings.converterFrom) ? storedSettings.converterFrom : "INR",
   );
   const [converterTo, setConverterToState] = useState<CurrencyCode>(
-    isCurrencyCode(storedSettings.converterTo) ? storedSettings.converterTo : "USD"
+    isCurrencyCode(storedSettings.converterTo) ? storedSettings.converterTo : "USD",
   );
   const [converterAmount, setConverterAmountState] = useState(
-    storedSettings.converterAmount ?? 1000
+    storedSettings.converterAmount ?? 1000,
   );
+  const [defaultTopUpMethod, setDefaultTopUpMethodState] =
+    useState<WalletTopUpMethod>(
+      isWalletTopUpMethod(storedSettings.defaultTopUpMethod)
+        ? storedSettings.defaultTopUpMethod
+        : "UPI",
+    );
+  const [confirmBeforeWalletPayment, setConfirmBeforeWalletPaymentState] =
+    useState(storedSettings.confirmBeforeWalletPayment ?? true);
+  const [notificationPreferences, setNotificationPreferencesState] =
+    useState<NotificationPreferences>(
+      normalizeNotificationPreferences(storedSettings.notificationPreferences),
+    );
 
-  const persist = useCallback((updates: StoredSettings) => {
+  const persist = (updates: StoredSettings) => {
     saveSettings({
       avatarId,
       compactMode,
@@ -96,18 +133,27 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
       converterFrom,
       converterTo,
       converterAmount,
+      defaultTopUpMethod,
+      confirmBeforeWalletPayment,
+      notificationPreferences,
       ...updates,
     });
-  }, [
-    appCurrency,
-    avatarId,
-    compactMode,
-    converterAmount,
-    converterFrom,
-    converterTo,
-    privacyMode,
-    settlementReminders,
-  ]);
+  };
+
+  const clearLocalAppSettings = () => {
+    window.localStorage.removeItem(settingsStorageKey);
+    setAvatarIdState("current");
+    setCompactModeState(false);
+    setPrivacyModeState(false);
+    setSettlementRemindersState(true);
+    setAppCurrencyState("INR");
+    setConverterFromState("INR");
+    setConverterToState("USD");
+    setConverterAmountState(1000);
+    setDefaultTopUpMethodState("UPI");
+    setConfirmBeforeWalletPaymentState(true);
+    setNotificationPreferencesState(defaultNotificationPreferences);
+  };
 
   const value = useMemo<AppSettingsValue>(
     () => ({
@@ -119,6 +165,9 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
       converterFrom,
       converterTo,
       converterAmount,
+      defaultTopUpMethod,
+      confirmBeforeWalletPayment,
+      notificationPreferences,
       currencies,
       setAvatarId(nextAvatarId) {
         setAvatarIdState(nextAvatarId);
@@ -152,6 +201,23 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
         setConverterAmountState(amount);
         persist({ converterAmount: amount });
       },
+      setDefaultTopUpMethod(method) {
+        setDefaultTopUpMethodState(method);
+        persist({ defaultTopUpMethod: method });
+      },
+      setConfirmBeforeWalletPayment(enabled) {
+        setConfirmBeforeWalletPaymentState(enabled);
+        persist({ confirmBeforeWalletPayment: enabled });
+      },
+      setNotificationPreference(key, enabled) {
+        const nextPreferences = {
+          ...notificationPreferences,
+          [key]: enabled,
+        };
+        setNotificationPreferencesState(nextPreferences);
+        persist({ notificationPreferences: nextPreferences });
+      },
+      clearLocalAppSettings,
       convertCurrency(amount, fromCurrency, toCurrency) {
         const amountInInr = amount / getCurrency(fromCurrency).rateFromInr;
         return amountInInr * getCurrency(toCurrency).rateFromInr;
@@ -175,7 +241,7 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
           "en-IN",
           {
             maximumFractionDigits: appCurrency === "JPY" ? 0 : 2,
-          }
+          },
         )}`;
       },
     }),
@@ -183,13 +249,15 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
       appCurrency,
       avatarId,
       compactMode,
+      confirmBeforeWalletPayment,
       converterAmount,
       converterFrom,
       converterTo,
+      defaultTopUpMethod,
+      notificationPreferences,
       privacyMode,
-      persist,
       settlementReminders,
-    ]
+    ],
   );
 
   return (

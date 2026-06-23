@@ -11,6 +11,7 @@ import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
 import { withTopProgress } from "../utils/topProgress";
+import "../styles/TransactionHistory.css";
 
 function formatTransactionDate(dateValue: string) {
   if (!dateValue) {

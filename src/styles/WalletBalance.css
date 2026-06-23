@@ -1,0 +1,510 @@
+/* Wallet & Balance page styles */
+.split-rooms-grid .room-form-card,
+.split-rooms-grid .room-list-card,
+.split-rooms-grid .member-balance-card,
+.split-rooms-grid .assignment-card {
+  gap: 12px;
+  padding: 14px;
+}
+
+
+.split-rooms-grid .room-form-card,
+.split-rooms-grid .room-list-card,
+.split-rooms-grid .member-balance-card,
+.split-rooms-grid .assignment-card {
+  min-height: 260px;
+}
+
+
+.split-rooms-grid .room-list-card,
+.split-rooms-grid .member-balance-card,
+.split-rooms-grid .assignment-card {
+  grid-column: span 4;
+  align-content: start;
+}
+
+
+.page-hero-card.dark,
+.balance-total-card.dark,
+.history-summary-card.dark {
+  color: #ffffff;
+  background: var(--dash-surface-dark);
+}
+
+
+.page-hero-card.dark h2,
+.page-hero-card.dark .bento-card-head span,
+.page-hero-card.dark p,
+.balance-total-card.dark,
+.history-summary-card.dark {
+  color: #ffffff;
+}
+
+
+.page-hero-card p,
+.balance-total-card p,
+.history-summary-card p,
+.topup-summary-card p {
+  max-width: 680px;
+  margin: 0;
+  color: var(--dash-body);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+
+.page-hero-card.dark p,
+.balance-total-card.dark p,
+.history-summary-card.dark p {
+  color: var(--dash-muted-soft);
+}
+
+
+.room-form-card,
+.account-breakdown-card,
+.payment-method-card {
+  grid-column: span 4;
+  min-height: 180px;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+
+.room-list-card,
+.settlement-card,
+.transaction-table-card {
+  grid-column: span 8;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+
+.assignment-card,
+.member-balance-card,
+.balance-card,
+.balance-settings-card,
+.topup-form-card,
+.topup-summary-card,
+.recent-topups-card,
+.history-summary-card {
+  grid-column: span 4;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+
+.balance-total-card {
+  grid-column: span 4;
+  min-height: 180px;
+  display: grid;
+  align-content: space-between;
+  gap: 12px;
+  padding: 18px;
+}
+
+
+.wallet-settlement-card {
+  grid-column: span 4;
+  gap: 16px;
+}
+
+
+.wallet-settlement-card .settlement-list {
+  gap: 9px;
+}
+
+
+.wallet-settlement-card .settlement-row {
+  min-height: 54px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+}
+
+
+.wallet-settlement-card .settlement-icon {
+  width: 34px;
+  height: 34px;
+}
+
+
+.wallet-settlement-card .settlement-row button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+
+.balance-total-details {
+  display: grid;
+  gap: 9px;
+}
+
+
+.balance-total-details > span,
+.topup-summary-card > span,
+.history-summary-card > span {
+  color: var(--dash-muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+
+.balance-total-card strong,
+.topup-summary-card strong,
+.history-summary-card strong {
+  font-family: var(--dash-mono);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.05;
+}
+
+
+.dashboard-primary-button,
+.dashboard-secondary-button,
+.assignment-grid button,
+.settlement-row button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    transform 220ms ease,
+    background-color 220ms ease,
+    box-shadow 220ms ease,
+    color 220ms ease;
+}
+
+
+.dashboard-secondary-button,
+.settlement-row button {
+  color: var(--dash-ink);
+  background: var(--dash-surface-strong);
+}
+
+
+.room-card-list,
+.compact-list,
+.settlement-list,
+.transaction-list,
+.method-list {
+  display: grid;
+  gap: 9px;
+}
+
+
+.room-row,
+.compact-list div,
+.settlement-row,
+.transaction-row,
+.method-row {
+  min-height: 52px;
+  display: grid;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 16px;
+  background: var(--dash-surface-soft);
+}
+
+
+.room-row div,
+.settlement-row div,
+.transaction-row div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+
+.room-row strong,
+.compact-list strong,
+.settlement-row strong,
+.transaction-row strong,
+.method-row strong {
+  color: var(--dash-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+
+.room-row span,
+.compact-list span,
+.settlement-row span,
+.transaction-row span,
+.method-row span {
+  color: var(--dash-body);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+
+.room-row em,
+.compact-list em,
+.settlement-row em,
+.transaction-row em {
+  color: var(--dash-ink);
+  font-family: var(--dash-mono);
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+
+.settlement-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+
+.settlement-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+}
+
+
+.settlement-icon.up {
+  color: var(--dash-success);
+  background: rgba(5, 177, 105, 0.1);
+}
+
+
+.settlement-icon.down {
+  color: var(--dash-danger);
+  background: rgba(207, 32, 47, 0.1);
+}
+@media (max-width: 1180px) {
+
+  .total-spend-card,
+  .room-form-card,
+  .member-balance-card,
+  .assignment-card,
+  .friend-request-card,
+  .friend-inbox-card,
+  .friend-sent-card,
+  .balance-card,
+  .balance-total-card,
+  .account-breakdown-card,
+  .balance-settings-card,
+  .topup-form-card,
+  .payment-method-card,
+  .topup-summary-card,
+  .recent-topups-card,
+  .monthly-graph-card,
+  .settings-card,
+  .history-summary-card {
+    grid-column: span 4;
+  }
+}
+@media (max-width: 860px) {
+
+  .wallet-card,
+  .monthly-graph-card,
+  .summary-card,
+  .total-spend-card,
+  .page-hero-card,
+  .room-form-card,
+  .room-list-card,
+  .member-balance-card,
+  .assignment-card,
+  .friend-request-card,
+  .friend-inbox-card,
+  .friend-sent-card,
+  .balance-card,
+  .balance-total-card,
+  .account-breakdown-card,
+  .settlement-card,
+  .balance-settings-card,
+  .topup-form-card,
+  .payment-method-card,
+  .topup-summary-card,
+  .recent-topups-card,
+  .settings-card,
+  .transaction-tools-card,
+  .transaction-table-card,
+  .friends-list-card,
+  .history-summary-card {
+    grid-column: span 12;
+  }
+
+
+  .split-rooms-grid .room-list-card,
+  .split-rooms-grid .member-balance-card,
+  .split-rooms-grid .assignment-card {
+    grid-column: span 12;
+  }
+
+
+  .room-row,
+  .room-row-button,
+  .room-row-live,
+  .settlement-row,
+  .compact-list div {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+
+  .wallet-settlement-card .settlement-row {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+}
+@media (max-width: 560px) {
+
+  .bento-card,
+  .expense-tracker-card,
+  .summary-card,
+  .page-hero-card,
+  .room-form-card,
+  .room-list-card,
+  .member-balance-card,
+  .assignment-card,
+  .friend-request-card,
+  .friend-inbox-card,
+  .friend-sent-card,
+  .friends-list-card,
+  .balance-card,
+  .balance-total-card,
+  .account-breakdown-card,
+  .settlement-card,
+  .balance-settings-card,
+  .topup-form-card,
+  .payment-method-card,
+  .topup-summary-card,
+  .recent-topups-card,
+  .settings-card,
+  .transaction-tools-card,
+  .transaction-table-card,
+  .history-summary-card,
+  .wallet-card,
+  .monthly-graph-card,
+  .total-spend-card {
+    border-radius: 18px;
+    padding: 18px;
+  }
+}
+
+
+.wallet-balance-overview-card {
+  grid-column: span 4;
+  min-height: 154px;
+  display: grid;
+  align-content: space-between;
+  gap: 10px;
+  padding: 14px;
+}
+
+
+.wallet-balance-overview-card p,
+.wallet-mini-card p {
+  margin: 6px 0 10px;
+  color: var(--dash-body);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+
+.wallet-mini-card {
+  grid-column: span 4;
+  min-height: 118px;
+  display: grid;
+  align-content: space-between;
+  gap: 8px;
+  padding: 14px;
+}
+
+
+.wallet-mini-card span {
+  display: block;
+  color: var(--dash-muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+
+.wallet-mini-card strong {
+  display: block;
+  font-family: var(--dash-mono);
+  font-size: clamp(20px, 2.4vw, 28px);
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--dash-ink);
+}
+
+
+.wallet-mini-card.dark {
+  background: var(--dash-surface-dark);
+  color: #ffffff;
+}
+
+
+.wallet-mini-card.dark span,
+.wallet-mini-card.dark p,
+.wallet-mini-card.dark strong {
+  color: #ffffff;
+}
+
+
+.wallet-ledger-card {
+  grid-column: span 8;
+}
+
+
+.wallet-ledger-card .transaction-list {
+  min-height: 228px;
+  max-height: 228px;
+}
+
+
+.wallet-pending-card {
+  grid-column: span 4;
+}
+@media (max-width: 860px) {
+  .wallet-balance-overview-card,
+  .wallet-mini-card,
+  .wallet-ledger-card,
+  .wallet-pending-card {
+    grid-column: span 12;
+  }
+}
+
+
+.split-rooms-grid .room-list-card,
+.split-rooms-grid .member-balance-card,
+.split-rooms-grid .assignment-card,
+.split-rooms-grid .room-overview-card,
+.split-rooms-grid .room-items-card {
+  box-shadow: 0 10px 26px rgba(10, 11, 13, 0.045);
+}
+@media (max-width: 1180px) {
+  .split-rooms-grid .page-hero-card,
+  .split-rooms-grid .room-form-card,
+  .split-rooms-grid .room-list-card,
+  .split-rooms-grid .member-balance-card,
+  .split-rooms-grid .assignment-card,
+  .split-rooms-grid .room-overview-card,
+  .split-rooms-grid .room-items-card {
+    grid-column: span 12;
+  }
+}

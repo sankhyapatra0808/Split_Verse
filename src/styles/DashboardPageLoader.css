@@ -546,3 +546,11 @@
     width 180ms ease-out,
     opacity 260ms ease;
 }
+
+.dashboard-loader-topbar {
+  position: sticky;
+  top: 14px;
+  z-index: 70;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}

@@ -256,6 +256,11 @@ export type CreateSplitRoomItemPayload = {
   assignedMemberId: string;
 };
 
+export type UpdateSplitRoomItemPayload = {
+  title: string;
+  amount: number;
+};
+
 export type PendingDue = {
   id: string;
   title: string;
@@ -423,6 +428,34 @@ export async function createSplitRoomItem(
   );
 }
 
+export async function updateSplitRoomItem(
+  itemId: string,
+  payload: UpdateSplitRoomItemPayload,
+) {
+  return apiFetch<{ message: string; item: SplitRoomItem }>(
+    `/api/split-rooms/items/${itemId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function deleteSplitRoomItem(itemId: string) {
+  return apiFetch<{ message: string }>(`/api/split-rooms/items/${itemId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function removeSplitRoomMember(roomId: string, memberId: string) {
+  return apiFetch<{ message: string; removedMemberId: string }>(
+    `/api/split-rooms/${roomId}/members/${memberId}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
 export async function deleteSplitRoom(roomId: string) {
   return apiFetch<{ message: string }>(`/api/split-rooms/${roomId}`, {
     method: "DELETE",
@@ -523,4 +556,48 @@ export async function getTransactions(params?: {
 
 export async function getCurrentDbUser() {
   return apiFetch<{ user: DbUser }>("/api/auth/me");
+}
+
+export type UserDataExport = {
+  exportedAt: string;
+  user: DbUser;
+  dashboard: DashboardSummary;
+  wallet: WalletSummaryResponse;
+  walletTopUps: WalletTopUpItem[];
+  friends: FriendsSummary;
+  splitRooms: SplitRoom[];
+  transactions: TransactionItem[];
+  transactionSummary: TransactionsResponse["summary"];
+};
+
+export async function downloadMyData() {
+  const [
+    userResponse,
+    dashboard,
+    wallet,
+    topUps,
+    friends,
+    splitRooms,
+    transactions,
+  ] = await Promise.all([
+    getCurrentDbUser(),
+    getDashboardSummary(),
+    getWalletSummary(),
+    getRecentWalletTopUps(),
+    getFriendsSummary(),
+    getSplitRooms(),
+    getTransactions({ exportMode: "count", limit: 1000 }),
+  ]);
+
+  return {
+    exportedAt: new Date().toISOString(),
+    user: userResponse.user,
+    dashboard,
+    wallet,
+    walletTopUps: topUps.topUps,
+    friends,
+    splitRooms: splitRooms.rooms,
+    transactions: transactions.transactions,
+    transactionSummary: transactions.summary,
+  } satisfies UserDataExport;
 }

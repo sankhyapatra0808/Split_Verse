@@ -768,6 +768,8 @@ router.post(
   "/:roomId/members/:memberId/collect",
   verifyFirebaseToken,
   async (req: AuthRequest, res) => {
+    const client = await db.connect();
+
     try {
       await ensureSplitRoomTablesOnce();
 
@@ -792,23 +794,34 @@ router.post(
           .json({ message: "Room id and member id are required" });
       }
 
-      const roomResult = await db.query(
+      await client.query("BEGIN");
+
+      const roomResult = await client.query<{
+        id: string;
+        name: string;
+        owner_user_id: string;
+      }>(
         `
-        SELECT id
+        SELECT id, name, owner_user_id
         FROM split_rooms
         WHERE id = $1
-        AND owner_user_id = $2;
+        AND owner_user_id = $2
+        FOR UPDATE;
         `,
         [roomId, dbUser.id],
       );
 
-      if (roomResult.rows.length === 0) {
+      const room = roomResult.rows[0];
+
+      if (!room) {
+        await client.query("ROLLBACK");
+
         return res.status(404).json({
           message: "Room not found or you do not own this room",
         });
       }
 
-      const memberResult = await db.query<RoomMemberRow>(
+      const memberResult = await client.query<RoomMemberRow>(
         `
         SELECT id, room_id, user_id, display_name, email, role, status
         FROM split_room_members
@@ -817,9 +830,12 @@ router.post(
         `,
         [memberId, roomId],
       );
+
       const member = memberResult.rows[0];
 
       if (!member) {
+        await client.query("ROLLBACK");
+
         return res
           .status(404)
           .json({ message: "Member not found in this room" });
@@ -829,24 +845,80 @@ router.post(
         member.user_id === dbUser.id ||
         member.email?.toLowerCase() === dbUser.email.toLowerCase()
       ) {
+        await client.query("ROLLBACK");
+
         return res.status(400).json({
           message: "Your own spend is already counted on the dashboard",
         });
       }
 
-      const updateResult = await db.query(
+      if (!member.user_id) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          message:
+            "This member has not created a SplitVerse account yet, so their dashboard expense cannot be updated.",
+        });
+      }
+
+      const itemResult = await client.query<{
+        id: string;
+        title: string;
+        amount: number;
+        expense_id: string | null;
+      }>(
         `
         UPDATE split_room_items
         SET collected_at = NOW()
         WHERE room_id = $1
         AND assigned_member_id = $2
         AND collected_at IS NULL
-        RETURNING id;
+        RETURNING
+          id,
+          title,
+          amount::float,
+          expense_id;
         `,
         [roomId, memberId],
       );
 
-      await db.query(
+      for (const item of itemResult.rows) {
+        if (item.expense_id) {
+          continue;
+        }
+
+        const expenseResult = await client.query<{ id: string }>(
+          `
+          INSERT INTO expenses (
+            user_id,
+            title,
+            category,
+            amount,
+            expense_date
+          )
+          VALUES (
+            $1,
+            $2,
+            'Shared room',
+            $3,
+            (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+          )
+          RETURNING id;
+          `,
+          [member.user_id, `${room.name}: ${item.title}`, Number(item.amount)],
+        );
+
+        await client.query(
+          `
+          UPDATE split_room_items
+          SET expense_id = $1
+          WHERE id = $2;
+          `,
+          [expenseResult.rows[0].id, item.id],
+        );
+      }
+
+      await client.query(
         `
         UPDATE split_rooms
         SET
@@ -872,6 +944,8 @@ router.post(
         [roomId, dbUser.id, dbUser.email],
       );
 
+      await client.query("COMMIT");
+
       sendLiveUpdate([dbUser.id, member.user_id], {
         type: "split-room",
         reason: "dues-collected",
@@ -880,14 +954,485 @@ router.post(
 
       return res.json({
         message: "Dues marked as collected",
-        updatedCount: updateResult.rows.length,
+        updatedCount: itemResult.rows.length,
       });
     } catch (error) {
+      await client.query("ROLLBACK");
+
       console.error("Collect split room dues failed:", error);
 
       return res.status(500).json({
         message: "Failed to mark dues collected",
       });
+    } finally {
+      client.release();
+    }
+  },
+);
+
+
+router.patch(
+  "/items/:itemId",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
+
+    try {
+      await ensureSplitRoomTablesOnce();
+
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const dbUser = await getCurrentUser(firebaseUser.uid);
+
+      if (!dbUser) {
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      const itemId = getRouteParam(req, "itemId");
+      const title = String(req.body.title ?? "").trim();
+      const amount = Number(req.body.amount);
+
+      if (!itemId) {
+        return res.status(400).json({ message: "Item id is required" });
+      }
+
+      if (!title) {
+        return res.status(400).json({ message: "Item name is required" });
+      }
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res
+          .status(400)
+          .json({ message: "Amount must be greater than 0" });
+      }
+
+      await client.query("BEGIN");
+
+      const itemResult = await client.query<{
+        id: string;
+        room_id: string;
+        title: string;
+        amount: number;
+        collected_at: string | null;
+        expense_id: string | null;
+        owner_user_id: string;
+      }>(
+        `
+        SELECT
+          item.id,
+          item.room_id,
+          item.title,
+          item.amount::float,
+          item.collected_at,
+          item.expense_id,
+          room.owner_user_id
+        FROM split_room_items item
+        INNER JOIN split_rooms room
+          ON room.id = item.room_id
+        WHERE item.id = $1
+        FOR UPDATE;
+        `,
+        [itemId],
+      );
+
+      const item = itemResult.rows[0];
+
+      if (!item) {
+        await client.query("ROLLBACK");
+
+        return res.status(404).json({ message: "Split room item not found" });
+      }
+
+      if (item.owner_user_id !== dbUser.id) {
+        await client.query("ROLLBACK");
+
+        return res.status(403).json({
+          message: "Only the room owner can edit this item",
+        });
+      }
+
+      if (item.collected_at || item.expense_id) {
+        await client.query("ROLLBACK");
+
+        return res.status(409).json({
+          message: "Collected items cannot be edited",
+        });
+      }
+
+      const updatedResult = await client.query<RoomItemRow>(
+        `
+        UPDATE split_room_items
+        SET
+          title = $1,
+          amount = $2
+        WHERE id = $3
+        RETURNING
+          id,
+          room_id,
+          assigned_member_id,
+          title,
+          amount::float,
+          collected_at,
+          expense_id,
+          created_at;
+        `,
+        [title, amount, itemId],
+      );
+
+      await client.query(
+        `
+        UPDATE split_rooms
+        SET
+          payment_status = 'no_one_paid',
+          updated_at = NOW()
+        WHERE id = $1;
+        `,
+        [item.room_id],
+      );
+
+      await client.query("COMMIT");
+
+      const notifiedUserIds = await getRoomUserIds(item.room_id);
+      sendLiveUpdate([dbUser.id, ...notifiedUserIds], {
+        type: "split-room",
+        reason: "item-edited",
+        roomId: item.room_id,
+      });
+
+      return res.json({
+        message: "Split item updated",
+        item: updatedResult.rows[0],
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+
+      console.error("Update split item failed:", error);
+
+      return res.status(500).json({
+        message: "Failed to update split item",
+      });
+    } finally {
+      client.release();
+    }
+  },
+);
+
+router.delete(
+  "/items/:itemId",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
+
+    try {
+      await ensureSplitRoomTablesOnce();
+
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const dbUser = await getCurrentUser(firebaseUser.uid);
+
+      if (!dbUser) {
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      const itemId = getRouteParam(req, "itemId");
+
+      if (!itemId) {
+        return res.status(400).json({ message: "Item id is required" });
+      }
+
+      await client.query("BEGIN");
+
+      const itemResult = await client.query<{
+        id: string;
+        room_id: string;
+        collected_at: string | null;
+        expense_id: string | null;
+        owner_user_id: string;
+      }>(
+        `
+        SELECT
+          item.id,
+          item.room_id,
+          item.collected_at,
+          item.expense_id,
+          room.owner_user_id
+        FROM split_room_items item
+        INNER JOIN split_rooms room
+          ON room.id = item.room_id
+        WHERE item.id = $1
+        FOR UPDATE;
+        `,
+        [itemId],
+      );
+
+      const item = itemResult.rows[0];
+
+      if (!item) {
+        await client.query("ROLLBACK");
+
+        return res.status(404).json({ message: "Split room item not found" });
+      }
+
+      if (item.owner_user_id !== dbUser.id) {
+        await client.query("ROLLBACK");
+
+        return res.status(403).json({
+          message: "Only the room owner can delete this item",
+        });
+      }
+
+      if (item.collected_at || item.expense_id) {
+        await client.query("ROLLBACK");
+
+        return res.status(409).json({
+          message: "Collected items cannot be deleted",
+        });
+      }
+
+      await client.query(
+        `
+        DELETE FROM split_room_items
+        WHERE id = $1;
+        `,
+        [itemId],
+      );
+
+      await client.query(
+        `
+        UPDATE split_rooms
+        SET
+          payment_status = CASE
+            WHEN NOT EXISTS (
+              SELECT 1
+              FROM split_room_items
+              WHERE room_id = $1
+            )
+              THEN 'no_one_paid'
+            WHEN NOT EXISTS (
+              SELECT 1
+              FROM split_room_items item
+              INNER JOIN split_room_members member
+                ON member.id = item.assigned_member_id
+              WHERE item.room_id = $1
+              AND item.collected_at IS NULL
+              AND NOT (
+                member.user_id = $2
+                OR LOWER(COALESCE(member.email, '')) = LOWER($3)
+              )
+            )
+              THEN 'all_paid'
+            ELSE 'no_one_paid'
+          END,
+          updated_at = NOW()
+        WHERE id = $1;
+        `,
+        [item.room_id, dbUser.id, dbUser.email],
+      );
+
+      await client.query("COMMIT");
+
+      const notifiedUserIds = await getRoomUserIds(item.room_id);
+      sendLiveUpdate([dbUser.id, ...notifiedUserIds], {
+        type: "split-room",
+        reason: "item-deleted",
+        roomId: item.room_id,
+      });
+
+      return res.json({
+        message: "Split item deleted",
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+
+      console.error("Delete split item failed:", error);
+
+      return res.status(500).json({
+        message: "Failed to delete split item",
+      });
+    } finally {
+      client.release();
+    }
+  },
+);
+
+
+
+router.delete(
+  "/:roomId/members/:memberId",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
+
+    try {
+      await ensureSplitRoomTablesOnce();
+
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const dbUser = await getCurrentUser(firebaseUser.uid);
+
+      if (!dbUser) {
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      const roomId = getRouteParam(req, "roomId");
+      const memberId = getRouteParam(req, "memberId");
+
+      if (!roomId || !memberId) {
+        return res
+          .status(400)
+          .json({ message: "Room id and member id are required" });
+      }
+
+      await client.query("BEGIN");
+
+      const roomResult = await client.query<{
+        id: string;
+        owner_user_id: string;
+      }>(
+        `
+        SELECT id, owner_user_id
+        FROM split_rooms
+        WHERE id = $1
+        AND owner_user_id = $2
+        FOR UPDATE;
+        `,
+        [roomId, dbUser.id],
+      );
+
+      const room = roomResult.rows[0];
+
+      if (!room) {
+        await client.query("ROLLBACK");
+
+        return res.status(404).json({
+          message: "Room not found or you do not own this room",
+        });
+      }
+
+      const memberResult = await client.query<RoomMemberRow>(
+        `
+        SELECT id, room_id, user_id, display_name, email, role, status
+        FROM split_room_members
+        WHERE id = $1
+        AND room_id = $2
+        FOR UPDATE;
+        `,
+        [memberId, roomId],
+      );
+
+      const member = memberResult.rows[0];
+
+      if (!member) {
+        await client.query("ROLLBACK");
+
+        return res
+          .status(404)
+          .json({ message: "Member not found in this room" });
+      }
+
+      if (
+        member.role === "owner" ||
+        member.user_id === dbUser.id ||
+        member.email?.toLowerCase() === dbUser.email.toLowerCase()
+      ) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          message: "The room host cannot be removed",
+        });
+      }
+
+      const assignedItemsResult = await client.query<{
+        item_count: number;
+      }>(
+        `
+        SELECT COUNT(*)::int AS item_count
+        FROM split_room_items
+        WHERE room_id = $1
+        AND assigned_member_id = $2;
+        `,
+        [roomId, memberId],
+      );
+      const assignedItemCount = Number(
+        assignedItemsResult.rows[0]?.item_count ?? 0,
+      );
+
+      if (assignedItemCount > 0) {
+        await client.query("ROLLBACK");
+
+        return res.status(409).json({
+          message:
+            "This member has room history, so removing them would affect previous split records.",
+        });
+      }
+
+      const notifiedUserIdsResult = await client.query<{
+        user_id: string | null;
+      }>(
+        `
+        SELECT DISTINCT user_id
+        FROM split_room_members
+        WHERE room_id = $1
+        AND user_id IS NOT NULL;
+        `,
+        [roomId],
+      );
+      const notifiedUserIds = notifiedUserIdsResult.rows.map(
+        (row) => row.user_id,
+      );
+
+      await client.query(
+        `
+        DELETE FROM split_room_members
+        WHERE id = $1
+        AND room_id = $2;
+        `,
+        [memberId, roomId],
+      );
+
+      await client.query(
+        `
+        UPDATE split_rooms
+        SET updated_at = NOW()
+        WHERE id = $1;
+        `,
+        [roomId],
+      );
+
+      await client.query("COMMIT");
+
+      sendLiveUpdate([dbUser.id, ...notifiedUserIds], {
+        type: "split-room",
+        reason: "member-removed",
+        roomId,
+      });
+
+      return res.json({
+        message: "Member removed from room",
+        removedMemberId: memberId,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+
+      console.error("Remove split room member failed:", error);
+
+      return res.status(500).json({
+        message: "Failed to remove member from room",
+      });
+    } finally {
+      client.release();
     }
   },
 );

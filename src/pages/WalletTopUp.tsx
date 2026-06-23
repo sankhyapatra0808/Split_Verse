@@ -16,6 +16,7 @@ import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
 import { withTopProgress } from "../utils/topProgress";
 import DashboardLayout from "./dashboard/DashboardLayout";
+import "../styles/WalletTopUp.css";
 
 const amounts = [500, 1000, 2000, 5000];
 const methods = [
@@ -55,11 +56,11 @@ function formatTopUpDate(dateValue: string) {
 }
 
 export default function WalletTopUp() {
-  const { formatCurrency } = useAppSettings();
+  const { defaultTopUpMethod, formatCurrency } = useAppSettings();
   const [selectedAmount, setSelectedAmount] = useState(1000);
   const [customAmount, setCustomAmount] = useState("");
   const [selectedMethod, setSelectedMethod] =
-    useState<WalletTopUpMethod>("UPI");
+    useState<WalletTopUpMethod>(defaultTopUpMethod);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -68,6 +69,10 @@ export default function WalletTopUp() {
   const [topUpsError, setTopUpsError] = useState("");
 
   const topUpAmount = customAmount ? Number(customAmount) : selectedAmount;
+
+  useEffect(() => {
+    setSelectedMethod(defaultTopUpMethod);
+  }, [defaultTopUpMethod]);
 
   async function loadRecentTopUps({ silent = false } = {}) {
     if (!silent) {

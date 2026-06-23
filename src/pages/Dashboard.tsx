@@ -19,6 +19,7 @@ import {
 import Dropdown from "../components/Dropdown";
 import { useAppSettings } from "../context/useAppSettings";
 import { withTopProgress } from "../utils/topProgress";
+import "../styles/Dashboard.css";
 
 const TIME_SLOTS = [
   { label: "12 AM - 6 AM", startHour: 0 },

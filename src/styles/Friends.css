@@ -1,0 +1,385 @@
+/* Friends page styles */
+.friends-grid {
+  gap: 12px;
+}
+
+
+.friend-request-card,
+.friend-inbox-card,
+.friend-sent-card {
+  grid-column: span 4;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+
+.friends-list-card {
+  grid-column: span 8;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+
+.friend-list,
+.friend-request-list {
+  display: grid;
+  gap: 9px;
+}
+
+
+.friend-row,
+.friend-request-row {
+  min-height: 54px;
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 16px;
+  background: var(--dash-surface-soft);
+}
+
+
+.friend-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+
+.friend-row img,
+.friend-row > span {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+}
+
+
+.friend-row img {
+  object-fit: cover;
+}
+
+
+.friend-row > span {
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: var(--dash-surface-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+
+.friend-row div,
+.friend-request-row div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+
+.friend-row strong,
+.friend-request-row strong {
+  color: var(--dash-ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+
+.friend-row small,
+.friend-request-row span {
+  overflow-wrap: anywhere;
+  color: var(--dash-body);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+
+.friend-request-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+
+.friend-request-row.highlighted {
+  border-color: rgba(0, 82, 255, 0.42);
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(0, 82, 255, 0.12);
+}
+
+
+.friend-request-row button,
+.friend-request-row a {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 13px;
+  color: #ffffff;
+  background: var(--dash-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+
+.friend-request-row.sent a {
+  color: var(--dash-primary);
+  background: rgba(0, 82, 255, 0.08);
+}
+
+
+.assignment-grid button:disabled,
+.friend-request-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+@media (max-width: 1180px) {
+
+  .expense-tracker-card,
+  .summary-card,
+  .page-hero-card,
+  .friends-list-card,
+  .transaction-tools-card,
+  .transaction-table-card {
+    grid-column: span 12;
+  }
+
+
+  .total-spend-card,
+  .room-form-card,
+  .member-balance-card,
+  .assignment-card,
+  .friend-request-card,
+  .friend-inbox-card,
+  .friend-sent-card,
+  .balance-card,
+  .balance-total-card,
+  .account-breakdown-card,
+  .balance-settings-card,
+  .topup-form-card,
+  .payment-method-card,
+  .topup-summary-card,
+  .recent-topups-card,
+  .monthly-graph-card,
+  .settings-card,
+  .history-summary-card {
+    grid-column: span 4;
+  }
+}
+@media (max-width: 860px) {
+
+  .wallet-card,
+  .monthly-graph-card,
+  .summary-card,
+  .total-spend-card,
+  .page-hero-card,
+  .room-form-card,
+  .room-list-card,
+  .member-balance-card,
+  .assignment-card,
+  .friend-request-card,
+  .friend-inbox-card,
+  .friend-sent-card,
+  .balance-card,
+  .balance-total-card,
+  .account-breakdown-card,
+  .settlement-card,
+  .balance-settings-card,
+  .topup-form-card,
+  .payment-method-card,
+  .topup-summary-card,
+  .recent-topups-card,
+  .settings-card,
+  .transaction-tools-card,
+  .transaction-table-card,
+  .friends-list-card,
+  .history-summary-card {
+    grid-column: span 12;
+  }
+
+
+  .friend-request-row,
+  .split-room-item-list div {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+
+  .friends-grid {
+    gap: 10px;
+  }
+
+
+  .friend-request-card,
+  .friend-inbox-card,
+  .friend-sent-card,
+  .friends-list-card {
+    gap: 12px;
+  }
+}
+@media (max-width: 560px) {
+
+  .bento-card,
+  .expense-tracker-card,
+  .summary-card,
+  .page-hero-card,
+  .room-form-card,
+  .room-list-card,
+  .member-balance-card,
+  .assignment-card,
+  .friend-request-card,
+  .friend-inbox-card,
+  .friend-sent-card,
+  .friends-list-card,
+  .balance-card,
+  .balance-total-card,
+  .account-breakdown-card,
+  .settlement-card,
+  .balance-settings-card,
+  .topup-form-card,
+  .payment-method-card,
+  .topup-summary-card,
+  .recent-topups-card,
+  .settings-card,
+  .transaction-tools-card,
+  .transaction-table-card,
+  .history-summary-card,
+  .wallet-card,
+  .monthly-graph-card,
+  .total-spend-card {
+    border-radius: 18px;
+    padding: 18px;
+  }
+
+
+  .friend-request-row,
+  .split-room-item-list div {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+
+  .friend-row,
+  .friend-request-row {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+
+  .friend-request-row button,
+  .friend-request-row a {
+    width: 100%;
+  }
+}
+
+
+.friend-search-field {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 999px;
+  background: var(--dash-canvas);
+  box-shadow: 0 8px 22px rgba(10, 11, 13, 0.04);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+
+.friend-search-field:focus-within {
+  border-color: rgba(0, 82, 255, 0.38);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.09);
+}
+
+
+.friend-search-field svg {
+  flex: 0 0 auto;
+  color: var(--dash-muted);
+}
+
+
+.friend-search-field input {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--dash-ink);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+
+.friend-search-field input::placeholder {
+  color: var(--dash-muted);
+  font-weight: 500;
+}
+
+
+.friend-search-field span {
+  display: none;
+}
+
+.friend-search-field {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 999px;
+  background: var(--dash-canvas);
+  box-shadow: 0 8px 22px rgba(10, 11, 13, 0.04);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.friend-search-field:focus-within {
+  border-color: rgba(0, 82, 255, 0.38);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.09);
+}
+
+.friend-search-field svg {
+  flex: 0 0 auto;
+  color: var(--dash-muted);
+}
+
+.friend-search-field input {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--dash-ink);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.friend-search-field input::placeholder {
+  color: var(--dash-muted);
+  font-weight: 500;
+}
+
+.friend-search-field > span {
+  display: none;
+}
+

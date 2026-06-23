@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, Mail, Send, UserPlus, UsersRound } from "lucide-react";
+import { Check, Mail, Search, Send, UserPlus, UsersRound } from "lucide-react";
 
 import DashboardLayout from "./dashboard/DashboardLayout";
 import {
@@ -11,6 +11,7 @@ import {
 } from "../lib/api";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { withTopProgress } from "../utils/topProgress";
+import "../styles/Friends.css";
 
 const emptySummary: FriendsSummary = {
   friends: [],
@@ -330,6 +331,7 @@ export default function Friends() {
           </div>
 
           <label className="friend-search-field">
+            <Search size={18} />
             <span>Search friends</span>
             <input
               type="search"

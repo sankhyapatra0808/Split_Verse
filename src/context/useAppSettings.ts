@@ -2,12 +2,20 @@ import { createContext, useContext } from "react";
 
 export type CurrencyCode = "INR" | "USD" | "EUR" | "GBP" | "JPY" | "AED";
 export type AvatarId = "current" | "initials";
+export type WalletTopUpMethod = "UPI" | "Card" | "Net banking";
 
 export type CurrencyOption = {
   code: CurrencyCode;
   label: string;
   symbol: string;
   rateFromInr: number;
+};
+
+export type NotificationPreferences = {
+  friendRequestEmails: boolean;
+  loginOtpEmails: boolean;
+  settlementReminderEmails: boolean;
+  roomDueNotifications: boolean;
 };
 
 export type AppSettingsValue = {
@@ -19,6 +27,9 @@ export type AppSettingsValue = {
   converterFrom: CurrencyCode;
   converterTo: CurrencyCode;
   converterAmount: number;
+  defaultTopUpMethod: WalletTopUpMethod;
+  confirmBeforeWalletPayment: boolean;
+  notificationPreferences: NotificationPreferences;
   currencies: CurrencyOption[];
   setAvatarId: (avatarId: AvatarId) => void;
   setCompactMode: (enabled: boolean) => void;
@@ -28,10 +39,17 @@ export type AppSettingsValue = {
   setConverterFrom: (currency: CurrencyCode) => void;
   setConverterTo: (currency: CurrencyCode) => void;
   setConverterAmount: (amount: number) => void;
+  setDefaultTopUpMethod: (method: WalletTopUpMethod) => void;
+  setConfirmBeforeWalletPayment: (enabled: boolean) => void;
+  setNotificationPreference: (
+    key: keyof NotificationPreferences,
+    enabled: boolean,
+  ) => void;
+  clearLocalAppSettings: () => void;
   convertCurrency: (
     amount: number,
     fromCurrency: CurrencyCode,
-    toCurrency: CurrencyCode
+    toCurrency: CurrencyCode,
   ) => number;
   formatCurrency: (amountInInr: number, options?: { signed?: boolean }) => string;
 };

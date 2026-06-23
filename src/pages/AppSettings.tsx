@@ -4,26 +4,39 @@ import {
   AlertTriangle,
   BellRing,
   Coins,
+  CreditCard,
+  Download,
   EyeOff,
+  Mail,
+  RotateCcw,
+  Search,
   Shield,
+  ShieldCheck,
   SlidersHorizontal,
   Trash2,
   UserRound,
   UsersRound,
+  WalletCards,
   X,
 } from "lucide-react";
 
 import Dropdown, { type DropdownOption } from "../components/Dropdown";
-import { useAppSettings, type CurrencyCode } from "../context/useAppSettings";
+import {
+  useAppSettings,
+  type CurrencyCode,
+  type WalletTopUpMethod,
+} from "../context/useAppSettings";
 import { useAuth } from "../context/useAuth";
 import {
   deleteAccount,
   deleteFriend,
+  downloadMyData,
   getFriendsSummary,
   type Friend,
 } from "../lib/api";
 import { withTopProgress } from "../utils/topProgress";
 import DashboardLayout from "./dashboard/DashboardLayout";
+import "../styles/AppSettings.css";
 
 const deleteAccountConfirmationText = "/DeleteAccount";
 
@@ -43,6 +56,21 @@ function formatFriendshipAge(days: number) {
   return `Friends for ${days} days`;
 }
 
+function downloadJsonFile(fileName: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export default function AppSettings() {
   const navigate = useNavigate();
   const { logout } = useAuth();
@@ -50,20 +78,27 @@ export default function AppSettings() {
     appCurrency,
     avatarId,
     compactMode,
+    confirmBeforeWalletPayment,
     converterAmount,
     converterFrom,
     converterTo,
     currencies,
+    defaultTopUpMethod,
+    notificationPreferences,
     privacyMode,
     settlementReminders,
+    clearLocalAppSettings,
     convertCurrency,
     formatCurrency,
     setAppCurrency,
     setAvatarId,
     setCompactMode,
+    setConfirmBeforeWalletPayment,
     setConverterAmount,
     setConverterFrom,
     setConverterTo,
+    setDefaultTopUpMethod,
+    setNotificationPreference,
     setPrivacyMode,
     setSettlementReminders,
   } = useAppSettings();
@@ -77,11 +112,14 @@ export default function AppSettings() {
   const [deletingFriendId, setDeletingFriendId] = useState("");
   const [friendDeleteMessage, setFriendDeleteMessage] = useState("");
   const [friendDeleteError, setFriendDeleteError] = useState("");
+  const [settingsMessage, setSettingsMessage] = useState("");
+  const [settingsError, setSettingsError] = useState("");
+  const [downloadingData, setDownloadingData] = useState(false);
 
   const convertedAmount = convertCurrency(
     converterAmount,
     converterFrom,
-    converterTo
+    converterTo,
   );
   const currencyOptions: DropdownOption<CurrencyCode>[] = currencies.map(
     (currency) => ({
@@ -95,6 +133,11 @@ export default function AppSettings() {
       label: currency.code,
     }),
   );
+  const topUpMethodOptions: DropdownOption<WalletTopUpMethod>[] = [
+    { value: "UPI", label: "UPI" },
+    { value: "Card", label: "Card" },
+    { value: "Net banking", label: "Net banking" },
+  ];
   const canDeleteAccount = deleteConfirmation === deleteAccountConfirmationText;
   const trimmedFriendSearch = friendSearch.trim();
   const visibleFriends = useMemo(() => {
@@ -196,6 +239,61 @@ export default function AppSettings() {
     } finally {
       setDeletingAccount(false);
     }
+  }
+
+  async function handleDownloadMyData() {
+    setSettingsMessage("");
+    setSettingsError("");
+    setDownloadingData(true);
+
+    try {
+      const serverData = await withTopProgress(downloadMyData);
+      const exportedAt = new Date();
+
+      downloadJsonFile(
+        `splitverse-data-${exportedAt.toISOString().slice(0, 10)}.json`,
+        {
+          ...serverData,
+          localSettings: {
+            appCurrency,
+            avatarId,
+            compactMode,
+            confirmBeforeWalletPayment,
+            converterAmount,
+            converterFrom,
+            converterTo,
+            defaultTopUpMethod,
+            notificationPreferences,
+            privacyMode,
+            settlementReminders,
+          },
+        },
+      );
+
+      setSettingsMessage("Your SplitVerse data export was downloaded.");
+    } catch (error) {
+      setSettingsError(
+        error instanceof Error
+          ? error.message
+          : "Could not download your SplitVerse data.",
+      );
+    } finally {
+      setDownloadingData(false);
+    }
+  }
+
+  function handleClearLocalSettings() {
+    const confirmed = window.confirm(
+      "Clear local app settings? This resets only this browser's SplitVerse preferences like currency, top-up method, privacy mode, and notification toggles. Your account, friends, wallet, and expenses will not be deleted.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    clearLocalAppSettings();
+    setSettingsError("");
+    setSettingsMessage("Local app settings were reset for this browser.");
   }
 
   return (
@@ -323,7 +421,9 @@ export default function AppSettings() {
               <input
                 type="checkbox"
                 checked={settlementReminders}
-                onChange={(event) => setSettlementReminders(event.target.checked)}
+                onChange={(event) =>
+                  setSettlementReminders(event.target.checked)
+                }
               />
             </label>
             <label>
@@ -353,6 +453,123 @@ export default function AppSettings() {
           </div>
         </article>
 
+        <article className="bento-card settings-card">
+          <div className="bento-card-head">
+            <div>
+              <span>Wallet defaults</span>
+              <h2>Payment safety</h2>
+            </div>
+            <WalletCards size={22} />
+          </div>
+
+          <label className="settings-field">
+            <span>Default wallet top-up method</span>
+            <Dropdown
+              ariaLabel="Default wallet top-up method"
+              value={defaultTopUpMethod}
+              options={topUpMethodOptions}
+              onChange={setDefaultTopUpMethod}
+            />
+          </label>
+
+          <div className="settings-toggle-list compact">
+            <label>
+              <ShieldCheck size={19} />
+              <span>
+                <strong>Ask before wallet payment</strong>
+                <small>
+                  Show a confirmation before paying split-room dues from wallet.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                checked={confirmBeforeWalletPayment}
+                onChange={(event) =>
+                  setConfirmBeforeWalletPayment(event.target.checked)
+                }
+              />
+            </label>
+          </div>
+        </article>
+
+        <article className="bento-card settings-card">
+          <div className="bento-card-head">
+            <div>
+              <span>Notifications</span>
+              <h2>Preference center</h2>
+            </div>
+            <Mail size={22} />
+          </div>
+
+          <div className="settings-toggle-list">
+            <label>
+              <UsersRound size={19} />
+              <span>
+                <strong>Friend request emails</strong>
+                <small>Allow email invites and friend request updates.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={notificationPreferences.friendRequestEmails}
+                onChange={(event) =>
+                  setNotificationPreference(
+                    "friendRequestEmails",
+                    event.target.checked,
+                  )
+                }
+              />
+            </label>
+            <label>
+              <ShieldCheck size={19} />
+              <span>
+                <strong>Login OTP emails</strong>
+                <small>Receive email login codes for safer sign-in.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={notificationPreferences.loginOtpEmails}
+                onChange={(event) =>
+                  setNotificationPreference("loginOtpEmails", event.target.checked)
+                }
+              />
+            </label>
+            <label>
+              <BellRing size={19} />
+              <span>
+                <strong>Settlement reminder emails</strong>
+                <small>Allow reminders for pending balances and dues.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={notificationPreferences.settlementReminderEmails}
+                onChange={(event) =>
+                  setNotificationPreference(
+                    "settlementReminderEmails",
+                    event.target.checked,
+                  )
+                }
+              />
+            </label>
+            <label>
+              <CreditCard size={19} />
+              <span>
+                <strong>Room due notifications</strong>
+                <small>Show room dues and wallet payment alerts in the app.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={notificationPreferences.roomDueNotifications}
+                onChange={(event) =>
+                  setNotificationPreference(
+                    "roomDueNotifications",
+                    event.target.checked,
+                  )
+                }
+              />
+            </label>
+          </div>
+        </article>
+
         <article className="bento-card settings-card friend-delete-card">
           <div className="bento-card-head">
             <div>
@@ -363,6 +580,7 @@ export default function AppSettings() {
           </div>
 
           <label className="settings-field friend-search-field">
+            <Search size={18} />
             <span>Search friend to delete</span>
             <input
               type="search"
@@ -387,20 +605,37 @@ export default function AppSettings() {
                 </p>
               )}
             {visibleFriends.map((friend) => (
-              <div className="settings-friend-delete-row" key={friend.id}>
-                <span>
-                  <strong>{getFriendLabel(friend)}</strong>
-                </span>
+              <article className="settings-friend-card" key={friend.id}>
+                <div className="settings-friend-main">
+                  {friend.photo_url ? (
+                    <img
+                      className="settings-friend-avatar"
+                      src={friend.photo_url}
+                      alt=""
+                    />
+                  ) : (
+                    <span className="settings-friend-avatar">
+                      {getFriendLabel(friend).slice(0, 2).toUpperCase()}
+                    </span>
+                  )}
+
+                  <div className="settings-friend-info">
+                    <strong>{getFriendLabel(friend)}</strong>
+                    <span>{friend.email}</span>
+                    <small>{formatFriendshipAge(friend.friendship_days)}</small>
+                  </div>
+                </div>
+
                 <button
-                  className="dashboard-danger-button"
+                  className="settings-danger-button settings-friend-delete-button"
                   type="button"
                   onClick={() => handleDeleteFriend(friend)}
                   disabled={deletingFriendId === friend.id}
                 >
                   <Trash2 size={15} />
-                  {deletingFriendId === friend.id ? "Deleting" : "Delete"}
+                  {deletingFriendId === friend.id ? "Deleting" : "Remove"}
                 </button>
-              </div>
+              </article>
             ))}
           </div>
 
@@ -420,28 +655,59 @@ export default function AppSettings() {
         <article className="bento-card settings-card danger-zone-card">
           <div className="bento-card-head">
             <div>
-              <span>Account control</span>
-              <h2>Delete account</h2>
+              <span>Danger zone</span>
+              <h2>Account control</h2>
             </div>
             <AlertTriangle size={22} />
           </div>
           <p>
-            Delete your SplitVerse account from Firebase and Neon. This is only
-            allowed when your wallet balance is zero and all pending dues are
-            cleared.
+            Download your SplitVerse data, reset this browser's local settings,
+            or permanently delete your account after all dues are cleared.
           </p>
-          <button
-            className="dashboard-danger-button"
-            type="button"
-            onClick={() => {
-              setDeleteConfirmation("");
-              setDeleteError("");
-              setDeleteDialogOpen(true);
-            }}
-          >
-            <Trash2 size={17} />
-            Delete account
-          </button>
+
+          <div className="settings-danger-actions">
+            <button
+              className="settings-safe-button"
+              type="button"
+              onClick={handleDownloadMyData}
+              disabled={downloadingData}
+            >
+              <Download size={17} />
+              {downloadingData ? "Preparing data" : "Download my data"}
+            </button>
+            <button
+              className="settings-outline-danger-button"
+              type="button"
+              onClick={handleClearLocalSettings}
+            >
+              <RotateCcw size={17} />
+              Clear local app settings
+            </button>
+            <button
+              className="settings-danger-button settings-delete-account-button"
+              type="button"
+              onClick={() => {
+                setDeleteConfirmation("");
+                setDeleteError("");
+                setDeleteDialogOpen(true);
+              }}
+            >
+              <Trash2 size={17} />
+              Delete account
+            </button>
+          </div>
+
+          {(settingsMessage || settingsError) && (
+            <p
+              className={
+                settingsError
+                  ? "settings-inline-message error"
+                  : "settings-inline-message"
+              }
+            >
+              {settingsError || settingsMessage}
+            </p>
+          )}
         </article>
       </section>
 
@@ -503,7 +769,7 @@ export default function AppSettings() {
                 Cancel
               </button>
               <button
-                className="dashboard-danger-button"
+                className="settings-danger-button"
                 type="submit"
                 disabled={deletingAccount || !canDeleteAccount}
               >
