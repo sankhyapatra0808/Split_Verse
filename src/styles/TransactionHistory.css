@@ -1,172 +1,192 @@
-/* Transaction History page styles */
-.page-hero-card.dark,
-.balance-total-card.dark,
-.history-summary-card.dark {
-  color: #ffffff;
-  background: var(--dash-surface-dark);
+/* Transaction History page - scoped styles only.
+   Do not add unscoped .transaction-row / .transaction-list rules here. */
+
+.transaction-history-grid {
+  align-items: start;
 }
 
-
-.page-hero-card.dark h2,
-.page-hero-card.dark .bento-card-head span,
-.page-hero-card.dark p,
-.balance-total-card.dark,
-.history-summary-card.dark {
-  color: #ffffff;
+.transaction-history-grid .page-hero-card {
+  grid-column: span 8;
+  min-height: 170px;
 }
 
-
-.page-hero-card p,
-.balance-total-card p,
-.history-summary-card p,
-.topup-summary-card p {
-  max-width: 680px;
-  margin: 0;
-  color: var(--dash-body);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-
-.page-hero-card.dark p,
-.balance-total-card.dark p,
-.history-summary-card.dark p {
-  color: var(--dash-muted-soft);
-}
-
-
-.transaction-ledger-card {
-  gap: 12px;
-  padding: 14px;
-}
-
-
-.transaction-ledger-card .transaction-list {
-  gap: 7px;
-  max-height: clamp(220px, 36svh, 340px);
-}
-
-
-.transaction-ledger-card .transaction-row {
-  min-height: 46px;
-  gap: 7px;
-  padding: 8px 9px;
-  border-radius: 14px;
-}
-
-
-.transaction-ledger-card .transaction-row strong,
-.transaction-ledger-card .transaction-row em {
-  font-size: 13px;
-}
-
-
-.transaction-ledger-card .transaction-row span,
-.transaction-ledger-card .transaction-row time {
-  font-size: 12px;
-}
-
-
-.transaction-ledger-card .status-pill {
-  min-height: 24px;
-  padding: 3px 8px;
-  font-size: 12px;
-}
-
-
-.assignment-card,
-.member-balance-card,
-.balance-card,
-.balance-settings-card,
-.topup-form-card,
-.topup-summary-card,
-.recent-topups-card,
-.history-summary-card {
-  grid-column: span 4;
+.transaction-history-grid .transaction-tools-card {
+  grid-column: span 12;
   display: grid;
   gap: 16px;
   padding: 18px;
 }
 
-
-.history-summary-card {
-  align-self: start;
+.transaction-history-grid .transaction-tools {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 180px auto auto;
+  gap: 12px;
+  align-items: center;
 }
 
-
-.balance-total-details > span,
-.topup-summary-card > span,
-.history-summary-card > span {
+.transaction-history-grid .search-field {
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 999px;
   color: var(--dash-muted);
+  background: var(--dash-canvas);
+}
+
+.transaction-history-grid .search-field input {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--dash-ink);
+  background: transparent;
+  font: inherit;
+}
+
+.transaction-history-grid .search-field:focus-within {
+  border-color: var(--dash-primary);
+  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+}
+
+.transaction-history-grid .transaction-ledger-card {
+  grid-column: span 8;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-self: start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.transaction-history-grid .history-summary-card {
+  grid-column: span 4;
+  align-self: start;
+  display: grid;
+  align-content: space-between;
+  gap: 16px;
+  min-height: 170px;
+  padding: 18px;
+  color: #ffffff;
+  background: var(--dash-surface-dark);
+}
+
+.transaction-history-grid .history-summary-card > span {
+  color: var(--dash-muted-soft);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.5;
   text-transform: uppercase;
 }
 
-
-.balance-total-card strong,
-.topup-summary-card strong,
-.history-summary-card strong {
+.transaction-history-grid .history-summary-card strong {
+  color: #ffffff;
   font-family: var(--dash-mono);
   font-size: 30px;
   font-weight: 500;
   line-height: 1.05;
 }
 
-
-.dashboard-form input,
-.dashboard-form select,
-.assignment-grid input,
-.assignment-grid select,
-.transaction-tools select,
-.transaction-export-dialog input,
-.transaction-export-dialog select,
-.search-field input {
-  width: 100%;
-  box-sizing: border-box;
-  height: 46px;
-  border: 1px solid var(--dash-hairline);
-  border-radius: 12px;
-  outline: 0;
-  padding: 0 14px;
-  color: var(--dash-ink);
-  background: var(--dash-canvas);
-  font: inherit;
+.transaction-history-grid .history-summary-card p {
+  margin: 0;
+  color: var(--dash-muted-soft);
   font-size: 14px;
+  line-height: 1.5;
 }
 
-
-.dashboard-form input:focus,
-.dashboard-form select:focus,
-.assignment-grid input:focus,
-.assignment-grid select:focus,
-.transaction-tools select:focus,
-.transaction-export-dialog input:focus,
-.transaction-export-dialog select:focus,
-.search-field:focus-within {
-  border-color: var(--dash-primary);
-  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
-}
-
-
-.transaction-tools-card {
-  grid-column: span 12;
-  padding: 18px;
-}
-
-
-.transaction-tools {
+.transaction-history-grid .transaction-list {
+  min-height: 0;
+  max-height: clamp(220px, 36svh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 180px auto auto;
-  gap: 12px;
+  gap: 7px;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
+.transaction-history-grid .transaction-row {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 14px;
+  background: var(--dash-surface-soft);
+}
+
+.transaction-history-grid .transaction-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.transaction-history-grid .transaction-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dash-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transaction-history-grid .transaction-row span,
+.transaction-history-grid .transaction-row time {
+  color: var(--dash-body);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.transaction-history-grid .transaction-row em {
+  color: var(--dash-ink);
+  font-family: var(--dash-mono);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.transaction-history-grid .transaction-row time {
+  color: var(--dash-muted);
+  white-space: nowrap;
+}
+
+.transaction-history-grid .status-pill {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.transaction-history-grid .status-pill.received,
+.transaction-history-grid .status-pill.added {
+  color: var(--dash-success);
+  background: rgba(5, 177, 105, 0.1);
+}
+
+.transaction-history-grid .status-pill.paid,
+.transaction-history-grid .status-pill.pending {
+  color: var(--dash-danger);
+  background: rgba(207, 32, 47, 0.1);
+}
 
 .transaction-export-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 90;
   display: grid;
   place-items: center;
   padding: 20px;
@@ -174,7 +194,6 @@
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
-
 
 .transaction-export-dialog {
   width: min(520px, 100%);
@@ -189,14 +208,12 @@
   box-shadow: 0 24px 80px rgba(10, 11, 13, 0.2);
 }
 
-
 .transaction-export-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
 }
-
 
 .transaction-export-head span,
 .transaction-export-dialog label span,
@@ -207,7 +224,6 @@
   line-height: 1.5;
 }
 
-
 .transaction-export-head h2 {
   margin: 4px 0 0;
   color: var(--dash-ink);
@@ -215,7 +231,6 @@
   font-weight: 400;
   line-height: 1.13;
 }
-
 
 .transaction-export-head button {
   width: 38px;
@@ -229,13 +244,11 @@
   cursor: pointer;
 }
 
-
 .transaction-export-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-
 
 .transaction-export-stats div {
   display: grid;
@@ -245,7 +258,6 @@
   background: var(--dash-surface-soft);
 }
 
-
 .transaction-export-stats strong {
   color: var(--dash-ink);
   font-family: var(--dash-mono);
@@ -253,12 +265,25 @@
   font-weight: 500;
 }
 
-
 .transaction-export-dialog label {
   display: grid;
   gap: 7px;
 }
 
+.transaction-export-dialog input,
+.transaction-export-dialog select {
+  width: 100%;
+  box-sizing: border-box;
+  height: 46px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 12px;
+  outline: 0;
+  padding: 0 14px;
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
+  font: inherit;
+  font-size: 14px;
+}
 
 .transaction-export-message {
   margin: 10px 0 0;
@@ -268,211 +293,42 @@
   line-height: 1.45;
 }
 
-
 .transaction-export-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
 }
 
-
-.search-field {
-  height: 46px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 14px;
-  border: 1px solid var(--dash-hairline);
-  border-radius: 999px;
-  color: var(--dash-muted);
-  background: var(--dash-canvas);
-}
-
-
-.search-field input {
-  height: auto;
-  border: 0;
-  padding: 0;
-  background: transparent;
-}
 @media (max-width: 1180px) {
-
-  .expense-tracker-card,
-  .summary-card,
-  .page-hero-card,
-  .friends-list-card,
-  .transaction-tools-card,
-  .transaction-table-card {
+  .transaction-history-grid .page-hero-card,
+  .transaction-history-grid .transaction-ledger-card,
+  .transaction-history-grid .history-summary-card {
     grid-column: span 12;
-  }
-
-
-  .total-spend-card,
-  .room-form-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .monthly-graph-card,
-  .settings-card,
-  .history-summary-card {
-    grid-column: span 4;
   }
 }
+
 @media (max-width: 860px) {
-
-  .wallet-card,
-  .monthly-graph-card,
-  .summary-card,
-  .total-spend-card,
-  .page-hero-card,
-  .room-form-card,
-  .room-list-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .settlement-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .settings-card,
-  .transaction-tools-card,
-  .transaction-table-card,
-  .friends-list-card,
-  .history-summary-card {
-    grid-column: span 12;
-  }
-
-
-  .assignment-grid,
-  .split-rooms-grid .assignment-grid,
-  .transaction-tools {
+  .transaction-history-grid .transaction-tools {
     grid-template-columns: 1fr;
   }
+}
 
+@media (max-width: 680px) {
+  .transaction-history-grid .transaction-row {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
 
+  .transaction-history-grid .transaction-row strong {
+    white-space: normal;
+  }
+
+  .transaction-export-actions,
   .transaction-export-stats {
     grid-template-columns: 1fr;
   }
 
-
   .transaction-export-actions {
-    flex-direction: column-reverse;
+    display: grid;
   }
-}
-@media (max-width: 560px) {
-
-  .bento-card,
-  .expense-tracker-card,
-  .summary-card,
-  .page-hero-card,
-  .room-form-card,
-  .room-list-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .friends-list-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .settlement-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .settings-card,
-  .transaction-tools-card,
-  .transaction-table-card,
-  .history-summary-card,
-  .wallet-card,
-  .monthly-graph-card,
-  .total-spend-card {
-    border-radius: 18px;
-    padding: 18px;
-  }
-}
-
-
-.dashboard-form select:focus,
-.assignment-grid select:focus,
-.transaction-tools select:focus,
-.transaction-export-dialog select:focus,
-.add-expense-form select:focus {
-  border-color: rgba(10, 11, 13, 0.28);
-  box-shadow: 0 0 0 3px rgba(10, 11, 13, 0.06);
-}
-
-
-.friend-search-field {
-  min-height: 46px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 14px;
-  border: 1px solid var(--dash-hairline);
-  border-radius: 999px;
-  background: var(--dash-canvas);
-  box-shadow: 0 8px 22px rgba(10, 11, 13, 0.04);
-  transition:
-    border-color 180ms ease,
-    box-shadow 180ms ease,
-    background-color 180ms ease;
-}
-
-
-.friend-search-field:focus-within {
-  border-color: rgba(0, 82, 255, 0.38);
-  background: #ffffff;
-  box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.09);
-}
-
-
-.friend-search-field svg {
-  flex: 0 0 auto;
-  color: var(--dash-muted);
-}
-
-
-.friend-search-field input {
-  width: 100%;
-  min-width: 0;
-  height: 44px;
-  border: 0;
-  outline: 0;
-  padding: 0;
-  color: var(--dash-ink);
-  background: transparent;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-
-.friend-search-field input::placeholder {
-  color: var(--dash-muted);
-  font-weight: 500;
-}
-
-
-.friend-search-field span {
-  display: none;
 }

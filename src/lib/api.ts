@@ -2,6 +2,43 @@ import { auth } from "../config/firebase";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
+type CachedAuthToken = {
+  uid: string;
+  token: string;
+  expiresAt: number;
+};
+
+let cachedAuthToken: CachedAuthToken | null = null;
+const authTokenExpiryBufferMs = 60 * 1000;
+
+async function getCachedAuthToken() {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    throw new Error("User is not authenticated");
+  }
+
+  const now = Date.now();
+
+  if (
+    cachedAuthToken &&
+    cachedAuthToken.uid === currentUser.uid &&
+    cachedAuthToken.expiresAt > now + authTokenExpiryBufferMs
+  ) {
+    return cachedAuthToken.token;
+  }
+
+  const tokenResult = await currentUser.getIdTokenResult();
+
+  cachedAuthToken = {
+    uid: currentUser.uid,
+    token: tokenResult.token,
+    expiresAt: new Date(tokenResult.expirationTime).getTime(),
+  };
+
+  return tokenResult.token;
+}
+
 export type DbUser = {
   id: string;
   firebase_uid: string;
@@ -132,6 +169,7 @@ export type WalletTopUpItem = {
   amount: number;
   method: string;
   createdAt: string;
+  displayDate?: string;
 };
 
 export type WalletTopUpsResponse = {
@@ -324,13 +362,7 @@ export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const currentUser = auth.currentUser;
-
-  if (!currentUser) {
-    throw new Error("User is not authenticated");
-  }
-
-  const token = await currentUser.getIdToken();
+  const token = await getCachedAuthToken();
 
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,

@@ -2,6 +2,10 @@ import authRoutes from "./routes/auth.routes.js";
 import express from "express";
 import cors from "cors";
 import { testDbConnection, db } from "./config/db.js";
+import {
+  ensurePerformanceIndexes,
+  ensurePerformanceIndexesInBackground,
+} from "./db/performanceIndexes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import expenseRoutes from "./routes/expenses.routes.js";
 import splitRoomRoutes from "./routes/splitRooms.routes.js";
@@ -247,9 +251,11 @@ app.post("/api/setup/app-tables", async (_req, res) => {
       );
     `);
 
+    await ensurePerformanceIndexes();
+
     res.json({
       status: "success",
-      message: "App tables are ready",
+      message: "App tables and performance indexes are ready",
     });
   } catch (error) {
     console.error("App tables setup failed:", error);
@@ -260,6 +266,26 @@ app.post("/api/setup/app-tables", async (_req, res) => {
     });
   }
 });
+
+app.post("/api/setup/performance-indexes", async (_req, res) => {
+  try {
+    await ensurePerformanceIndexes();
+
+    res.json({
+      status: "success",
+      message: "Performance indexes are ready",
+    });
+  } catch (error) {
+    console.error("Performance index setup failed:", error);
+
+    res.status(500).json({
+      status: "error",
+      message: "Performance index setup failed",
+    });
+  }
+});
+
+ensurePerformanceIndexesInBackground();
 
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);

@@ -155,7 +155,7 @@ export default function Friends() {
             request.id === optimisticRequest.id ? response.request : request,
           ),
         }));
-        await loadFriends();
+        void loadFriends();
         setMessage(
           response.request.emailStatus === "sent"
             ? "Friend request email sent."
@@ -217,12 +217,11 @@ export default function Friends() {
           ),
         }));
       }
-      setMessage("Friend request accepted instantly. Confirming...");
+      setMessage("Friend request accepted.");
 
       await withTopProgress(async () => {
         await acceptFriendRequest(requestId);
-
-        await loadFriends();
+        void loadFriends();
 
         setMessage("Friend request accepted.");
       });

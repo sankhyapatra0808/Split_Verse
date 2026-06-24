@@ -172,6 +172,49 @@ export default function Dashboard() {
     }
   }
 
+  function applyInstantExpenseToDashboard(amount: number) {
+    setDashboardSummary((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      const currentMonthIndex = new Date().getMonth();
+
+      return {
+        ...prev,
+        metrics: {
+          ...prev.metrics,
+          todayExpense: (prev.metrics.todayExpense ?? 0) + amount,
+        },
+        expenseTracker: {
+          ...prev.expenseTracker,
+          totalSpentToday:
+            (prev.expenseTracker?.totalSpentToday ??
+              prev.metrics.todayExpense ??
+              0) + amount,
+          categories: prev.expenseTracker?.categories ?? [],
+          timeSlots: prev.expenseTracker?.timeSlots,
+        },
+        monthlySpend: prev.monthlySpend
+          ? {
+              ...prev.monthlySpend,
+              graphTotal: (prev.monthlySpend.graphTotal ?? 0) + amount,
+              currentMonthTotal:
+                (prev.monthlySpend.currentMonthTotal ?? 0) + amount,
+              months: prev.monthlySpend.months.map((month, index) =>
+                index === currentMonthIndex
+                  ? {
+                      ...month,
+                      amount: month.amount + amount,
+                    }
+                  : month,
+              ),
+            }
+          : prev.monthlySpend,
+      };
+    });
+  }
+
   async function handleCreateExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -188,6 +231,8 @@ export default function Dashboard() {
       return;
     }
 
+    const previousSummary = dashboardSummary;
+
     setExpenseFormError("");
     setExpenseSubmitting(true);
 
@@ -199,6 +244,7 @@ export default function Dashboard() {
           amount,
         });
 
+        applyInstantExpenseToDashboard(amount);
         setExpenseForm({
           title: "",
           category: "Food",
@@ -206,10 +252,15 @@ export default function Dashboard() {
         });
 
         setExpenseFormOpen(false);
-
-        await reloadDashboard({ silent: true });
+        window.dispatchEvent(
+          new CustomEvent("splitverse:data-updated", {
+            detail: { source: "dashboard-expense" },
+          }),
+        );
+        void reloadDashboard({ silent: true });
       });
     } catch (error) {
+      setDashboardSummary(previousSummary);
       console.error("Failed to create expense:", error);
       setExpenseFormError(
         error instanceof Error

@@ -245,6 +245,26 @@ export default function SharedSplitRooms() {
     setPendingDues(duesData.dues);
   };
 
+  function emitSplitVerseUpdates({ pendingDuesChanged = true } = {}) {
+    window.dispatchEvent(
+      new CustomEvent("splitverse:data-updated", {
+        detail: { source: "split-rooms" },
+      }),
+    );
+
+    if (pendingDuesChanged) {
+      window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
+    }
+  }
+
+  function refreshSplitRoomDataInBackground(
+    preferredRoomId?: string,
+    { pendingDuesChanged = true } = {},
+  ) {
+    emitSplitVerseUpdates({ pendingDuesChanged });
+    void reloadSplitRoomData(preferredRoomId);
+  }
+
   useEffect(() => {
     let active = true;
 
@@ -308,7 +328,13 @@ export default function SharedSplitRooms() {
   }, [roomIdFromNotification, rooms]);
 
   useEffect(() => {
-    const handleDataUpdated = () => {
+    const handleDataUpdated = (event: Event) => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+
+      if (source === "split-rooms") {
+        return;
+      }
+
       void reloadSplitRoomData(selectedRoomId);
     };
 
@@ -490,6 +516,163 @@ export default function SharedSplitRooms() {
     };
   }
 
+  function createOptimisticRoom({
+    name,
+    category,
+    friendEmails,
+  }: {
+    name: string;
+    category: string;
+    friendEmails: string[];
+  }): SplitRoom {
+    const roomId = getOptimisticId("room");
+    const createdAt = new Date().toISOString();
+    const ownerMemberId = getOptimisticId("member-owner");
+    const ownerMember = {
+      id: ownerMemberId,
+      room_id: roomId,
+      user_id: null,
+      display_name: "Me",
+      email: null,
+      role: "owner",
+      status: "active",
+      isMe: true,
+      isOwner: true,
+    };
+    const friendMembers = friendEmails.map((email) => {
+      const friend = friends.find((item) => item.email === email);
+
+      return {
+        id: getOptimisticId("member"),
+        room_id: roomId,
+        user_id: friend?.id ?? null,
+        display_name: friend?.name || email.split("@")[0],
+        email,
+        role: "member",
+        status: "active",
+        isMe: false,
+        isOwner: false,
+      };
+    });
+    const members = [ownerMember, ...friendMembers];
+
+    return {
+      id: roomId,
+      name,
+      category,
+      created_at: createdAt,
+      paymentStatus: "no_one_paid",
+      isOwner: true,
+      memberCount: members.length,
+      totalAmount: 0,
+      outstandingAmount: 0,
+      collectedAmount: 0,
+      status: "Creating...",
+      members,
+      balances: members.map((member) => ({
+        memberId: member.id,
+        name: member.isMe ? "Me" : member.display_name || member.email,
+        detail: member.isMe ? "Your spend" : "No dues yet",
+        amount: 0,
+        outstandingAmount: 0,
+        collectedAmount: 0,
+        isMe: member.isMe,
+        isCollected: false,
+        itemCount: 0,
+      })),
+      items: [],
+    };
+  }
+
+  function updateRoomItemOptimistically(
+    room: SplitRoom,
+    itemId: string,
+    title: string,
+    amount: number,
+  ): SplitRoom {
+    const existingItem = room.items.find((item) => item.id === itemId);
+
+    if (!existingItem) {
+      return room;
+    }
+
+    const member = room.members.find(
+      (item) => item.id === existingItem.assigned_member_id,
+    );
+    const amountDiff = amount - existingItem.amount;
+    const affectsOutstanding = !member?.isMe && !existingItem.isCollected;
+    const affectsCollected = !member?.isMe && existingItem.isCollected;
+
+    return {
+      ...room,
+      totalAmount: room.totalAmount + amountDiff,
+      outstandingAmount: affectsOutstanding
+        ? room.outstandingAmount + amountDiff
+        : room.outstandingAmount,
+      collectedAmount: affectsCollected
+        ? room.collectedAmount + amountDiff
+        : room.collectedAmount,
+      items: room.items.map((item) =>
+        item.id === itemId ? { ...item, title, amount } : item,
+      ),
+      balances: room.balances.map((balance) =>
+        balance.memberId === existingItem.assigned_member_id
+          ? {
+              ...balance,
+              amount: balance.amount + amountDiff,
+              outstandingAmount: affectsOutstanding
+                ? balance.outstandingAmount + amountDiff
+                : balance.outstandingAmount,
+              collectedAmount: affectsCollected
+                ? balance.collectedAmount + amountDiff
+                : balance.collectedAmount,
+            }
+          : balance,
+      ),
+    };
+  }
+
+  function deleteRoomItemOptimistically(
+    room: SplitRoom,
+    itemToDelete: SplitRoom["items"][number],
+  ): SplitRoom {
+    const member = room.members.find(
+      (item) => item.id === itemToDelete.assigned_member_id,
+    );
+    const affectsOutstanding = !member?.isMe && !itemToDelete.isCollected;
+    const affectsCollected = !member?.isMe && itemToDelete.isCollected;
+    const nextItems = room.items.filter((item) => item.id !== itemToDelete.id);
+    const nextOutstandingAmount = affectsOutstanding
+      ? Math.max(0, room.outstandingAmount - itemToDelete.amount)
+      : room.outstandingAmount;
+
+    return {
+      ...room,
+      items: nextItems,
+      totalAmount: Math.max(0, room.totalAmount - itemToDelete.amount),
+      outstandingAmount: nextOutstandingAmount,
+      collectedAmount: affectsCollected
+        ? Math.max(0, room.collectedAmount - itemToDelete.amount)
+        : room.collectedAmount,
+      status: nextItems.length === 0 ? "New" : room.status,
+      balances: room.balances.map((balance) =>
+        balance.memberId === itemToDelete.assigned_member_id
+          ? {
+              ...balance,
+              amount: Math.max(0, balance.amount - itemToDelete.amount),
+              outstandingAmount: affectsOutstanding
+                ? Math.max(0, balance.outstandingAmount - itemToDelete.amount)
+                : balance.outstandingAmount,
+              collectedAmount: affectsCollected
+                ? Math.max(0, balance.collectedAmount - itemToDelete.amount)
+                : balance.collectedAmount,
+              itemCount: Math.max(0, balance.itemCount - 1),
+            }
+          : balance,
+      ),
+    };
+  }
+
   function markPendingDuePaid(dueId: string) {
     const paidDue = pendingDues.find((due) => due.id === dueId);
 
@@ -615,20 +798,32 @@ export default function SharedSplitRooms() {
       return;
     }
 
+    const previousRooms = rooms;
+
     try {
       setRemovingMemberId(member.id);
-      setMessage("Removing member...");
+      setRooms((prev) =>
+        prev.map((room) =>
+          room.id === selectedRoom.id
+            ? {
+                ...room,
+                members: room.members.filter((item) => item.id !== member.id),
+                balances: room.balances.filter(
+                  (balance) => balance.memberId !== member.id,
+                ),
+                memberCount: Math.max(0, room.memberCount - 1),
+              }
+            : room,
+        ),
+      );
+      setMessage("Member removed from the room.");
 
       await withTopProgress(async () => {
         await removeSplitRoomMember(selectedRoom.id, member.id);
-
-        window.dispatchEvent(new Event("splitverse:data-updated"));
-        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
-
-        await reloadSplitRoomData(selectedRoom.id);
-        setMessage("Member removed from the room.");
+        refreshSplitRoomDataInBackground(selectedRoom.id);
       });
     } catch (removeError) {
+      setRooms(previousRooms);
       setError(
         removeError instanceof Error
           ? removeError.message
@@ -677,35 +872,19 @@ export default function SharedSplitRooms() {
       setRooms((prev) =>
         prev.map((room) =>
           room.id === selectedRoom.id
-            ? {
-                ...room,
-                items: room.items.map((item) =>
-                  item.id === editingItemId
-                    ? {
-                        ...item,
-                        title,
-                        amount,
-                      }
-                    : item,
-                ),
-              }
+            ? updateRoomItemOptimistically(room, editingItemId, title, amount)
             : room,
         ),
       );
+      setMessage("Split item updated.");
+      cancelEditingItem();
 
       await withTopProgress(async () => {
         await updateSplitRoomItem(editingItemId, {
           title,
           amount,
         });
-
-        window.dispatchEvent(new Event("splitverse:data-updated"));
-        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
-
-        await reloadSplitRoomData(selectedRoom.id);
-
-        setMessage("Split item updated.");
-        cancelEditingItem();
+        refreshSplitRoomDataInBackground(selectedRoom.id);
       });
     } catch (updateError) {
       setRooms(previousRooms);
@@ -738,27 +917,20 @@ export default function SharedSplitRooms() {
       setRooms((prev) =>
         prev.map((room) =>
           room.id === selectedRoom.id
-            ? {
-                ...room,
-                items: room.items.filter((roomItem) => roomItem.id !== item.id),
-              }
+            ? deleteRoomItemOptimistically(room, item)
             : room,
         ),
       );
 
+      if (editingItemId === item.id) {
+        cancelEditingItem();
+      }
+
+      setMessage("Split item deleted.");
+
       await withTopProgress(async () => {
         await deleteSplitRoomItem(item.id);
-
-        window.dispatchEvent(new Event("splitverse:data-updated"));
-        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
-
-        await reloadSplitRoomData(selectedRoom.id);
-
-        if (editingItemId === item.id) {
-          cancelEditingItem();
-        }
-
-        setMessage("Split item deleted.");
+        refreshSplitRoomDataInBackground(selectedRoom.id);
       });
     } catch (deleteError) {
       setRooms(previousRooms);
@@ -788,24 +960,44 @@ export default function SharedSplitRooms() {
       return;
     }
 
+    const previousRooms = rooms;
+    const previousSelectedRoomId = selectedRoomId;
+    const nextRoomName = roomName.trim();
+    const nextRoomCategory = roomCategory;
+    const nextFriendEmails = selectedFriendEmails;
+    const optimisticRoom = createOptimisticRoom({
+      name: nextRoomName,
+      category: nextRoomCategory,
+      friendEmails: nextFriendEmails,
+    });
+
     try {
       setSavingRoom(true);
+      setRooms((prev) => [optimisticRoom, ...prev]);
+      setSelectedRoomId(optimisticRoom.id);
+      setRoomName("");
+      setSelectedFriendEmails([]);
+      setFriendSearch("");
+      setFriendPickerOpen(false);
+      setRoomCategory("restaurant");
+      setMessage("Room created instantly. Saving...");
+
       await withTopProgress(async () => {
         const response = await createSplitRoom({
-          name: roomName.trim(),
-          category: roomCategory,
-          members: selectedFriendEmails,
+          name: nextRoomName,
+          category: nextRoomCategory,
+          members: nextFriendEmails,
         });
 
-        await reloadSplitRoomData(response.room.id);
-        setRoomName("");
-        setSelectedFriendEmails([]);
-        setFriendSearch("");
-        setFriendPickerOpen(false);
-        setRoomCategory("restaurant");
         setMessage("Room created and added to your active rooms.");
+        void reloadSplitRoomData(response.room.id);
       });
     } catch (createError) {
+      setRooms(previousRooms);
+      setSelectedRoomId(previousSelectedRoomId);
+      setRoomName(nextRoomName);
+      setSelectedFriendEmails(nextFriendEmails);
+      setRoomCategory(nextRoomCategory);
       setError(
         createError instanceof Error
           ? createError.message
@@ -876,14 +1068,14 @@ export default function SharedSplitRooms() {
           assignedMemberId,
         });
 
-        window.dispatchEvent(new Event("splitverse:data-updated"));
-
-        await reloadSplitRoomData(selectedRoom.id);
         setMessage(
           assignedMember?.isMe
             ? "Expense item added"
             : "Expense item added as a due",
         );
+        refreshSplitRoomDataInBackground(selectedRoom.id, {
+          pendingDuesChanged: !assignedMember?.isMe,
+        });
       });
     } catch (itemError) {
       setRooms(previousRooms);
@@ -932,10 +1124,10 @@ export default function SharedSplitRooms() {
 
       await withTopProgress(async () => {
         await deleteSplitRoom(room.id);
-        await reloadSplitRoomData(
+        setMessage("Room deleted.");
+        refreshSplitRoomDataInBackground(
           room.id === selectedRoomId ? undefined : selectedRoomId,
         );
-        setMessage("Room deleted.");
       });
     } catch (deleteError) {
       setRooms(previousRooms);
@@ -975,16 +1167,12 @@ export default function SharedSplitRooms() {
       await withTopProgress(async () => {
         const response = await collectSplitRoomMemberDues(roomId, memberId);
 
-        window.dispatchEvent(new Event("splitverse:data-updated"));
-        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
-
-        await reloadSplitRoomData(roomId);
-
         setMessage(
           response.updatedCount > 0
             ? "Dues marked as collected."
             : "There were no pending dues for this member.",
         );
+        refreshSplitRoomDataInBackground(roomId);
       });
     } catch (collectError) {
       setRooms(previousRooms);
@@ -1030,11 +1218,8 @@ export default function SharedSplitRooms() {
 
       await withTopProgress(async () => {
         await paySplitRoomDue(itemId);
-        window.dispatchEvent(new Event("splitverse:data-updated"));
-        await reloadSplitRoomData(selectedRoomId);
-        window.dispatchEvent(new Event("splitverse:pending-dues-updated"));
-
         setMessage("Due paid from wallet successfully.");
+        refreshSplitRoomDataInBackground(selectedRoomId);
       });
     } catch (payError) {
       setRooms(previousRooms);

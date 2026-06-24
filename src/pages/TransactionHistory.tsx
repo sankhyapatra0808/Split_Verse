@@ -11,7 +11,6 @@ import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
 import { withTopProgress } from "../utils/topProgress";
-import "../styles/TransactionHistory.css";
 
 function formatTransactionDate(dateValue: string) {
   if (!dateValue) {
@@ -249,7 +248,7 @@ export default function TransactionHistory() {
 
   return (
     <DashboardLayout eyebrow="History">
-      <section className="dashboard-page-grid">
+      <section className="dashboard-page-grid transaction-history-grid">
         <article className="bento-card page-hero-card">
           <div className="bento-card-head">
             <div>

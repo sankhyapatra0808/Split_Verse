@@ -26,33 +26,39 @@ const methods = [
 ] satisfies { label: string; value: WalletTopUpMethod; icon: LucideIcon }[];
 
 function formatTopUpDate(dateValue: string) {
-  const date = new Date(dateValue);
+  if (!dateValue) {
+    return "Unknown";
+  }
+
+  const rawValue = String(dateValue);
+
+  // If backend already sends DD-MM-YYYY, show it directly.
+  if (/^\d{2}-\d{2}-\d{4}$/.test(rawValue)) {
+    return rawValue;
+  }
+
+  // If backend sends YYYY-MM-DD, convert to DD-MM-YYYY.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+    const [year, month, day] = rawValue.split("-");
+    return `${day}-${month}-${year}`;
+  }
+
+  const normalizedValue = rawValue.replace(" ", "T");
+  const hasTimezone = /z$|[+-]\d{2}:?\d{2}$/i.test(normalizedValue);
+  const date = new Date(hasTimezone ? normalizedValue : `${normalizedValue}Z`);
 
   if (Number.isNaN(date.getTime())) {
     return "Unknown";
   }
 
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-
-  const isSameDate = (first: Date, second: Date) =>
-    first.getFullYear() === second.getFullYear() &&
-    first.getMonth() === second.getMonth() &&
-    first.getDate() === second.getDate();
-
-  if (isSameDate(date, today)) {
-    return "Today";
-  }
-
-  if (isSameDate(date, yesterday)) {
-    return "Yesterday";
-  }
-
-  return date.toLocaleDateString("en-IN", {
+  return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
-    month: "short",
-  });
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  })
+    .format(date)
+    .replaceAll("/", "-");
 }
 
 export default function WalletTopUp() {
@@ -309,7 +315,7 @@ export default function WalletTopUp() {
                 <div key={topUp.id}>
                   <span>{topUp.method}</span>
                   <strong>{formatCurrency(topUp.amount)}</strong>
-                  <em>{formatTopUpDate(topUp.createdAt)}</em>
+                  <em>{topUp.displayDate || formatTopUpDate(topUp.createdAt)}</em>
                 </div>
               ))}
           </div>

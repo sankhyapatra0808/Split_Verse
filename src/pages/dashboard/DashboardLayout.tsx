@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 
 import logo from "../../assets/Logo-v2.png";
-import "../../styles/Dashboard.css";
 import { useAuth } from "../../context/useAuth";
 import { useAppSettings } from "../../context/useAppSettings";
 import {

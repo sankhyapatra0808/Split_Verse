@@ -5,7 +5,6 @@ import DashboardLayout from "./dashboard/DashboardLayout";
 import { getWalletSummary, type WalletSummaryResponse } from "../lib/api";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
-import "../styles/WalletBalance.css";
 
 function formatDate(dateValue: string) {
   if (!dateValue) {
@@ -96,7 +95,7 @@ export default function WalletBalance() {
 
   return (
     <DashboardLayout eyebrow="Wallet">
-      <section className="dashboard-page-grid">
+      <section className="dashboard-page-grid wallet-balance-grid">
         <article className="bento-card page-hero-card">
           <div className="bento-card-head">
             <div>

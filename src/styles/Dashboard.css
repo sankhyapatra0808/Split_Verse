@@ -2638,3 +2638,123 @@
   z-index: 100;
 }
 
+
+/* Profile initials avatar must work before AppSettings.css is ever loaded. */
+.settings-avatar {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: 50%;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0a0b0d, #6b7280);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.settings-avatar.large {
+  width: 62px;
+  height: 62px;
+  min-width: 62px;
+  font-size: 18px;
+}
+
+.profile-button .settings-avatar {
+  width: 127%;
+  height: 103%;
+  min-width: 0;
+  border-radius: inherit;
+}
+
+.profile-panel-person .settings-avatar.large {
+  width: 62px;
+  height: 62px;
+  min-width: 62px;
+  border-radius: 50%;
+}
+
+.avatar-initials,
+.settings-avatar.avatar-initials {
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0a0b0d, #6b7280);
+}
+
+.profile-photo {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: hidden;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.profile-photo.panel {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+}
+
+/* FINAL FIX: stable wallet + transaction ledger rows after login */
+.wallet-ledger-card .transaction-row,
+.wallet-pending-card .transaction-row,
+.transaction-ledger-card .transaction-row {
+  width: 100%;
+  box-sizing: border-box;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) max-content max-content max-content !important;
+  align-items: center !important;
+  column-gap: 12px !important;
+  row-gap: 4px !important;
+  min-height: 75px !important;
+  padding: 10px 12px !important;
+  overflow: hidden;
+}
+
+.wallet-ledger-card .transaction-row > div,
+.wallet-pending-card .transaction-row > div,
+.transaction-ledger-card .transaction-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.wallet-ledger-card .transaction-row strong,
+.wallet-pending-card .transaction-row strong,
+.transaction-ledger-card .transaction-row strong,
+.wallet-ledger-card .transaction-row span,
+.wallet-pending-card .transaction-row span,
+.transaction-ledger-card .transaction-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-ledger-card .transaction-row em,
+.wallet-pending-card .transaction-row em,
+.transaction-ledger-card .transaction-row em,
+.wallet-ledger-card .transaction-row time,
+.wallet-pending-card .transaction-row time,
+.transaction-ledger-card .transaction-row time,
+.wallet-ledger-card .status-pill,
+.wallet-pending-card .status-pill,
+.transaction-ledger-card .status-pill {
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .wallet-ledger-card .transaction-row,
+  .wallet-pending-card .transaction-row,
+  .transaction-ledger-card .transaction-row {
+    grid-template-columns: 1fr !important;
+    justify-items: start;
+  }
+}
