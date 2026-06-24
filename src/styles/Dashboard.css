@@ -1748,6 +1748,7 @@
 .profile-panel-actions {
   display: grid;
   gap: 10px;
+  grid-template-columns: 1fr 1fr;
 }
 
 
@@ -1757,6 +1758,7 @@
   justify-content: center;
   gap: 10px;
   border: 0;
+  width: 190px;
   border-radius: 999px;
   padding: 0 14px;
   cursor: pointer;
