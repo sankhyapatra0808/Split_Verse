@@ -342,7 +342,7 @@
   cursor: pointer;
   color: #ffffff;
   background: linear-gradient(135deg, #ef4444, #b91c1c);
-  box-shadow: 0 10px 22px rgba(207, 32, 47, 0.18);
+  /* box-shadow: 0 10px 22px rgba(207, 32, 47, 0.18); */
   font: inherit;
   font-size: 13px;
   font-weight: 800;
@@ -356,7 +356,7 @@
 
 .settings-danger-button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 16px 30px rgba(207, 32, 47, 0.24);
+  /* box-shadow: 0 16px 30px rgba(207, 32, 47, 0.24); */
 }
 
 .settings-danger-button:active:not(:disabled) {
@@ -503,14 +503,14 @@
   border: 1px solid rgba(0, 82, 255, 0.22);
   color: var(--dash-primary);
   background: rgba(0, 82, 255, 0.07);
-  box-shadow: 0 10px 22px rgba(0, 82, 255, 0.08);
+  /* box-shadow: 0 10px 22px rgba(0, 82, 255, 0.08); */
 }
 
 .settings-outline-danger-button {
   border: 1px solid rgba(207, 32, 47, 0.22);
   color: var(--dash-danger);
   background: rgba(207, 32, 47, 0.08);
-  box-shadow: 0 10px 22px rgba(207, 32, 47, 0.06);
+  /* box-shadow: 0 10px 22px rgba(207, 32, 47, 0.06); */
 }
 
 .settings-safe-button:hover:not(:disabled),
@@ -521,13 +521,13 @@
 .settings-safe-button:hover:not(:disabled) {
   border-color: rgba(0, 82, 255, 0.36);
   background: rgba(0, 82, 255, 0.1);
-  box-shadow: 0 16px 30px rgba(0, 82, 255, 0.14);
+  /* box-shadow: 0 16px 30px rgba(0, 82, 255, 0.14); */
 }
 
 .settings-outline-danger-button:hover:not(:disabled) {
   border-color: rgba(207, 32, 47, 0.38);
-  background: rgba(207, 32, 47, 0.11);
-  box-shadow: 0 16px 30px rgba(207, 32, 47, 0.12);
+  background: rgba(207, 32, 47, 0.1);
+  /* box-shadow: 0 16px 30px rgba(207, 32, 47, 0.12); */
 }
 
 .settings-safe-button:active:not(:disabled),
