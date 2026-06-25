@@ -1,5 +1,5 @@
 import "dotenv/config";
-import pg from "pg";
+import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 const { Pool } = pg;
 
@@ -55,11 +55,11 @@ function isTransientDbError(error: unknown) {
   );
 }
 
-export async function queryWithRetry<T = any>(
+export async function queryWithRetry<T extends QueryResultRow = QueryResultRow>(
   text: string,
   values?: unknown[],
   attempts = 2,
-) {
+): Promise<QueryResult<T>> {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

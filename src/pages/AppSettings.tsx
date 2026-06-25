@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -236,6 +236,7 @@ export default function AppSettings() {
   const [savedProfilePhotoUrl, setSavedProfilePhotoUrl] = useState("");
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [profilePhotoPreviewUrl, setProfilePhotoPreviewUrl] = useState("");
+  const profilePhotoObjectUrlRef = useRef("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
   const [walletPinSet, setWalletPinSet] = useState(false);
@@ -398,19 +399,31 @@ export default function AppSettings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.photoURL]);
 
-  useEffect(() => {
-    if (!profilePhotoFile) {
-      setProfilePhotoPreviewUrl("");
-      return;
+  useEffect(
+    () => () => {
+      if (profilePhotoObjectUrlRef.current) {
+        URL.revokeObjectURL(profilePhotoObjectUrlRef.current);
+      }
+    },
+    [],
+  );
+
+  function clearProfilePhotoPreview() {
+    if (profilePhotoObjectUrlRef.current) {
+      URL.revokeObjectURL(profilePhotoObjectUrlRef.current);
+      profilePhotoObjectUrlRef.current = "";
     }
 
-    const objectUrl = URL.createObjectURL(profilePhotoFile);
-    setProfilePhotoPreviewUrl(objectUrl);
+    setProfilePhotoPreviewUrl("");
+  }
 
-    return () => {
-      URL.revokeObjectURL(objectUrl);
-    };
-  }, [profilePhotoFile]);
+  function setProfilePhotoPreview(file: File) {
+    clearProfilePhotoPreview();
+
+    const objectUrl = URL.createObjectURL(file);
+    profilePhotoObjectUrlRef.current = objectUrl;
+    setProfilePhotoPreviewUrl(objectUrl);
+  }
 
   function handleProfilePhotoFileChange(file: File | null) {
     setSettingsError("");
@@ -418,6 +431,7 @@ export default function AppSettings() {
 
     if (!file) {
       setProfilePhotoFile(null);
+      clearProfilePhotoPreview();
       return;
     }
 
@@ -432,6 +446,7 @@ export default function AppSettings() {
     }
 
     setProfilePhotoFile(file);
+    setProfilePhotoPreview(file);
     setProfilePhotoUrl("");
   }
 
@@ -508,6 +523,7 @@ export default function AppSettings() {
         );
         setProfilePhotoUrl("");
         setProfilePhotoFile(null);
+        clearProfilePhotoPreview();
         setAvatarId(
           response.user.avatar_mode === "initials" ? "initials" : "current",
         );

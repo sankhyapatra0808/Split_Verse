@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
   AppSettingsContext,
@@ -219,9 +219,9 @@ function getCurrencyFractionDigits(currencyCode: CurrencyCode) {
 }
 
 export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
-  const storedSettings = useMemo(loadStoredSettings, []);
-  const detectedCurrency = useMemo(detectCurrencyCode, []);
-  const detectedLanguage = useMemo(detectLanguageCode, []);
+  const storedSettings = useMemo(() => loadStoredSettings(), []);
+  const detectedCurrency = useMemo(() => detectCurrencyCode(), []);
+  const detectedLanguage = useMemo(() => detectLanguageCode(), []);
   const [avatarId, setAvatarIdState] = useState<AvatarId>(
     isAvatarId(storedSettings.avatarId) ? storedSettings.avatarId : "current",
   );
@@ -274,7 +274,7 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
 
   useEffect(() => observeUiTranslations(appLanguage), [appLanguage]);
 
-  const persist = (updates: StoredSettings) => {
+  const persist = useCallback((updates: StoredSettings) => {
     saveSettings({
       avatarId,
       compactMode,
@@ -290,9 +290,22 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
       notificationPreferences,
       ...updates,
     });
-  };
+  }, [
+    appCurrency,
+    appLanguage,
+    avatarId,
+    compactMode,
+    confirmBeforeWalletPayment,
+    converterAmount,
+    converterFrom,
+    converterTo,
+    defaultTopUpMethod,
+    notificationPreferences,
+    privacyMode,
+    settlementReminders,
+  ]);
 
-  const clearLocalAppSettings = () => {
+  const clearLocalAppSettings = useCallback(() => {
     window.localStorage.removeItem(settingsStorageKey);
     setAvatarIdState("current");
     setCompactModeState(false);
@@ -306,7 +319,7 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
     setDefaultTopUpMethodState("UPI");
     setConfirmBeforeWalletPaymentState(true);
     setNotificationPreferencesState(defaultNotificationPreferences);
-  };
+  }, [detectedCurrency, detectedLanguage]);
 
   const value = useMemo<AppSettingsValue>(
     () => {
@@ -432,7 +445,9 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
       converterTo,
       defaultTopUpMethod,
       detectedCurrency,
+      clearLocalAppSettings,
       notificationPreferences,
+      persist,
       privacyMode,
       settlementReminders,
     ],

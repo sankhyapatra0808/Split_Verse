@@ -14,7 +14,6 @@ import {
 
 const router = express.Router();
 const topUpMethodValues = ["UPI", "Card", "Net banking"] as const;
-const topUpMethods = new Set<string>(topUpMethodValues);
 const topUpDescriptionPrefix = "Wallet top-up via ";
 const maxTopUpPerTransaction = Number(process.env.MAX_TOP_UP_PER_TRANSACTION || 10000);
 const maxTopUpPerDay = Number(process.env.MAX_TOP_UP_PER_DAY || 100000);

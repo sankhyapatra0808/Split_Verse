@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import express, { type Request, type Response } from "express";
+import type { QueryResult, QueryResultRow } from "pg";
 import { z } from "zod";
 import { db } from "../config/db.js";
 import { sendLiveUpdate } from "../liveEvents.js";
@@ -66,7 +67,10 @@ type PaymentOrderRow = {
 };
 
 type Queryable = {
-  query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }>;
+  query: <T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: unknown[],
+  ) => Promise<QueryResult<T>>;
 };
 
 async function getCurrentDbUser(firebaseUid: string) {

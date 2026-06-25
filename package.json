@@ -5,9 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
+    "build:server": "npm --prefix server run build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "npm --prefix server run test",
+    "verify:visual": "node scripts/verify-visual-consistency.mjs",
+    "verify:runtime": "node scripts/verify-runtime.mjs",
+    "verify": "npm run lint && npm run test && npm run build && npm run build:server && npm run verify:visual && npm run verify:runtime"
   },
   "dependencies": {
     "firebase": "^12.14.0",

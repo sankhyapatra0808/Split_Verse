@@ -247,7 +247,10 @@ export default function SharedSplitRooms() {
     );
   }, [friends, trimmedFriendSearch]);
   const itemPlaceholder = getItemPlaceholder(selectedRoom?.category);
-  const selectedRoomItems = selectedRoom?.items ?? [];
+  const selectedRoomItems = useMemo(
+    () => selectedRoom?.items ?? [],
+    [selectedRoom],
+  );
   const paymentDialogMember = useMemo(
     () =>
       selectedRoom?.members.find(
@@ -1394,9 +1397,10 @@ export default function SharedSplitRooms() {
               <span>Friends</span>
 
               {friends.length === 0 ? (
-                <p className="dashboard-muted-text">
-                  No friends yet. Add friends first from the Friends page.
-                </p>
+                <span
+                  className="dashboard-value-skeleton wide"
+                  aria-label="No friends available"
+                />
               ) : (
                 <div className="friend-dropdown" ref={friendDropdownRef}>
                   <button

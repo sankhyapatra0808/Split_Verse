@@ -3,6 +3,7 @@ import express from "express";
 import multer from "multer";
 import { v2 as cloudinary, type UploadApiResponse } from "cloudinary";
 import argon2 from "argon2";
+import type { QueryResult, QueryResultRow } from "pg";
 import { z } from "zod";
 import { db } from "../config/db.js";
 import { adminAuth } from "../config/firebaseAdmin.js";
@@ -167,7 +168,10 @@ type LoginOtpSession = {
 const loginOtpSessions = new Map<string, LoginOtpSession>();
 
 type Queryable = {
-  query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }>;
+  query: <T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: unknown[],
+  ) => Promise<QueryResult<T>>;
 };
 
 function getWalletPinStrengthIssue(pin: string) {
@@ -387,13 +391,6 @@ function hasOwnBodyField(body: unknown, ...keys: string[]) {
   }
 
   return keys.some((key) => Object.prototype.hasOwnProperty.call(body, key));
-}
-
-function getServerUrl(req: express.Request) {
-  return (
-    process.env.SERVER_URL ||
-    `${req.protocol}://${req.get("host")}`
-  ).replace(/\/$/, "");
 }
 
 function uploadProfilePhotoToCloudinary(

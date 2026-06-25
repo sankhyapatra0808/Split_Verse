@@ -75,6 +75,16 @@ export const safeTextSchema = (label: string, max = 120) =>
     .trim()
     .min(1, `${label} is required`)
     .max(max, `${label} is too long`)
-    .refine((value) => !/[\u0000-\u001F\u007F]/.test(value), {
+    .refine((value) => {
+      for (const character of value) {
+        const code = character.charCodeAt(0);
+
+        if (code <= 0x1f || code === 0x7f) {
+          return false;
+        }
+      }
+
+      return true;
+    }, {
       message: `${label} contains invalid characters`,
     });

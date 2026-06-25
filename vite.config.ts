@@ -6,7 +6,7 @@ import babel from '@rolldown/plugin-babel'
 export default defineConfig({
   build: {
     sourcemap: false,
-    minify: "esbuild",
+    minify: "oxc",
   },
   plugins: [
     react(),

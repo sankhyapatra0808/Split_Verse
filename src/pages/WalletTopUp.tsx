@@ -120,8 +120,8 @@ export default function WalletTopUp() {
   const { defaultTopUpMethod, formatCurrency } = useAppSettings();
   const [selectedAmount, setSelectedAmount] = useState(1000);
   const [customAmount, setCustomAmount] = useState("");
-  const [selectedMethod, setSelectedMethod] =
-    useState<WalletTopUpMethod>(defaultTopUpMethod);
+  const [selectedMethodOverride, setSelectedMethodOverride] =
+    useState<WalletTopUpMethod | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -130,10 +130,7 @@ export default function WalletTopUp() {
   const [topUpsError, setTopUpsError] = useState("");
 
   const topUpAmount = customAmount ? Number(customAmount) : selectedAmount;
-
-  useEffect(() => {
-    setSelectedMethod(defaultTopUpMethod);
-  }, [defaultTopUpMethod]);
+  const selectedMethod = selectedMethodOverride ?? defaultTopUpMethod;
 
   async function loadRecentTopUps({ silent = false } = {}) {
     if (!silent) {
@@ -360,7 +357,7 @@ export default function WalletTopUp() {
                     name="payment-method"
                     type="radio"
                     checked={selectedMethod === method.value}
-                    onChange={() => setSelectedMethod(method.value)}
+                    onChange={() => setSelectedMethodOverride(method.value)}
                   />
                   <span>
                     <Icon size={19} />

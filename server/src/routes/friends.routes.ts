@@ -138,10 +138,6 @@ function normalizeEmail(email: unknown) {
   return String(email ?? "").trim().toLowerCase();
 }
 
-function isEmail(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
 function getServerUrl(req: express.Request) {
   return (
     process.env.SERVER_URL ||
