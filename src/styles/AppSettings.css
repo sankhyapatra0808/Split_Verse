@@ -1,17 +1,4 @@
 /* App Settings page styles */
-.assignment-card,
-.member-balance-card,
-.balance-card,
-.balance-settings-card,
-.topup-form-card,
-.topup-summary-card,
-.recent-topups-card,
-.history-summary-card {
-  grid-column: span 4;
-  display: grid;
-  gap: 16px;
-  padding: 18px;
-}
 
 .settings-avatar {
   width: 38px;
@@ -189,54 +176,12 @@
   accent-color: var(--dash-primary);
 }
 @media (max-width: 1180px) {
-  .total-spend-card,
-  .room-form-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .monthly-graph-card,
-  .settings-card,
-  .history-summary-card {
+  .settings-grid .settings-card {
     grid-column: span 4;
   }
 }
 @media (max-width: 860px) {
-  .wallet-card,
-  .monthly-graph-card,
-  .summary-card,
-  .total-spend-card,
-  .page-hero-card,
-  .room-form-card,
-  .room-list-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .settlement-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .settings-card,
-  .transaction-tools-card,
-  .transaction-table-card,
-  .friends-list-card,
-  .history-summary-card {
+  .settings-grid .settings-card {
     grid-column: span 12;
   }
 
@@ -246,34 +191,7 @@
   }
 }
 @media (max-width: 560px) {
-  .bento-card,
-  .expense-tracker-card,
-  .summary-card,
-  .page-hero-card,
-  .room-form-card,
-  .room-list-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .friends-list-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .settlement-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .settings-card,
-  .transaction-tools-card,
-  .transaction-table-card,
-  .history-summary-card,
-  .wallet-card,
-  .monthly-graph-card,
-  .total-spend-card {
+  .settings-grid .settings-card {
     border-radius: 18px;
     padding: 18px;
   }
@@ -814,10 +732,55 @@
 
 
 .profile-photo-upload-field input[type="file"] {
-  min-height: 42px;
+  min-height: 48px;
   height: auto;
-  padding: 9px 12px;
+  border-color: var(--dash-hairline);
+  border-radius: 12px;
+  padding: 7px 10px;
   cursor: pointer;
+  color: var(--dash-body);
+  background: var(--dash-canvas);
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.profile-photo-upload-field input[type="file"]:hover:not(:disabled),
+.profile-photo-upload-field input[type="file"]:focus-visible {
+  border-color: var(--dash-primary);
+  box-shadow: 0 0 0 1px var(--dash-primary);
+}
+
+.profile-photo-upload-field input[type="file"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.profile-photo-upload-field input[type="file"]::file-selector-button {
+  min-height: 32px;
+  margin-right: 12px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  cursor: pointer;
+  color: var(--dash-ink);
+  background: var(--dash-surface-strong);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background-color 180ms ease;
+}
+
+.profile-photo-upload-field
+  input[type="file"]:hover:not(:disabled)::file-selector-button {
+  background: var(--dash-hairline-soft);
+}
+
+.profile-photo-upload-field input[type="file"]:disabled::file-selector-button {
+  cursor: not-allowed;
 }
 
 .profile-photo-upload-field small {
