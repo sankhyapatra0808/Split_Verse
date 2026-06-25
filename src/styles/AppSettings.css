@@ -582,3 +582,247 @@
     width: 100%;
   }
 }
+
+/* Currency + language card cleanup */
+.currency-language-card {
+  align-content: start;
+}
+
+.settings-locale-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.currency-language-card .settings-preview {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .settings-locale-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Profile photo update layout fix */
+.profile-photo-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-photo-preview-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.profile-photo-preview {
+  width: 92px;
+  height: 92px;
+  min-width: 92px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--dash-primary);
+  border-radius: 50%;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0a0b0d, #6b7280);
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.profile-photo-preview img {
+  width: 124%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.profile-photo-copy {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.profile-photo-copy strong {
+  color: var(--dash-ink);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.profile-photo-copy small {
+  max-width: 560px;
+  color: var(--dash-body);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.profile-photo-url-field {
+  margin-top: 2px;
+}
+
+.profile-photo-settings > .dashboard-secondary-button {
+  width: fit-content;
+}
+
+@media (max-width: 640px) {
+  .profile-photo-preview-row {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .profile-photo-copy {
+    width: 100%;
+  }
+
+  .profile-photo-copy small {
+    margin-inline: auto;
+  }
+
+  .profile-photo-url-field {
+    text-align: left;
+  }
+
+  .profile-photo-settings > .dashboard-secondary-button {
+    width: 100%;
+  }
+}
+
+/* Wallet PIN security form */
+.wallet-pin-form {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 16px;
+  background: var(--dash-surface-soft);
+}
+
+.wallet-pin-head {
+  display: grid;
+  gap: 4px;
+}
+
+.wallet-pin-head strong {
+  color: var(--dash-ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.wallet-pin-head small {
+  color: var(--dash-body);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.wallet-pin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .wallet-pin-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+.wallet-pin-actions-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.wallet-pin-forgot-button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0 14px;
+  color: var(--dash-primary);
+  background: rgba(0, 82, 255, 0.08);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.wallet-pin-forgot-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.wallet-pin-reset-dialog {
+  max-width: 540px;
+}
+
+.wallet-pin-reset-dialog label {
+  display: grid;
+  gap: 7px;
+}
+
+.wallet-pin-reset-dialog label span {
+  color: var(--dash-body);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.wallet-pin-reset-dialog input {
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 12px;
+  outline: 0;
+  padding: 0 12px;
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
+  font: inherit;
+  letter-spacing: 0.1em;
+}
+
+.wallet-pin-reset-warning svg {
+  color: var(--dash-primary);
+}
+
+.wallet-pin-otp-button {
+  justify-self: start;
+}
+
+.transaction-export-message.error {
+  color: var(--dash-danger);
+  background: rgba(207, 32, 47, 0.08);
+}
+
+@media (max-width: 720px) {
+  .wallet-pin-actions-row {
+    align-items: stretch;
+  }
+
+  .wallet-pin-actions-row > button {
+    width: 100%;
+  }
+}
+
+
+.profile-photo-upload-field input[type="file"] {
+  min-height: 42px;
+  height: auto;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.profile-photo-upload-field small {
+  color: var(--dash-body);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}

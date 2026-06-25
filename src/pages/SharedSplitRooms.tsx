@@ -58,6 +58,56 @@ function getMemberName(member: SplitRoom["members"][number]) {
   return member.display_name || member.email || "Member";
 }
 
+function getPersonInitials(name?: string | null, email?: string | null) {
+  const source = name || email?.split("@")[0] || "SV";
+  const parts = source.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0]?.[0] || "S";
+  const second = parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] || "V";
+
+  return `${first}${second}`.toUpperCase();
+}
+
+function getDisplayAvatarUrl(person: {
+  photo_url?: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: string | null;
+  display_photo_url?: string | null;
+}) {
+  if (person.avatar_mode === "initials") {
+    return "";
+  }
+
+  return person.display_photo_url || person.profile_photo_url || person.photo_url || "";
+}
+
+function renderFriendMiniAvatar(friend: Friend) {
+  const avatarUrl = getDisplayAvatarUrl(friend);
+
+  if (avatarUrl) {
+    return <img src={avatarUrl} alt="" />;
+  }
+
+  return <span>{getPersonInitials(friend.name, friend.email)}</span>;
+}
+
+function renderMemberMiniAvatar(member?: SplitRoom["members"][number]) {
+  if (!member) {
+    return <span className="room-member-avatar initials">SV</span>;
+  }
+
+  const avatarUrl = getDisplayAvatarUrl(member);
+
+  if (avatarUrl) {
+    return <img className="room-member-avatar" src={avatarUrl} alt="" />;
+  }
+
+  return (
+    <span className="room-member-avatar initials">
+      {getPersonInitials(member.display_name, member.email)}
+    </span>
+  );
+}
+
 function formatFriendshipAge(days: number) {
   if (days <= 0) {
     return "Friends today";
@@ -127,7 +177,9 @@ export default function SharedSplitRooms() {
   const [collectingMemberId, setCollectingMemberId] = useState("");
   const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
   const [payingDueId, setPayingDueId] = useState("");
-  const [expandedDueMemberId, setExpandedDueMemberId] = useState("");
+  const [walletPinByItemId, setWalletPinByItemId] = useState<Record<string, string>>({});
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentDialogMemberId, setPaymentDialogMemberId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const friendDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -170,13 +222,6 @@ export default function SharedSplitRooms() {
       })),
     [sortedMembers],
   );
-  const selectedRoomPendingDues = useMemo(
-    () =>
-      selectedRoom
-        ? pendingDues.filter((due) => due.roomId === selectedRoom.id)
-        : [],
-    [pendingDues, selectedRoom],
-  );
   const selectedFriendNames = useMemo(
     () =>
       selectedFriendEmails
@@ -203,6 +248,45 @@ export default function SharedSplitRooms() {
   }, [friends, trimmedFriendSearch]);
   const itemPlaceholder = getItemPlaceholder(selectedRoom?.category);
   const selectedRoomItems = selectedRoom?.items ?? [];
+  const paymentDialogMember = useMemo(
+    () =>
+      selectedRoom?.members.find(
+        (member) => member.id === paymentDialogMemberId,
+      ) ?? null,
+    [paymentDialogMemberId, selectedRoom],
+  );
+  const paymentDialogBalance = useMemo(
+    () =>
+      selectedRoom?.balances.find(
+        (balance) => balance.memberId === paymentDialogMemberId,
+      ) ?? null,
+    [paymentDialogMemberId, selectedRoom],
+  );
+  const paymentDialogItems = useMemo(
+    () =>
+      paymentDialogMemberId
+        ? selectedRoomItems
+            .filter(
+              (item) => item.assigned_member_id === paymentDialogMemberId,
+            )
+            .sort((left, right) => {
+              if (left.isCollected === right.isCollected) {
+                return left.title.localeCompare(right.title);
+              }
+
+              return left.isCollected ? 1 : -1;
+            })
+        : [],
+    [paymentDialogMemberId, selectedRoomItems],
+  );
+  const paymentDialogPendingTotal = paymentDialogItems.reduce(
+    (sum, item) => sum + (item.isCollected ? 0 : Number(item.amount)),
+    0,
+  );
+  const paymentDialogPaidTotal = paymentDialogItems.reduce(
+    (sum, item) => sum + (item.isCollected ? Number(item.amount) : 0),
+    0,
+  );
   const removableMemberCount = useMemo(
     () =>
       selectedRoom
@@ -263,6 +347,25 @@ export default function SharedSplitRooms() {
   ) {
     emitSplitVerseUpdates({ pendingDuesChanged });
     void reloadSplitRoomData(preferredRoomId);
+  }
+
+  function openMemberPaymentDialog(memberId: string) {
+    if (!selectedRoom) {
+      return;
+    }
+
+    setPaymentDialogMemberId(memberId);
+    setPaymentDialogOpen(true);
+  }
+
+  function closeMemberPaymentDialog() {
+    if (payingDueId) {
+      return;
+    }
+
+    setPaymentDialogOpen(false);
+    setPaymentDialogMemberId("");
+    setWalletPinByItemId({});
   }
 
   useEffect(() => {
@@ -387,7 +490,8 @@ export default function SharedSplitRooms() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setExpandedDueMemberId("");
+      setPaymentDialogOpen(false);
+      setPaymentDialogMemberId("");
     }, 0);
 
     return () => window.clearTimeout(timer);
@@ -1194,6 +1298,13 @@ export default function SharedSplitRooms() {
     setMessage("");
     setError("");
 
+    const walletPin = (walletPinByItemId[itemId] || "").trim();
+
+    if (!/^\d{4,6}$/.test(walletPin)) {
+      setError("Enter your 4 to 6 digit wallet PIN to pay from wallet.");
+      return;
+    }
+
     const dueToPay = pendingDues.find((due) => due.id === itemId);
 
     if (confirmBeforeWalletPayment) {
@@ -1217,7 +1328,12 @@ export default function SharedSplitRooms() {
       setMessage("Due paid.");
 
       await withTopProgress(async () => {
-        await paySplitRoomDue(itemId);
+        await paySplitRoomDue(itemId, { walletPin });
+        setWalletPinByItemId((prev) => {
+          const next = { ...prev };
+          delete next[itemId];
+          return next;
+        });
         setMessage("Due paid from wallet successfully.");
         refreshSplitRoomDataInBackground(selectedRoomId);
       });
@@ -1336,15 +1452,7 @@ export default function SharedSplitRooms() {
                             onClick={() => toggleSelectedFriend(friend.email)}
                             disabled={savingRoom}
                           >
-                            {friend.photo_url ? (
-                              <img src={friend.photo_url} alt="" />
-                            ) : (
-                              <span>
-                                {(friend.name || friend.email)
-                                  .slice(0, 2)
-                                  .toUpperCase()}
-                              </span>
-                            )}
+                            {renderFriendMiniAvatar(friend)}
 
                             <strong>
                               {friend.name || friend.email.split("@")[0]}
@@ -1421,7 +1529,7 @@ export default function SharedSplitRooms() {
                       {room.isOwner ? " - Owner" : ""}
                     </span>
                   </div>
-                  <em>{formatCurrency(room.outstandingAmount)} due</em>
+                  <em>{formatCurrency(room.outstandingAmount)}{" "}due</em>
                 </button>
                 <span className="status-pill">{room.status}</span>
                 <button
@@ -1462,19 +1570,23 @@ export default function SharedSplitRooms() {
             <div className="member-balance-list">
               {selectedRoom?.balances.length
                 ? selectedRoom.balances.map((balance) => {
-                    const hasWalletDues =
-                      balance.isMe && selectedRoomPendingDues.length > 0;
+                    const balanceMember = selectedRoom.members.find(
+                      (member) => member.id === balance.memberId,
+                    );
+                    const memberItems = selectedRoomItems.filter(
+                      (item) => item.assigned_member_id === balance.memberId,
+                    );
+                    const hasMePendingItems =
+                      balance.isMe && memberItems.some((item) => !item.isCollected);
                     const hasUnpaidDue =
-                      hasWalletDues ||
+                      hasMePendingItems ||
                       (!balance.isMe && balance.outstandingAmount > 0);
-                    const expanded =
-                      hasWalletDues && expandedDueMemberId === balance.memberId;
+                    const canOpenPaymentDialog = balance.isMe;
                     const rowClassName = [
                       "member-balance-row",
                       balance.isCollected ? "collected" : "",
                       hasUnpaidDue ? "unpaid" : "",
-                      hasWalletDues ? "expandable" : "",
-                      expanded ? "expanded" : "",
+                      canOpenPaymentDialog ? "payment-dialog-trigger" : "",
                     ]
                       .filter(Boolean)
                       .join(" ");
@@ -1486,35 +1598,26 @@ export default function SharedSplitRooms() {
                       >
                         <div
                           className={rowClassName}
-                          role={hasWalletDues ? "button" : undefined}
-                          tabIndex={hasWalletDues ? 0 : undefined}
+                          role={canOpenPaymentDialog ? "button" : undefined}
+                          tabIndex={canOpenPaymentDialog ? 0 : undefined}
                           onClick={() => {
-                            if (!hasWalletDues) {
-                              return;
+                            if (canOpenPaymentDialog) {
+                              openMemberPaymentDialog(balance.memberId);
                             }
-
-                            setExpandedDueMemberId((current) =>
-                              current === balance.memberId
-                                ? ""
-                                : balance.memberId,
-                            );
                           }}
                           onKeyDown={(event) => {
                             if (
-                              !hasWalletDues ||
+                              !canOpenPaymentDialog ||
                               (event.key !== "Enter" && event.key !== " ")
                             ) {
                               return;
                             }
 
                             event.preventDefault();
-                            setExpandedDueMemberId((current) =>
-                              current === balance.memberId
-                                ? ""
-                                : balance.memberId,
-                            );
+                            openMemberPaymentDialog(balance.memberId);
                           }}
                         >
+                          {renderMemberMiniAvatar(balanceMember)}
                           <span className="member-balance-name">
                             {hasUnpaidDue && (
                               <i
@@ -1530,13 +1633,6 @@ export default function SharedSplitRooms() {
                               ? formatCurrency(balance.amount)
                               : formatCurrency(balance.outstandingAmount)}
                           </em>
-                          {hasWalletDues && (
-                            <ChevronDown
-                              className="member-due-chevron"
-                              size={16}
-                              aria-hidden="true"
-                            />
-                          )}
                           {!balance.isMe &&
                             balance.outstandingAmount > 0 &&
                             selectedRoom.isOwner && (
@@ -1561,36 +1657,6 @@ export default function SharedSplitRooms() {
                               </button>
                             )}
                         </div>
-
-                        {expanded && (
-                          <div className="room-pending-dues-panel">
-                            <span>Pay from wallet</span>
-                            <div className="room-pending-due-list">
-                              {selectedRoomPendingDues.map((due) => (
-                                <div
-                                  className="room-pending-due-row"
-                                  key={due.id}
-                                >
-                                  <div>
-                                    <strong>{due.title}</strong>
-                                    <small>
-                                      Pay to{" "}
-                                      {due.receiverName || due.receiverEmail}
-                                    </small>
-                                  </div>
-                                  <em>{formatCurrency(due.amount)}</em>
-                                  <button
-                                    type="button"
-                                    onClick={() => handlePayDue(due.id)}
-                                    disabled={payingDueId === due.id}
-                                  >
-                                    {payingDueId === due.id ? "Paying" : "Pay"}
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
                       </div>
                     );
                   })
@@ -1725,6 +1791,109 @@ export default function SharedSplitRooms() {
           </article>
         )}
       </section>
+
+      {paymentDialogOpen && selectedRoom && paymentDialogMember && (
+        <div className="split-room-payment-backdrop" role="presentation">
+          <div
+            className="split-room-payment-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="split-room-payment-title"
+          >
+            <div className="split-room-payment-head">
+              <div>
+                <span>My room payments</span>
+                <h2 id="split-room-payment-title">{selectedRoom.name}</h2>
+                <p>{getMemberName(paymentDialogMember)}</p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close payment details"
+                onClick={closeMemberPaymentDialog}
+                disabled={Boolean(payingDueId)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="split-room-payment-stats">
+              <div>
+                <span>Assigned</span>
+                <strong>{formatCurrency(paymentDialogBalance?.amount ?? 0)}</strong>
+              </div>
+              <div>
+                <span>Pending</span>
+                <strong>{formatCurrency(paymentDialogPendingTotal)}</strong>
+              </div>
+              <div>
+                <span>Paid</span>
+                <strong>{formatCurrency(paymentDialogPaidTotal)}</strong>
+              </div>
+            </div>
+
+            <div className="split-room-payment-list">
+              {paymentDialogItems.length === 0 && (
+                <p className="dashboard-muted-text">
+                  No items assigned to you in this room yet.
+                </p>
+              )}
+
+              {paymentDialogItems.map((item) => (
+                <div
+                  className={
+                    item.isCollected
+                      ? "split-room-payment-row paid"
+                      : "split-room-payment-row"
+                  }
+                  key={item.id}
+                >
+                  <ReceiptText size={17} />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <small>
+                      {item.isCollected
+                        ? "Paid / collected"
+                        : "Waiting for payment"}
+                    </small>
+                  </div>
+                  <em>{formatCurrency(item.amount)}</em>
+                  {item.isCollected ? (
+                    <span className="split-room-payment-status">Paid</span>
+                  ) : (
+                    <div className="split-room-payment-action">
+                      <label>
+                        <span>Wallet PIN</span>
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          pattern="\d{4,6}"
+                          maxLength={6}
+                          placeholder="4-6 digits"
+                          value={walletPinByItemId[item.id] || ""}
+                          disabled={payingDueId === item.id}
+                          onChange={(event) =>
+                            setWalletPinByItemId((prev) => ({
+                              ...prev,
+                              [item.id]: event.target.value.replace(/\D/g, "").slice(0, 6),
+                            }))
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handlePayDue(item.id)}
+                        disabled={payingDueId === item.id}
+                      >
+                        {payingDueId === item.id ? "Paying" : "Pay"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {historyDialogOpen && selectedRoom && (
         <div className="split-room-history-backdrop" role="presentation">
@@ -1970,7 +2139,7 @@ export default function SharedSplitRooms() {
                       .join(" ")}
                     key={member.id}
                   >
-                    <UsersRound size={16} />
+                    {renderMemberMiniAvatar(member)}
                     <div className="split-room-member-meta">
                       <strong>{getMemberName(member)}</strong>
                       <span>{member.email || "No email saved"}</span>

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import editorialImage from "../assets/SplitVerse_Landing.png";
+import { useAppSettings } from "../context/useAppSettings";
 import iconimage from "../assets/Logo-v2.png";
 import "../styles/Landing.css";
 
@@ -28,15 +29,15 @@ const navLinks = [
 const proofPoints = ["Item-wise bills", "Room balances", "Manual settlements"];
 
 const heroStats = [
-  { label: "Dinner table", value: "Rs. 4,820", helper: "7 people" },
-  { label: "You owe", value: "Rs. 640", helper: "2 dues" },
-  { label: "You get back", value: "Rs. 1,180", helper: "4 friends" },
+  { label: "Dinner table", amount: 4820, helper: "7 people" },
+  { label: "You owe", amount: 640, helper: "2 dues" },
+  { label: "You get back", amount: 1180, helper: "4 friends" },
 ];
 
 const splitRows = [
-  { name: "Aarav", item: "Pasta, drink", amount: "Rs. 780" },
-  { name: "Mira", item: "Salad, dessert", amount: "Rs. 620" },
-  { name: "Kabir", item: "Shared sides", amount: "Rs. 430" },
+  { name: "Aarav", item: "Pasta, drink", amount: 780 },
+  { name: "Mira", item: "Salad, dessert", amount: 620 },
+  { name: "Kabir", item: "Shared sides", amount: 430 },
 ];
 
 const services = [
@@ -59,7 +60,8 @@ const services = [
     label: "Settle",
     title: "Track dues until the group is square.",
     text: "Record payments manually, see who owes whom, and send calm reminders when balances are still pending.",
-    metric: "Rs. 3,300 owed",
+    metricAmount: 3300,
+    metricSuffix: "owed",
   },
 ];
 
@@ -125,6 +127,22 @@ const footerColumns = [
 ];
 
 export default function Landing() {
+  const { formatCurrency } = useAppSettings();
+
+  const serviceCards = services.map((service) => {
+    const metric =
+      "metricAmount" in service && typeof service.metricAmount === "number"
+        ? `${formatCurrency(service.metricAmount)} ${service.metricSuffix ?? ""}`.trim()
+        : "metric" in service
+          ? service.metric
+          : "";
+
+    return {
+      ...service,
+      metric,
+    };
+  });
+
   const handleBrandClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -218,7 +236,7 @@ export default function Landing() {
             </div>
             <div className="split-total">
               <span>Total bill</span>
-              <strong>Rs. 4,820</strong>
+              <strong>{formatCurrency(4820)}</strong>
             </div>
             <div className="split-list">
               {splitRows.map((row) => (
@@ -228,7 +246,7 @@ export default function Landing() {
                     <strong>{row.name}</strong>
                     <span>{row.item}</span>
                   </div>
-                  <em>{row.amount}</em>
+                  <em>{formatCurrency(row.amount)}</em>
                 </div>
               ))}
             </div>
@@ -237,7 +255,7 @@ export default function Landing() {
           <div className="split-card split-card-floating">
             <span>Settlement note</span>
             <br />
-            <strong>Rs. 640 pending</strong>
+            <strong>{formatCurrency(640)} pending</strong>
             <p>Due from two friends after tax and shared sides.</p>
           </div>
         </div>
@@ -259,7 +277,7 @@ export default function Landing() {
             {heroStats.map((stat) => (
               <div key={stat.label}>
                 <span>{stat.label}</span>
-                <strong>{stat.value}</strong>
+                <strong>{formatCurrency(stat.amount)}</strong>
                 <em>{stat.helper}</em>
               </div>
             ))}
@@ -281,7 +299,7 @@ export default function Landing() {
         </div>
 
         <div className="service-grid">
-          {services.map((service) => {
+          {serviceCards.map((service) => {
             const Icon = service.icon;
 
             return (
@@ -364,15 +382,15 @@ export default function Landing() {
         <div className="balance-ledger" aria-label="Dashboard preview">
           <div className="ledger-header">
             <span>Current balance</span>
-            <strong>+Rs. 2,450</strong>
+            <strong>{formatCurrency(2450, { signed: true })}</strong>
           </div>
           <div className="ledger-row">
             <span>You owe</span>
-            <strong>Rs. 850</strong>
+            <strong>{formatCurrency(850)}</strong>
           </div>
           <div className="ledger-row">
             <span>You are owed</span>
-            <strong>Rs. 3,300</strong>
+            <strong>{formatCurrency(3300)}</strong>
           </div>
           <div className="ledger-row">
             <span>Active rooms</span>

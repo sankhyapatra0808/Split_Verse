@@ -23,7 +23,10 @@ import { useAuth } from "../../context/useAuth";
 import { useAppSettings } from "../../context/useAppSettings";
 import {
   API_URL,
+  cacheProfileDisplay,
+  getCurrentDbUser,
   getFriendsSummary,
+  readCachedProfileDisplay,
   getPendingDues,
   type FriendRequest,
   type PendingDue,
@@ -85,6 +88,8 @@ export default function DashboardLayout({
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { avatarId, compactMode, formatCurrency } = useAppSettings();
+  const userId = user?.uid;
+  const cachedProfileDisplay = readCachedProfileDisplay(userId);
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
   const [pendingFriendRequests, setPendingFriendRequests] = useState<
@@ -92,7 +97,10 @@ export default function DashboardLayout({
   >([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState("");
-  const userId = user?.uid;
+  const [profileDisplay, setProfileDisplay] = useState({
+    avatarMode: cachedProfileDisplay?.avatarMode || "photo",
+    displayPhotoUrl: cachedProfileDisplay?.displayPhotoUrl || user?.photoURL || "",
+  });
   const username = getUsername(user?.displayName, user?.email);
   const initials = getUserInitials(user?.displayName, user?.email);
   const notificationCount = pendingDues.length + pendingFriendRequests.length;
@@ -139,6 +147,70 @@ export default function DashboardLayout({
 
     return () => window.clearTimeout(timer);
   }, [loadProfileNotifications]);
+
+  const loadProfileDisplay = useCallback(async () => {
+    if (!userId) {
+      setProfileDisplay({ avatarMode: "photo", displayPhotoUrl: "" });
+      return;
+    }
+
+    try {
+      const response = await getCurrentDbUser();
+      cacheProfileDisplay(response.user, userId);
+      setProfileDisplay({
+        avatarMode: response.user.avatar_mode === "initials" ? "initials" : "photo",
+        displayPhotoUrl:
+          response.user.display_photo_url ||
+          response.user.profile_photo_url ||
+          response.user.photo_url ||
+          "",
+      });
+    } catch (error) {
+      console.error("Failed to load profile display:", error);
+      const cached = readCachedProfileDisplay(userId);
+      setProfileDisplay({
+        avatarMode: cached?.avatarMode || "photo",
+        displayPhotoUrl: cached?.displayPhotoUrl || user?.photoURL || "",
+      });
+    }
+  }, [user?.photoURL, userId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadProfileDisplay();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadProfileDisplay]);
+
+  useEffect(() => {
+    const handleProfileUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        avatarMode?: "photo" | "initials";
+        displayPhotoUrl?: string;
+      }>).detail;
+
+      if (detail?.avatarMode || typeof detail?.displayPhotoUrl === "string") {
+        setProfileDisplay((current) => ({
+          avatarMode: detail.avatarMode || current.avatarMode,
+          displayPhotoUrl:
+            typeof detail.displayPhotoUrl === "string"
+              ? detail.displayPhotoUrl
+              : current.displayPhotoUrl,
+        }));
+      }
+
+      void loadProfileDisplay();
+    };
+
+    window.addEventListener("splitverse:profile-updated", handleProfileUpdated);
+    window.addEventListener("splitverse:data-updated", handleProfileUpdated);
+
+    return () => {
+      window.removeEventListener("splitverse:profile-updated", handleProfileUpdated);
+      window.removeEventListener("splitverse:data-updated", handleProfileUpdated);
+    };
+  }, [loadProfileDisplay]);
 
   useEffect(() => {
     if (profilePanelOpen) {
@@ -267,7 +339,10 @@ export default function DashboardLayout({
   };
 
   const renderAvatar = (size: "button" | "panel" = "button") => {
-    if (avatarId === "initials") {
+    const shouldShowInitials = avatarId === "initials" || profileDisplay.avatarMode === "initials";
+    const displayPhotoUrl = profileDisplay.displayPhotoUrl || user?.photoURL || "";
+
+    if (shouldShowInitials) {
       return (
         <span className={`settings-avatar avatar-initials ${size === "panel" ? "large" : ""}`}>
           {initials}
@@ -275,10 +350,10 @@ export default function DashboardLayout({
       );
     }
 
-    if (user?.photoURL) {
+    if (displayPhotoUrl) {
       return (
         <img
-          src={user.photoURL}
+          src={displayPhotoUrl}
           alt="Profile"
           className={size === "panel" ? "profile-photo panel" : "profile-photo"}
         />
@@ -415,7 +490,7 @@ export default function DashboardLayout({
                     Friend request from{" "}
                     {request.requester_name || request.requester_email}
                   </strong>
-                  <span>{request.requester_email} wants to add you.</span>
+                  <span>{request.requester_email}{" "}{"-"}{" "} wants to add you.</span>
                 </button>
               ))}
               {pendingDues.map((due) => (
@@ -425,10 +500,10 @@ export default function DashboardLayout({
                   onClick={() => handlePendingDueClick(due.roomId)}
                 >
                   <strong>
-                    {due.title} - {formatCurrency(due.amount)}
+                    {due.title}{" "}-{" "}{formatCurrency(due.amount)}
                   </strong>
                   <span>
-                    {due.roomName} - Pay to{" "}
+                    {due.roomName}{" "}-{" "}Pay to{" "}
                     {due.receiverName || due.receiverEmail}
                   </span>
                 </button>

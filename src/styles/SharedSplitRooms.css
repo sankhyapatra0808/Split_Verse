@@ -287,7 +287,7 @@
 .dashboard-secondary-button,
 .assignment-grid button,
 .settlement-row button {
-  min-height: 30px;
+  min-height: 44px;
   border: 0;
   border-radius: 999px;
   display: inline-flex;
@@ -2659,5 +2659,343 @@
 
   .split-room-member-status {
     justify-self: start;
+  }
+}
+
+/* Keep split-room member avatars compact and circular */
+.room-member-avatar {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  aspect-ratio: 1 / 1;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 50%;
+  color: #ffffff;
+  background: var(--dash-surface-dark);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+img.room-member-avatar {
+  object-fit: cover;
+  background: var(--dash-surface-soft);
+}
+
+.member-balance-row .room-member-avatar {
+  width: 32px;
+  height: 32px;
+  min-width: 26px;
+}
+
+.split-room-member-row .room-member-avatar {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  font-size: 12px;
+}
+
+@media (max-width: 680px) {
+  .member-balance-row .room-member-avatar,
+  .split-room-member-row .room-member-avatar {
+    justify-self: start;
+  }
+}
+
+/* Me member payment popup */
+.split-rooms-grid .member-balance-row.payment-dialog-trigger {
+  cursor: pointer;
+}
+
+.split-rooms-grid .member-balance-row.payment-dialog-trigger:hover {
+  border-color: rgba(0, 82, 255, 0.22);
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(10, 11, 13, 0.06);
+}
+
+.split-rooms-grid .member-balance-row.payment-dialog-trigger:focus-visible {
+  outline: 0;
+  border-color: rgba(0, 82, 255, 0.34);
+  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+}
+
+.split-room-payment-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 170;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 11, 13, 0.3);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.split-room-payment-dialog {
+  width: min(650px, 100%);
+  max-height: min(720px, 90svh);
+  box-sizing: border-box;
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+  padding: 22px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 24px;
+  color: var(--dash-ink);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 80px rgba(10, 11, 13, 0.22);
+}
+
+.split-room-payment-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.split-room-payment-head span,
+.split-room-payment-stats span {
+  color: var(--dash-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.split-room-payment-head h2 {
+  margin: 4px 0 0;
+  color: var(--dash-ink);
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+.split-room-payment-head p {
+  margin: 4px 0 0;
+  color: var(--dash-body);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.split-room-payment-head > button {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--dash-ink);
+  background: var(--dash-surface-strong);
+  cursor: pointer;
+}
+
+.split-room-payment-head > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.split-room-payment-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.split-room-payment-stats > div {
+  display: grid;
+  gap: 5px;
+  padding: 13px;
+  border-radius: 16px;
+  background: var(--dash-surface-soft);
+}
+
+.split-room-payment-stats strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--dash-ink);
+  font-family: var(--dash-mono);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.split-room-payment-list {
+  min-height: 120px;
+  max-height: min(380px, 48svh);
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.split-room-payment-row {
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(0, 82, 255, 0.14);
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.split-room-payment-row.paid {
+  border-color: var(--dash-hairline-soft);
+  background: var(--dash-surface-soft);
+  opacity: 0.86;
+}
+
+.split-room-payment-row > svg {
+  color: var(--dash-primary);
+}
+
+.split-room-payment-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.split-room-payment-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dash-ink);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split-room-payment-row small {
+  color: var(--dash-body);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.split-room-payment-row em {
+  color: var(--dash-ink);
+  font-family: var(--dash-mono);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.split-room-payment-row button,
+.split-room-payment-status {
+  min-height: 32px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 13px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.split-room-payment-row button {
+  color: #ffffff;
+  background: var(--dash-primary);
+  cursor: pointer;
+}
+
+.split-room-payment-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.split-room-payment-status {
+  color: var(--dash-success);
+  background: rgba(5, 177, 105, 0.1);
+}
+
+@media (max-width: 680px) {
+  .split-room-payment-backdrop {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .split-room-payment-dialog {
+    max-height: 92svh;
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .split-room-payment-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .split-room-payment-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .split-room-payment-row em,
+  .split-room-payment-row button,
+  .split-room-payment-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+/* Wallet PIN action inside the Me payment popup */
+.split-room-payment-action {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(110px, 0.9fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.split-room-payment-action label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.split-room-payment-action label span {
+  color: var(--dash-muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.split-room-payment-action input {
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 999px;
+  outline: 0;
+  padding: 0 11px;
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.split-room-payment-action input:focus {
+  border-color: var(--dash-primary);
+  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+}
+
+@media (max-width: 640px) {
+  .split-room-payment-action {
+    width: 100%;
+    grid-template-columns: 1fr;
   }
 }

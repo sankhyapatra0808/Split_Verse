@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import express from "express";
+import { z } from "zod";
 import { db } from "../config/db.js";
 import {
   type AuthRequest,
@@ -10,12 +11,19 @@ import {
   isEmailConfigured,
   sendTransactionalEmail,
 } from "../utils/email.js";
+import { parseRequestBody, sendValidationError } from "../middleware/validateRequest.js";
 
 const router = express.Router();
 const acceptPageCacheTtlMs = Number(
   process.env.ACCEPT_PAGE_CACHE_TTL_MS || 15 * 60 * 1000,
 );
 const acceptPageRenderVersion = "2026-06-22-v1";
+
+const friendRequestSchema = z
+  .object({
+    email: z.string().trim().email("Enter a valid email address").max(254),
+  })
+  .strict();
 
 const acceptPageMessages = {
   notFound: "Friend request not found",
@@ -46,6 +54,9 @@ type DbUserRow = {
   name: string | null;
   email: string;
   photo_url: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: "photo" | "initials" | null;
+  display_photo_url?: string | null;
 };
 
 type FriendRow = DbUserRow & {
@@ -66,6 +77,11 @@ type FriendRequestRow = {
 };
 
 async function ensureFriendTables() {
+  // Table creation is handled by migrations. Keep this legacy setup disabled in normal requests.
+  if (process.env.ENABLE_LEGACY_ROUTE_TABLE_SETUP !== "true") {
+    return;
+  }
+
   await db.query(`
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -98,7 +114,17 @@ async function ensureFriendTables() {
 async function getCurrentUser(firebaseUid: string) {
   const result = await db.query<DbUserRow>(
     `
-    SELECT id, name, email, photo_url
+    SELECT
+      id,
+      name,
+      email,
+      photo_url,
+      profile_photo_url,
+      avatar_mode,
+      CASE
+        WHEN avatar_mode = 'initials' THEN NULL
+        ELSE COALESCE(profile_photo_url, photo_url)
+      END AS display_photo_url
     FROM users
     WHERE firebase_uid = $1;
     `,
@@ -305,6 +331,12 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           friend.name,
           friend.email,
           friend.photo_url,
+          friend.profile_photo_url,
+          friend.avatar_mode,
+          CASE
+            WHEN friend.avatar_mode = 'initials' THEN NULL
+            ELSE COALESCE(friend.profile_photo_url, friend.photo_url)
+          END AS display_photo_url,
           friendship.created_at AS friendship_created_at,
           GREATEST(
             FLOOR(EXTRACT(EPOCH FROM (NOW() - friendship.created_at)) / 86400),
@@ -329,6 +361,13 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           request.requester_user_id,
           requester.name AS requester_name,
           requester.email AS requester_email,
+          requester.photo_url AS requester_photo_url,
+          requester.profile_photo_url AS requester_profile_photo_url,
+          requester.avatar_mode AS requester_avatar_mode,
+          CASE
+            WHEN requester.avatar_mode = 'initials' THEN NULL
+            ELSE COALESCE(requester.profile_photo_url, requester.photo_url)
+          END AS requester_display_photo_url,
           request.recipient_email,
           request.status,
           request.token,
@@ -350,6 +389,13 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           request.requester_user_id,
           requester.name AS requester_name,
           requester.email AS requester_email,
+          requester.photo_url AS requester_photo_url,
+          requester.profile_photo_url AS requester_profile_photo_url,
+          requester.avatar_mode AS requester_avatar_mode,
+          CASE
+            WHEN requester.avatar_mode = 'initials' THEN NULL
+            ELSE COALESCE(requester.profile_photo_url, requester.photo_url)
+          END AS requester_display_photo_url,
           request.recipient_email,
           request.status,
           request.token,
@@ -399,11 +445,8 @@ router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
       return res.status(404).json({ message: "User not found in database" });
     }
 
-    const recipientEmail = normalizeEmail(req.body.email);
-
-    if (!isEmail(recipientEmail)) {
-      return res.status(400).json({ message: "Enter a valid email address" });
-    }
+    const { email } = parseRequestBody(friendRequestSchema, req.body);
+    const recipientEmail = normalizeEmail(email);
 
     if (recipientEmail === dbUser.email.toLowerCase()) {
       return res.status(400).json({ message: "You cannot send a friend request to yourself" });
@@ -486,6 +529,10 @@ router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
       },
     });
   } catch (error) {
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
     console.error("Send friend request failed:", error);
 
     return res.status(500).json({

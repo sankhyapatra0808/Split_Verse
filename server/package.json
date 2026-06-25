@@ -11,16 +11,24 @@
     "db:migrate:prod": "node dist/db/runMigrations.js"
   },
   "dependencies": {
+    "argon2": "^0.44.0",
+    "cloudinary": "^2.8.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
     "firebase-admin": "^14.0.0",
+    "helmet": "^8.2.0",
+    "multer": "^2.0.2",
     "nodemailer": "^9.0.1",
-    "pg": "^8.21.0"
+    "pg": "^8.21.0",
+    "razorpay": "^2.9.6",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.0.0",
     "@types/node": "^25.0.1",
     "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.0",

@@ -1275,7 +1275,7 @@
 .dashboard-secondary-button,
 .assignment-grid button,
 .settlement-row button {
-  min-height: 30px;
+  min-height: 44px;
   border: 0;
   border-radius: 999px;
   display: inline-flex;
@@ -1758,7 +1758,6 @@
   justify-content: center;
   gap: 10px;
   border: 0;
-  width: 190px;
   border-radius: 999px;
   padding: 0 14px;
   cursor: pointer;
@@ -2296,7 +2295,7 @@
 
 
 .profile-photo {
-  width: 100%;
+  width: 124%;
   height: 100%;
   border-radius: inherit;
   object-fit: cover;
@@ -2690,7 +2689,7 @@
 }
 
 .profile-photo {
-  width: 100%;
+  width: 124%;
   height: 100%;
   display: block;
   overflow: hidden;
@@ -2758,5 +2757,135 @@
   .transaction-ledger-card .transaction-row {
     grid-template-columns: 1fr !important;
     justify-items: start;
+  }
+}
+
+/* Mandatory wallet PIN onboarding gate */
+.mandatory-wallet-pin-screen {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  color: var(--dash-ink);
+  background:
+    radial-gradient(circle at top left, rgba(0, 82, 255, 0.13), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(5, 177, 105, 0.12), transparent 30%),
+    var(--dash-surface-soft);
+  font-family: var(--dash-font);
+}
+
+.mandatory-wallet-pin-card {
+  width: min(100%, 460px);
+  box-sizing: border-box;
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  border: 1px solid rgba(222, 225, 230, 0.92);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.12);
+  text-align: left;
+}
+
+.mandatory-wallet-pin-icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  color: #ffffff;
+  background: var(--dash-primary);
+}
+
+.mandatory-wallet-pin-card > span {
+  color: var(--dash-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mandatory-wallet-pin-card h1 {
+  margin: 0;
+  color: var(--dash-ink);
+  font-size: clamp(28px, 5vw, 38px);
+  font-weight: 500;
+  line-height: 1.05;
+}
+
+.mandatory-wallet-pin-card p,
+.mandatory-wallet-pin-card small {
+  margin: 0;
+  color: var(--dash-body);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.mandatory-wallet-pin-card label {
+  display: grid;
+  gap: 7px;
+}
+
+.mandatory-wallet-pin-card label span {
+  color: var(--dash-body);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.mandatory-wallet-pin-card input {
+  width: 100%;
+  height: 46px;
+  box-sizing: border-box;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 14px;
+  outline: 0;
+  padding: 0 14px;
+  color: var(--dash-ink);
+  background: var(--dash-canvas);
+  font: inherit;
+  font-size: 18px;
+  letter-spacing: 0.14em;
+}
+
+.mandatory-wallet-pin-card input:focus {
+  border-color: rgba(0, 82, 255, 0.45);
+  box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.1);
+}
+
+.mandatory-wallet-pin-card button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  color: #ffffff;
+  background: var(--dash-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.mandatory-wallet-pin-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.mandatory-wallet-pin-error {
+  padding: 11px 12px;
+  border: 1px solid rgba(207, 32, 47, 0.16);
+  border-radius: 14px;
+  color: var(--dash-danger) !important;
+  background: rgba(207, 32, 47, 0.08);
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .mandatory-wallet-pin-screen {
+    padding: 16px;
+  }
+
+  .mandatory-wallet-pin-card {
+    padding: 22px;
+    border-radius: 24px;
   }
 }

@@ -33,16 +33,34 @@ function getFriendLabel(name: string | null, email: string) {
   return name || email.split("@")[0] || email;
 }
 
-function formatFriendshipAge(days: number) {
-  if (days <= 0) {
-    return "Friends today";
+function getFriendAvatarUrl(friend: {
+  photo_url?: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: string | null;
+  display_photo_url?: string | null;
+}) {
+  if (friend.avatar_mode === "initials") {
+    return "";
   }
 
-  if (days === 1) {
-    return "Friends for 1 day";
+  return friend.display_photo_url || friend.profile_photo_url || friend.photo_url || "";
+}
+
+function renderFriendAvatar(friend: {
+  name: string | null;
+  email: string;
+  photo_url?: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: string | null;
+  display_photo_url?: string | null;
+}) {
+  const avatarUrl = getFriendAvatarUrl(friend);
+
+  if (avatarUrl) {
+    return <img className="friend-avatar" src={avatarUrl} alt="" />;
   }
 
-  return `Friends for ${days} days`;
+  return <span className="friend-avatar initials">{getFriendInitials(friend.name, friend.email)}</span>;
 }
 
 export default function Friends() {
@@ -358,15 +376,10 @@ export default function Friends() {
               )}
             {visibleFriends.map((friend) => (
               <div className="friend-row" key={friend.id}>
-                {friend.photo_url ? (
-                  <img src={friend.photo_url} alt="" />
-                ) : (
-                  <span>{getFriendInitials(friend.name, friend.email)}</span>
-                )}
+                {renderFriendAvatar(friend)}
                 <div>
                   <strong>{getFriendLabel(friend.name, friend.email)}</strong>
                   <small>{friend.email}</small>
-                  <em>{formatFriendshipAge(friend.friendship_days)}</em>
                 </div>
               </div>
             ))}

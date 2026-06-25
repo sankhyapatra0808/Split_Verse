@@ -1,5 +1,9 @@
 import crypto from "node:crypto";
 import express from "express";
+import multer from "multer";
+import { v2 as cloudinary, type UploadApiResponse } from "cloudinary";
+import argon2 from "argon2";
+import { z } from "zod";
 import { db } from "../config/db.js";
 import { adminAuth } from "../config/firebaseAdmin.js";
 import { isEmailConfigured, sendTransactionalEmail } from "../utils/email.js";
@@ -7,12 +11,150 @@ import {
   type AuthRequest,
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
+import { parseRequestBody, sendValidationError } from "../middleware/validateRequest.js";
+import {
+  sendWalletPinError,
+  verifyWalletPinForUser,
+} from "../utils/walletPin.js";
 
 const router = express.Router();
 const deleteAccountConfirmationText = "/DeleteAccount";
 const loginOtpLength = 6;
 const loginOtpExpiryMs = 10 * 60 * 1000;
 const maxLoginOtpAttempts = 5;
+const supportedAppCurrencies = new Set([
+  "INR",
+  "USD",
+  "CAD",
+  "EUR",
+  "GBP",
+  "JPY",
+  "AED",
+  "AUD",
+  "SGD",
+  "CHF",
+  "CNY",
+]);
+const supportedAppLanguages = new Set([
+  "en",
+  "hi",
+  "bn",
+  "fr",
+  "es",
+  "de",
+  "ar",
+  "ja",
+  "zh",
+  "pt",
+]);
+const walletPinLengthMessage = "Wallet PIN must be 4 to 6 digits";
+const walletPinMaxFailedAttempts = Number(process.env.WALLET_PIN_MAX_FAILED_ATTEMPTS || 5);
+const walletPinLockMs = Number(process.env.WALLET_PIN_LOCK_MS || 15 * 60 * 1000);
+const walletPinResetOtpLength = 6;
+const walletPinResetOtpExpiryMs = Number(
+  process.env.WALLET_PIN_RESET_OTP_EXPIRY_MS || 10 * 60 * 1000,
+);
+const walletPinResetOtpMaxAttempts = Number(
+  process.env.WALLET_PIN_RESET_OTP_MAX_ATTEMPTS || 5,
+);
+const walletPinResetOtpMaxRequests = Number(
+  process.env.WALLET_PIN_RESET_OTP_MAX_REQUESTS || 3,
+);
+const walletPinResetOtpWindowMinutes = Number(
+  process.env.WALLET_PIN_RESET_OTP_WINDOW_MINUTES || 15,
+);
+const walletPinOtpPepper =
+  process.env.WALLET_PIN_OTP_PEPPER ||
+  process.env.RAZORPAY_WEBHOOK_SECRET ||
+  process.env.SETUP_ROUTE_SECRET ||
+  "splitverse-local-wallet-pin-otp-pepper";
+
+const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY?.trim();
+const cloudinaryApiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
+const cloudinaryProfileFolder =
+  process.env.CLOUDINARY_PROFILE_FOLDER?.trim() || "splitverse/profile-photos";
+const isCloudinaryConfigured = Boolean(
+  cloudinaryCloudName && cloudinaryApiKey && cloudinaryApiSecret,
+);
+
+if (isCloudinaryConfigured) {
+  cloudinary.config({
+    cloud_name: cloudinaryCloudName,
+    api_key: cloudinaryApiKey,
+    api_secret: cloudinaryApiSecret,
+    secure: true,
+  });
+}
+
+
+const walletPinValueSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4,6}$/, walletPinLengthMessage)
+  .superRefine((pin, context) => {
+    const strengthIssue = getWalletPinStrengthIssue(pin);
+
+    if (strengthIssue) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: strengthIssue,
+      });
+    }
+  });
+
+const walletPinSchema = z
+  .object({
+    pin: walletPinValueSchema,
+    currentPin: z
+      .string()
+      .trim()
+      .regex(/^\d{4,6}$/, walletPinLengthMessage)
+      .optional(),
+  })
+  .strict();
+
+const verifyWalletPinSchema = z
+  .object({
+    pin: z.string().trim().regex(/^\d{4,6}$/, walletPinLengthMessage),
+  })
+  .strict();
+
+const walletPinResetOtpRequestSchema = z.object({}).strict();
+
+const walletPinResetSchema = z
+  .object({
+    otp: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, "Enter the 6-digit OTP sent to your email"),
+    pin: walletPinValueSchema,
+  })
+  .strict();
+
+const maxProfilePhotoSizeBytes = 3 * 1024 * 1024;
+const allowedProfilePhotoMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
+const profilePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: maxProfilePhotoSizeBytes,
+    files: 1,
+  },
+  fileFilter: (_req, file, callback) => {
+    if (!allowedProfilePhotoMimeTypes.has(file.mimetype)) {
+      callback(new Error("Only JPG, PNG, WEBP, or GIF images are allowed"));
+      return;
+    }
+
+    callback(null, true);
+  },
+});
 
 type LoginOtpSession = {
   firebaseUid: string;
@@ -23,6 +165,151 @@ type LoginOtpSession = {
 };
 
 const loginOtpSessions = new Map<string, LoginOtpSession>();
+
+type Queryable = {
+  query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }>;
+};
+
+function getWalletPinStrengthIssue(pin: string) {
+  if (/^(\d)\1+$/.test(pin)) {
+    return "Use a stronger wallet PIN. Repeated digits are too easy to guess.";
+  }
+
+  const commonPins = new Set([
+    "0000",
+    "1111",
+    "2222",
+    "3333",
+    "4444",
+    "5555",
+    "6666",
+    "7777",
+    "8888",
+    "9999",
+    "1234",
+    "4321",
+    "12345",
+    "54321",
+    "123456",
+    "654321",
+    "1122",
+    "1212",
+    "2580",
+  ]);
+
+  if (commonPins.has(pin)) {
+    return "Use a stronger wallet PIN. This PIN is too common.";
+  }
+
+  const digits = pin.split("").map(Number);
+  const increasing = digits.every(
+    (digit, index) => index === 0 || digit === digits[index - 1] + 1,
+  );
+  const decreasing = digits.every(
+    (digit, index) => index === 0 || digit === digits[index - 1] - 1,
+  );
+
+  if (increasing || decreasing) {
+    return "Use a stronger wallet PIN. Sequential digits are too easy to guess.";
+  }
+
+  return "";
+}
+
+function createWalletPinResetOtp() {
+  return crypto
+    .randomInt(10 ** (walletPinResetOtpLength - 1), 10 ** walletPinResetOtpLength)
+    .toString();
+}
+
+function hashWalletPinResetOtp(otp: string, userId: string) {
+  return crypto
+    .createHmac("sha256", walletPinOtpPepper)
+    .update(`${userId}:${otp}`)
+    .digest("hex");
+}
+
+async function getAuthUserProfile(client: Queryable, userId: string) {
+  const result = await client.query(
+    `
+    SELECT
+      id,
+      firebase_uid,
+      name,
+      email,
+      photo_url,
+      profile_photo_url,
+      avatar_mode,
+      app_currency,
+      app_language,
+      (wallet_pin_hash IS NOT NULL) AS has_wallet_pin,
+      CASE
+        WHEN avatar_mode = 'initials' THEN NULL
+        ELSE COALESCE(profile_photo_url, photo_url)
+      END AS display_photo_url,
+      provider,
+      created_at,
+      updated_at
+    FROM users
+    WHERE id = $1;
+    `,
+    [userId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function sendWalletPinResetOtpEmail({
+  email,
+  otp,
+  name,
+}: {
+  email: string;
+  otp: string;
+  name: string | null;
+}) {
+  if (!isEmailConfigured()) {
+    return "not_configured";
+  }
+
+  const safeName = escapeHtml(name?.trim() || "there");
+  const emailResult = await sendTransactionalEmail({
+    to: email,
+    subject: "Reset your SplitVerse wallet PIN",
+    text: `Your SplitVerse wallet PIN reset code is ${otp}. It expires in 10 minutes. If you did not request this, change your account password.`,
+    html: `
+      <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0a0b0d;">
+        <h1 style="font-size:24px;margin:0 0 12px;">Reset your wallet PIN</h1>
+        <p style="font-size:15px;line-height:1.5;margin:0 0 18px;">
+          Hi ${safeName}, use this code to reset your SplitVerse wallet PIN. It expires in 10 minutes.
+        </p>
+        <div style="display:inline-block;padding:14px 18px;border-radius:14px;background:#f7f7f7;border:1px solid #dee1e6;font-size:28px;font-weight:800;letter-spacing:8px;">
+          ${otp}
+        </div>
+        <p style="font-size:13px;line-height:1.5;margin:18px 0 0;color:#5b616e;">
+          If you did not request this OTP, ignore it and change your login password.
+        </p>
+      </div>
+    `,
+  });
+
+  if (!emailResult.ok) {
+    console.error("Wallet PIN reset OTP email failed:", emailResult);
+    return emailResult.reason;
+  }
+
+  return "sent";
+}
+
 
 function cleanupExpiredLoginOtpSessions() {
   const now = Date.now();
@@ -52,6 +339,106 @@ function timingSafeEqualHex(left: string, right: string) {
     leftBuffer.length === rightBuffer.length &&
     crypto.timingSafeEqual(leftBuffer, rightBuffer)
   );
+}
+
+function normalizeAvatarMode(value: unknown) {
+  return value === "initials" ? "initials" : "photo";
+}
+
+function normalizeProfilePhotoUrl(value: unknown) {
+  const photoUrl = String(value ?? "").trim();
+
+  if (!photoUrl) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(photoUrl);
+
+    if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+      return null;
+    }
+
+    return parsedUrl.toString().slice(0, 2048);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeAppCurrency(value: unknown) {
+  const currency = String(value ?? "")
+    .trim()
+    .toUpperCase();
+
+  return supportedAppCurrencies.has(currency) ? currency : null;
+}
+
+function normalizeAppLanguage(value: unknown) {
+  const language = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  return supportedAppLanguages.has(language) ? language : null;
+}
+
+function hasOwnBodyField(body: unknown, ...keys: string[]) {
+  if (!body || typeof body !== "object") {
+    return false;
+  }
+
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(body, key));
+}
+
+function getServerUrl(req: express.Request) {
+  return (
+    process.env.SERVER_URL ||
+    `${req.protocol}://${req.get("host")}`
+  ).replace(/\/$/, "");
+}
+
+function uploadProfilePhotoToCloudinary(
+  file: Express.Multer.File,
+  userId: string,
+) {
+  if (!isCloudinaryConfigured) {
+    throw Object.assign(
+      new Error(
+        "Cloudinary is not configured. Add CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in server/.env.",
+      ),
+      { statusCode: 503 },
+    );
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: cloudinaryProfileFolder,
+        public_id: `${userId}-${crypto.randomBytes(8).toString("hex")}`,
+        resource_type: "image",
+        overwrite: false,
+        transformation: [
+          {
+            width: 512,
+            height: 512,
+            crop: "fill",
+            gravity: "face",
+            quality: "auto",
+            fetch_format: "auto",
+          },
+        ],
+      },
+      (error, result?: UploadApiResponse) => {
+        if (error || !result?.secure_url) {
+          reject(error || new Error("Cloudinary did not return a secure URL"));
+          return;
+        }
+
+        resolve(result.secure_url);
+      },
+    );
+
+    uploadStream.end(file.buffer);
+  });
 }
 
 async function sendLoginOtpEmail({
@@ -242,9 +629,12 @@ router.post(
         name,
         email,
         photo_url,
-        provider
+        provider,
+        avatar_mode,
+        app_currency,
+        app_language
       )
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES ($1, $2, $3, $4, $5, 'photo', 'INR', 'en')
       ON CONFLICT (firebase_uid)
       DO UPDATE SET
         name = EXCLUDED.name,
@@ -252,7 +642,13 @@ router.post(
         photo_url = EXCLUDED.photo_url,
         provider = EXCLUDED.provider,
         updated_at = NOW()
-      RETURNING *;
+      RETURNING
+        *,
+        (wallet_pin_hash IS NOT NULL) AS has_wallet_pin,
+        CASE
+          WHEN avatar_mode = 'initials' THEN NULL
+          ELSE COALESCE(profile_photo_url, photo_url)
+        END AS display_photo_url;
       `,
         [firebaseUid, name, email, photoUrl, provider],
       );
@@ -289,6 +685,15 @@ router.get("/me", verifyFirebaseToken, async (req: AuthRequest, res) => {
         name,
         email,
         photo_url,
+        profile_photo_url,
+        avatar_mode,
+        app_currency,
+        app_language,
+        (wallet_pin_hash IS NOT NULL) AS has_wallet_pin,
+        CASE
+          WHEN avatar_mode = 'initials' THEN NULL
+          ELSE COALESCE(profile_photo_url, photo_url)
+        END AS display_photo_url,
         provider,
         created_at,
         updated_at
@@ -315,6 +720,775 @@ router.get("/me", verifyFirebaseToken, async (req: AuthRequest, res) => {
     });
   }
 });
+
+router.post(
+  "/profile-photo",
+  verifyFirebaseToken,
+  (req, res, next) => {
+    profilePhotoUpload.single("photo")(req, res, (error: unknown) => {
+      if (error instanceof multer.MulterError) {
+        return res.status(400).json({
+          message:
+            error.code === "LIMIT_FILE_SIZE"
+              ? "Profile photo must be 3 MB or smaller"
+              : "Could not upload profile photo",
+        });
+      }
+
+      if (error) {
+        return res.status(400).json({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not upload profile photo",
+        });
+      }
+
+      return next();
+    });
+  },
+  async (req: AuthRequest, res) => {
+    try {
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({
+          message: "Unauthorized",
+        });
+      }
+
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({
+          message: "Choose a profile photo to upload",
+        });
+      }
+
+      const profilePhotoUrl = await uploadProfilePhotoToCloudinary(file, firebaseUser.uid);
+      const result = await db.query(
+        `
+        UPDATE users
+        SET
+          avatar_mode = 'photo',
+          profile_photo_url = $2,
+          updated_at = NOW()
+        WHERE firebase_uid = $1
+        RETURNING
+          id,
+          firebase_uid,
+          name,
+          email,
+          photo_url,
+          profile_photo_url,
+          avatar_mode,
+          app_currency,
+          app_language,
+          (wallet_pin_hash IS NOT NULL) AS has_wallet_pin,
+          CASE
+            WHEN avatar_mode = 'initials' THEN NULL
+            ELSE COALESCE(profile_photo_url, photo_url)
+          END AS display_photo_url,
+          provider,
+          created_at,
+          updated_at;
+        `,
+        [firebaseUser.uid, profilePhotoUrl],
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          message: "User not found in database",
+        });
+      }
+
+      return res.status(201).json({
+        message: "Profile photo uploaded",
+        user: result.rows[0],
+      });
+    } catch (error) {
+      console.error("Upload profile photo failed:", error);
+
+      const statusCode =
+        typeof error === "object" && error !== null && "statusCode" in error
+          ? Number((error as { statusCode?: unknown }).statusCode)
+          : 500;
+
+      return res.status(Number.isFinite(statusCode) ? statusCode : 500).json({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to upload profile photo",
+      });
+    }
+  },
+);
+
+router.patch("/profile", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({
+        message: "Unauthorized",
+      });
+    }
+
+    const avatarModeSupplied = hasOwnBodyField(
+      req.body,
+      "avatarMode",
+      "avatar_mode",
+    );
+    const profilePhotoSupplied = hasOwnBodyField(
+      req.body,
+      "profilePhotoUrl",
+      "profile_photo_url",
+    );
+    const appCurrencySupplied = hasOwnBodyField(
+      req.body,
+      "appCurrency",
+      "app_currency",
+    );
+    const appLanguageSupplied = hasOwnBodyField(
+      req.body,
+      "appLanguage",
+      "app_language",
+    );
+
+    const avatarMode = avatarModeSupplied
+      ? normalizeAvatarMode(req.body?.avatarMode ?? req.body?.avatar_mode)
+      : null;
+    const rawProfilePhotoUrl =
+      req.body?.profilePhotoUrl ?? req.body?.profile_photo_url;
+    const profilePhotoUrl = profilePhotoSupplied
+      ? normalizeProfilePhotoUrl(rawProfilePhotoUrl)
+      : null;
+    const appCurrency = appCurrencySupplied
+      ? normalizeAppCurrency(req.body?.appCurrency ?? req.body?.app_currency)
+      : null;
+    const appLanguage = appLanguageSupplied
+      ? normalizeAppLanguage(req.body?.appLanguage ?? req.body?.app_language)
+      : null;
+
+    if (profilePhotoSupplied && rawProfilePhotoUrl && !profilePhotoUrl) {
+      return res.status(400).json({
+        message: "Profile photo must be a valid http or https image URL",
+      });
+    }
+
+    if (appCurrencySupplied && !appCurrency) {
+      return res.status(400).json({
+        message: "Unsupported application currency",
+      });
+    }
+
+    if (appLanguageSupplied && !appLanguage) {
+      return res.status(400).json({
+        message: "Unsupported application language",
+      });
+    }
+
+    const result = await db.query(
+      `
+      UPDATE users
+      SET
+        avatar_mode = COALESCE($2::text, avatar_mode),
+        profile_photo_url = CASE
+          WHEN $3::boolean THEN $4::text
+          ELSE profile_photo_url
+        END,
+        app_currency = COALESCE($5::text, app_currency),
+        app_language = COALESCE($6::text, app_language),
+        updated_at = NOW()
+      WHERE firebase_uid = $1
+      RETURNING
+        id,
+        firebase_uid,
+        name,
+        email,
+        photo_url,
+        profile_photo_url,
+        avatar_mode,
+        app_currency,
+        app_language,
+        (wallet_pin_hash IS NOT NULL) AS has_wallet_pin,
+        CASE
+          WHEN avatar_mode = 'initials' THEN NULL
+          ELSE COALESCE(profile_photo_url, photo_url)
+        END AS display_photo_url,
+        provider,
+        created_at,
+        updated_at;
+      `,
+      [
+        firebaseUser.uid,
+        avatarMode,
+        profilePhotoSupplied,
+        profilePhotoUrl,
+        appCurrency,
+        appLanguage,
+      ],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "User not found in database",
+      });
+    }
+
+    return res.json({
+      message: "Profile settings updated",
+      user: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Update profile settings failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to update profile settings",
+    });
+  }
+});
+
+router.post("/wallet-pin", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  const client = await db.connect();
+
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { pin, currentPin } = parseRequestBody(walletPinSchema, req.body);
+
+    await client.query("BEGIN");
+
+    const userResult = await client.query<{
+      id: string;
+      wallet_pin_hash: string | null;
+    }>(
+      `
+      SELECT id, wallet_pin_hash
+      FROM users
+      WHERE firebase_uid = $1
+      FOR UPDATE;
+      `,
+      [firebaseUser.uid],
+    );
+
+    const user = userResult.rows[0];
+
+    if (!user) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({ message: "User not found in database" });
+    }
+
+    if (user.wallet_pin_hash) {
+      if (!currentPin) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({ message: "Old wallet PIN is required" });
+      }
+
+      try {
+        await verifyWalletPinForUser(client, user.id, currentPin);
+      } catch (pinError) {
+        await client.query("COMMIT");
+
+        if (sendWalletPinError(res, pinError)) {
+          return;
+        }
+
+        throw pinError;
+      }
+
+      const sameAsOldPin = await argon2.verify(user.wallet_pin_hash, pin);
+
+      if (sameAsOldPin) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          message: "New wallet PIN cannot be the same as the old PIN",
+        });
+      }
+    }
+
+    const nextHash = await argon2.hash(pin);
+
+    await client.query(
+      `
+      UPDATE users
+      SET
+        wallet_pin_hash = $2,
+        wallet_pin_failed_attempts = 0,
+        wallet_pin_locked_until = NULL,
+        wallet_pin_updated_at = NOW(),
+        updated_at = NOW()
+      WHERE id = $1;
+      `,
+      [user.id, nextHash],
+    );
+
+    const updatedUser = await getAuthUserProfile(client, user.id);
+
+    await client.query("COMMIT");
+
+    return res.json({
+      message: user.wallet_pin_hash
+        ? "Wallet PIN changed successfully"
+        : "Wallet PIN saved",
+      user: updatedUser,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+
+    if (sendValidationError(res, error) || sendWalletPinError(res, error)) {
+      return;
+    }
+
+    console.error("Save wallet PIN failed:", error);
+
+    return res.status(500).json({ message: "Failed to save wallet PIN" });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/wallet-pin/verify", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  const client = await db.connect();
+
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { pin } = parseRequestBody(verifyWalletPinSchema, req.body);
+
+    await client.query("BEGIN");
+
+    const userResult = await client.query<{
+      id: string;
+      wallet_pin_hash: string | null;
+      wallet_pin_failed_attempts: number;
+      wallet_pin_locked_until: Date | string | null;
+    }>(
+      `
+      SELECT
+        id,
+        wallet_pin_hash,
+        wallet_pin_failed_attempts,
+        wallet_pin_locked_until
+      FROM users
+      WHERE firebase_uid = $1
+      FOR UPDATE;
+      `,
+      [firebaseUser.uid],
+    );
+
+    const user = userResult.rows[0];
+
+    if (!user) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({ message: "User not found in database" });
+    }
+
+    if (!user.wallet_pin_hash) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({ message: "Set a wallet PIN first" });
+    }
+
+    const lockedUntil = user.wallet_pin_locked_until
+      ? new Date(user.wallet_pin_locked_until).getTime()
+      : 0;
+
+    if (lockedUntil > Date.now()) {
+      await client.query("ROLLBACK");
+
+      return res.status(423).json({
+        message: "Wallet PIN is temporarily locked. Try again later.",
+        lockedUntil: new Date(lockedUntil).toISOString(),
+      });
+    }
+
+    const pinMatches = await argon2.verify(user.wallet_pin_hash, pin);
+
+    if (!pinMatches) {
+      const nextAttempts = Number(user.wallet_pin_failed_attempts || 0) + 1;
+      const shouldLock = nextAttempts >= walletPinMaxFailedAttempts;
+      const lockedUntilValue = shouldLock
+        ? new Date(Date.now() + walletPinLockMs)
+        : null;
+
+      await client.query(
+        `
+        UPDATE users
+        SET
+          wallet_pin_failed_attempts = $2,
+          wallet_pin_locked_until = $3,
+          updated_at = NOW()
+        WHERE id = $1;
+        `,
+        [user.id, nextAttempts, lockedUntilValue],
+      );
+
+      await client.query("COMMIT");
+
+      return res.status(401).json({
+        message: shouldLock
+          ? "Too many wrong wallet PIN attempts. Wallet PIN is temporarily locked."
+          : "Incorrect wallet PIN",
+        attemptsRemaining: Math.max(walletPinMaxFailedAttempts - nextAttempts, 0),
+        lockedUntil: lockedUntilValue?.toISOString(),
+      });
+    }
+
+    await client.query(
+      `
+      UPDATE users
+      SET
+        wallet_pin_failed_attempts = 0,
+        wallet_pin_locked_until = NULL,
+        updated_at = NOW()
+      WHERE id = $1;
+      `,
+      [user.id],
+    );
+
+    await client.query("COMMIT");
+
+    return res.json({ verified: true });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
+    console.error("Verify wallet PIN failed:", error);
+
+    return res.status(500).json({ message: "Failed to verify wallet PIN" });
+  } finally {
+    client.release();
+  }
+});
+
+
+router.post(
+  "/wallet-pin/reset-otp/request",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
+
+    try {
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      parseRequestBody(walletPinResetOtpRequestSchema, req.body);
+
+      const userResult = await client.query<{
+        id: string;
+        name: string | null;
+        email: string;
+        wallet_pin_hash: string | null;
+      }>(
+        `
+        SELECT id, name, email, wallet_pin_hash
+        FROM users
+        WHERE firebase_uid = $1;
+        `,
+        [firebaseUser.uid],
+      );
+
+      const user = userResult.rows[0];
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      if (!user.wallet_pin_hash) {
+        return res.status(400).json({
+          message: "Set your wallet PIN first before using reset.",
+        });
+      }
+
+      await client.query(
+        `
+        UPDATE wallet_pin_reset_otps
+        SET consumed_at = NOW()
+        WHERE user_id = $1
+        AND consumed_at IS NULL
+        AND expires_at <= NOW();
+        `,
+        [user.id],
+      );
+
+      const requestCountResult = await client.query<{ request_count: number }>(
+        `
+        SELECT COUNT(*)::int AS request_count
+        FROM wallet_pin_reset_otps
+        WHERE user_id = $1
+        AND created_at > NOW() - ($2::int * INTERVAL '1 minute');
+        `,
+        [user.id, walletPinResetOtpWindowMinutes],
+      );
+
+      if (Number(requestCountResult.rows[0].request_count) >= walletPinResetOtpMaxRequests) {
+        return res.status(429).json({
+          message: "Too many reset OTP requests. Please try again later.",
+        });
+      }
+
+      const otp = createWalletPinResetOtp();
+      const emailStatus = await sendWalletPinResetOtpEmail({
+        email: user.email,
+        name: user.name,
+        otp,
+      });
+
+      if (emailStatus !== "sent") {
+        return res.status(503).json({
+          message:
+            emailStatus === "not_configured"
+              ? "Email OTP delivery is not configured. Add Brevo SMTP settings in server/.env."
+              : "Could not send wallet PIN reset OTP. Please try again.",
+        });
+      }
+
+      await client.query("BEGIN");
+
+      await client.query(
+        `
+        UPDATE wallet_pin_reset_otps
+        SET consumed_at = NOW()
+        WHERE user_id = $1
+        AND consumed_at IS NULL;
+        `,
+        [user.id],
+      );
+
+      await client.query(
+        `
+        INSERT INTO wallet_pin_reset_otps (
+          user_id,
+          otp_hash,
+          expires_at
+        )
+        VALUES ($1, $2, NOW() + ($3::int * INTERVAL '1 millisecond'));
+        `,
+        [user.id, hashWalletPinResetOtp(otp, user.id), walletPinResetOtpExpiryMs],
+      );
+
+      await client.query("COMMIT");
+
+      return res.status(201).json({
+        message: "Wallet PIN reset OTP sent to your registered email.",
+        expiresInSeconds: Math.floor(walletPinResetOtpExpiryMs / 1000),
+      });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+
+      if (sendValidationError(res, error)) {
+        return;
+      }
+
+      console.error("Request wallet PIN reset OTP failed:", error);
+
+      return res.status(500).json({
+        message: "Failed to request wallet PIN reset OTP",
+      });
+    } finally {
+      client.release();
+    }
+  },
+);
+
+router.post(
+  "/wallet-pin/reset",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
+
+    try {
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const { otp, pin } = parseRequestBody(walletPinResetSchema, req.body);
+
+      await client.query("BEGIN");
+
+      const userResult = await client.query<{
+        id: string;
+        wallet_pin_hash: string | null;
+      }>(
+        `
+        SELECT id, wallet_pin_hash
+        FROM users
+        WHERE firebase_uid = $1
+        FOR UPDATE;
+        `,
+        [firebaseUser.uid],
+      );
+
+      const user = userResult.rows[0];
+
+      if (!user) {
+        await client.query("ROLLBACK");
+
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      const otpResult = await client.query<{
+        id: string;
+        otp_hash: string;
+        expires_at: Date | string;
+        failed_attempts: number;
+        is_expired: boolean;
+      }>(
+        `
+        SELECT
+          id,
+          otp_hash,
+          expires_at,
+          failed_attempts,
+          expires_at <= NOW() AS is_expired
+        FROM wallet_pin_reset_otps
+        WHERE user_id = $1
+        AND consumed_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE;
+        `,
+        [user.id],
+      );
+
+      const otpRow = otpResult.rows[0];
+
+      if (!otpRow) {
+        await client.query("ROLLBACK");
+
+        return res.status(404).json({
+          message: "Reset OTP expired. Please request a new OTP.",
+        });
+      }
+
+      if (otpRow.is_expired) {
+        await client.query(
+          `UPDATE wallet_pin_reset_otps SET consumed_at = NOW() WHERE id = $1;`,
+          [otpRow.id],
+        );
+        await client.query("COMMIT");
+
+        return res.status(410).json({
+          message: "Reset OTP expired. Please request a new OTP.",
+        });
+      }
+
+      if (Number(otpRow.failed_attempts) >= walletPinResetOtpMaxAttempts) {
+        await client.query("ROLLBACK");
+
+        return res.status(423).json({
+          message: "Too many wrong OTP attempts. Please request a new OTP.",
+        });
+      }
+
+      const submittedOtpHash = hashWalletPinResetOtp(otp, user.id);
+      const otpMatches = timingSafeEqualHex(otpRow.otp_hash, submittedOtpHash);
+
+      if (!otpMatches) {
+        const nextAttempts = Number(otpRow.failed_attempts || 0) + 1;
+        await client.query(
+          `
+          UPDATE wallet_pin_reset_otps
+          SET failed_attempts = $2
+          WHERE id = $1;
+          `,
+          [otpRow.id, nextAttempts],
+        );
+        await client.query("COMMIT");
+
+        return res.status(nextAttempts >= walletPinResetOtpMaxAttempts ? 423 : 401).json({
+          message:
+            nextAttempts >= walletPinResetOtpMaxAttempts
+              ? "Too many wrong OTP attempts. Please request a new OTP."
+              : "Incorrect OTP",
+          attemptsRemaining: Math.max(
+            walletPinResetOtpMaxAttempts - nextAttempts,
+            0,
+          ),
+        });
+      }
+
+      if (user.wallet_pin_hash) {
+        const sameAsOldPin = await argon2.verify(user.wallet_pin_hash, pin);
+
+        if (sameAsOldPin) {
+          await client.query("ROLLBACK");
+
+          return res.status(400).json({
+            message: "New wallet PIN cannot be the same as the old PIN",
+          });
+        }
+      }
+
+      const nextHash = await argon2.hash(pin);
+
+      await client.query(
+        `
+        UPDATE users
+        SET
+          wallet_pin_hash = $2,
+          wallet_pin_failed_attempts = 0,
+          wallet_pin_locked_until = NULL,
+          wallet_pin_updated_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1;
+        `,
+        [user.id, nextHash],
+      );
+
+      await client.query(
+        `
+        UPDATE wallet_pin_reset_otps
+        SET consumed_at = NOW()
+        WHERE id = $1;
+        `,
+        [otpRow.id],
+      );
+
+      const updatedUser = await getAuthUserProfile(client, user.id);
+
+      await client.query("COMMIT");
+
+      return res.json({
+        message: "Wallet PIN reset successfully",
+        user: updatedUser,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+
+      if (sendValidationError(res, error)) {
+        return;
+      }
+
+      console.error("Reset wallet PIN failed:", error);
+
+      return res.status(500).json({ message: "Failed to reset wallet PIN" });
+    } finally {
+      client.release();
+    }
+  },
+);
 
 router.delete(
   "/account",

@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   Trash2,
   UserRound,
+  ImagePlus,
   UsersRound,
   WalletCards,
   X,
@@ -23,6 +24,7 @@ import {
 import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import {
   useAppSettings,
+  type AppLanguageCode,
   type CurrencyCode,
   type WalletTopUpMethod,
 } from "../context/useAppSettings";
@@ -31,7 +33,13 @@ import {
   deleteAccount,
   deleteFriend,
   downloadMyData,
+  getCurrentDbUser,
   getFriendsSummary,
+  requestWalletPinResetOtp,
+  resetWalletPinWithOtp,
+  saveWalletPin,
+  updateProfileSettings,
+  uploadProfilePhoto,
   type Friend,
 } from "../lib/api";
 import { withTopProgress } from "../utils/topProgress";
@@ -71,11 +79,117 @@ function downloadJsonFile(fileName: string, payload: unknown) {
   URL.revokeObjectURL(objectUrl);
 }
 
+function getProfileInitials(
+  userName?: string | null,
+  userEmail?: string | null,
+) {
+  const source = userName || userEmail?.split("@")[0] || "SV";
+  const parts = source.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0]?.[0] || "S";
+  const second =
+    parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] || "V";
+
+  return `${first}${second}`.toUpperCase();
+}
+
+function getFriendInitials(friend: Friend) {
+  const source = friend.name || friend.email?.split("@")[0] || "SV";
+  const parts = source.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0]?.[0] || "S";
+  const second =
+    parts.length > 1 ? parts[parts.length - 1][0] : parts[0]?.[1] || "V";
+
+  return `${first}${second}`.toUpperCase();
+}
+
+function getFriendAvatarUrl(friend: Friend) {
+  if (friend.avatar_mode === "initials") {
+    return "";
+  }
+
+  return (
+    friend.display_photo_url ||
+    friend.profile_photo_url ||
+    friend.photo_url ||
+    ""
+  );
+}
+
+function isProbablyImageUrl(value: string) {
+  if (!value.trim()) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+
+function normalizePinInput(value: string) {
+  return value.replace(/\D/g, "").slice(0, 6);
+}
+
+function getWalletPinStrengthError(pin: string) {
+  if (!/^\d{4,6}$/.test(pin)) {
+    return "Wallet PIN must be 4 to 6 digits.";
+  }
+
+  if (/^(\d)\1+$/.test(pin)) {
+    return "Use a stronger PIN. Repeated digits are too easy to guess.";
+  }
+
+  const commonPins = new Set([
+    "0000",
+    "1111",
+    "2222",
+    "3333",
+    "4444",
+    "5555",
+    "6666",
+    "7777",
+    "8888",
+    "9999",
+    "1234",
+    "4321",
+    "12345",
+    "54321",
+    "123456",
+    "654321",
+    "1122",
+    "1212",
+    "2580",
+  ]);
+
+  if (commonPins.has(pin)) {
+    return "Use a stronger PIN. This PIN is too common.";
+  }
+
+  const digits = pin.split("").map(Number);
+  const increasing = digits.every(
+    (digit, index) => index === 0 || digit === digits[index - 1] + 1,
+  );
+  const decreasing = digits.every(
+    (digit, index) => index === 0 || digit === digits[index - 1] - 1,
+  );
+
+  if (increasing || decreasing) {
+    return "Use a stronger PIN. Sequential digits are too easy to guess.";
+  }
+
+  return "";
+}
+
+
 export default function AppSettings() {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { user, logout, refreshDbUser } = useAuth();
   const {
     appCurrency,
+    appLanguage,
     avatarId,
     compactMode,
     confirmBeforeWalletPayment,
@@ -84,13 +198,16 @@ export default function AppSettings() {
     converterTo,
     currencies,
     defaultTopUpMethod,
+    languages,
     notificationPreferences,
     privacyMode,
     settlementReminders,
     clearLocalAppSettings,
     convertCurrency,
     formatCurrency,
+    formatCurrencyValue,
     setAppCurrency,
+    setAppLanguage,
     setAvatarId,
     setCompactMode,
     setConfirmBeforeWalletPayment,
@@ -115,6 +232,25 @@ export default function AppSettings() {
   const [settingsMessage, setSettingsMessage] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [downloadingData, setDownloadingData] = useState(false);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
+  const [savedProfilePhotoUrl, setSavedProfilePhotoUrl] = useState("");
+  const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
+  const [profilePhotoPreviewUrl, setProfilePhotoPreviewUrl] = useState("");
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [walletPinSet, setWalletPinSet] = useState(false);
+  const [walletPinCurrent, setWalletPinCurrent] = useState("");
+  const [walletPinNew, setWalletPinNew] = useState("");
+  const [walletPinConfirm, setWalletPinConfirm] = useState("");
+  const [savingWalletPin, setSavingWalletPin] = useState(false);
+  const [walletPinResetOpen, setWalletPinResetOpen] = useState(false);
+  const [walletPinResetOtp, setWalletPinResetOtp] = useState("");
+  const [walletPinResetNew, setWalletPinResetNew] = useState("");
+  const [walletPinResetConfirm, setWalletPinResetConfirm] = useState("");
+  const [walletPinResetMessage, setWalletPinResetMessage] = useState("");
+  const [walletPinResetError, setWalletPinResetError] = useState("");
+  const [requestingWalletPinReset, setRequestingWalletPinReset] = useState(false);
+  const [resettingWalletPin, setResettingWalletPin] = useState(false);
 
   const convertedAmount = convertCurrency(
     converterAmount,
@@ -125,6 +261,15 @@ export default function AppSettings() {
     (currency) => ({
       value: currency.code,
       label: `${currency.code} - ${currency.label}`,
+    }),
+  );
+  const languageOptions: DropdownOption<AppLanguageCode>[] = languages.map(
+    (language) => ({
+      value: language.code,
+      label:
+        language.label === language.nativeLabel
+          ? language.label
+          : `${language.nativeLabel} - ${language.label}`,
     }),
   );
   const compactCurrencyOptions: DropdownOption<CurrencyCode>[] = currencies.map(
@@ -153,6 +298,23 @@ export default function AppSettings() {
         .includes(normalizedSearch),
     );
   }, [friends, trimmedFriendSearch]);
+  const profileInitials = getProfileInitials(user?.displayName, user?.email);
+  const profilePreviewUrl =
+    avatarId === "initials"
+      ? ""
+      : profilePhotoPreviewUrl ||
+        profilePhotoUrl.trim() ||
+        savedProfilePhotoUrl ||
+        user?.photoURL ||
+        "";
+
+  function isKnownCurrency(value: unknown): value is CurrencyCode {
+    return currencies.some((currency) => currency.code === value);
+  }
+
+  function isKnownLanguage(value: unknown): value is AppLanguageCode {
+    return languages.some((language) => language.code === value);
+  }
 
   useEffect(() => {
     let active = true;
@@ -185,6 +347,344 @@ export default function AppSettings() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadProfileSettings() {
+      try {
+        setProfileLoading(true);
+        const response = await getCurrentDbUser();
+
+        if (!active) {
+          return;
+        }
+
+        setSavedProfilePhotoUrl(
+          response.user.profile_photo_url ||
+            response.user.photo_url ||
+            user?.photoURL ||
+            "",
+        );
+        setProfilePhotoUrl("");
+        setAvatarId(
+          response.user.avatar_mode === "initials" ? "initials" : "current",
+        );
+        setWalletPinSet(Boolean(response.user.has_wallet_pin));
+
+        if (isKnownCurrency(response.user.app_currency)) {
+          setAppCurrency(response.user.app_currency);
+        }
+
+        if (isKnownLanguage(response.user.app_language)) {
+          setAppLanguage(response.user.app_language);
+        }
+      } catch (error) {
+        if (active) {
+          console.error("Could not load profile display settings:", error);
+        }
+      } finally {
+        if (active) {
+          setProfileLoading(false);
+        }
+      }
+    }
+
+    void loadProfileSettings();
+
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.photoURL]);
+
+  useEffect(() => {
+    if (!profilePhotoFile) {
+      setProfilePhotoPreviewUrl("");
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(profilePhotoFile);
+    setProfilePhotoPreviewUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [profilePhotoFile]);
+
+  function handleProfilePhotoFileChange(file: File | null) {
+    setSettingsError("");
+    setSettingsMessage("");
+
+    if (!file) {
+      setProfilePhotoFile(null);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setSettingsError("Choose a valid image file.");
+      return;
+    }
+
+    if (file.size > 3 * 1024 * 1024) {
+      setSettingsError("Profile photo must be 3 MB or smaller.");
+      return;
+    }
+
+    setProfilePhotoFile(file);
+    setProfilePhotoUrl("");
+  }
+
+  async function saveProfileDisplay(
+    nextAvatarId = avatarId,
+    nextPhotoUrl: string | null | undefined = undefined,
+    { quiet = false } = {},
+  ) {
+    const trimmedPhotoUrl = String(nextPhotoUrl ?? "").trim();
+    const photoUrlForBackend = trimmedPhotoUrl || savedProfilePhotoUrl.trim() || null;
+
+    if (!isProbablyImageUrl(trimmedPhotoUrl)) {
+      setSettingsError("Enter a valid http or https profile photo URL.");
+      return;
+    }
+
+    try {
+      setProfileSaving(true);
+      setSettingsError("");
+
+      const response = await updateProfileSettings({
+        avatarMode: nextAvatarId === "initials" ? "initials" : "photo",
+        profilePhotoUrl: photoUrlForBackend,
+      });
+
+      setSavedProfilePhotoUrl(
+        response.user.profile_photo_url || response.user.photo_url || "",
+      );
+      setProfilePhotoUrl("");
+      setAvatarId(
+        response.user.avatar_mode === "initials" ? "initials" : "current",
+      );
+      window.dispatchEvent(new Event("splitverse:profile-updated"));
+      window.dispatchEvent(new Event("splitverse:data-updated"));
+
+      if (!quiet) {
+        setSettingsMessage(
+          "Profile display updated. Friends will see your latest photo preference.",
+        );
+      }
+    } catch (error) {
+      setSettingsError(
+        error instanceof Error
+          ? error.message
+          : "Could not update profile display settings.",
+      );
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  function handleAvatarModeChange(useInitials: boolean) {
+    const nextAvatarId = useInitials ? "initials" : "current";
+
+    setAvatarId(nextAvatarId);
+    void saveProfileDisplay(nextAvatarId, undefined, { quiet: false });
+  }
+
+  async function handleSaveProfilePhoto(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (profilePhotoFile) {
+      try {
+        setProfileSaving(true);
+        setSettingsError("");
+        setSettingsMessage("");
+
+        const response = await withTopProgress(() =>
+          uploadProfilePhoto(profilePhotoFile),
+        );
+
+        setSavedProfilePhotoUrl(
+          response.user.profile_photo_url || response.user.photo_url || "",
+        );
+        setProfilePhotoUrl("");
+        setProfilePhotoFile(null);
+        setAvatarId(
+          response.user.avatar_mode === "initials" ? "initials" : "current",
+        );
+        window.dispatchEvent(new Event("splitverse:profile-updated"));
+        window.dispatchEvent(new Event("splitverse:data-updated"));
+        setSettingsMessage("Profile photo uploaded securely.");
+      } catch (error) {
+        setSettingsError(
+          error instanceof Error
+            ? error.message
+            : "Could not upload profile photo.",
+        );
+      } finally {
+        setProfileSaving(false);
+      }
+
+      return;
+    }
+
+    await saveProfileDisplay(avatarId, profilePhotoUrl);
+  }
+
+  async function saveApplicationDisplay(
+    nextCurrency = appCurrency,
+    nextLanguage = appLanguage,
+  ) {
+    try {
+      setSettingsError("");
+      await updateProfileSettings({
+        appCurrency: nextCurrency,
+        appLanguage: nextLanguage,
+      });
+      setSettingsMessage("Application display settings saved.");
+    } catch (error) {
+      setSettingsError(
+        error instanceof Error
+          ? error.message
+          : "Could not save application display settings.",
+      );
+    }
+  }
+
+  function handleAppCurrencyChange(currency: CurrencyCode) {
+    setAppCurrency(currency);
+    void saveApplicationDisplay(currency, appLanguage);
+  }
+
+  function handleAppLanguageChange(language: AppLanguageCode) {
+    setAppLanguage(language);
+    void saveApplicationDisplay(appCurrency, language);
+  }
+
+  async function handleSaveWalletPin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSettingsError("");
+    setSettingsMessage("");
+
+    const nextPin = walletPinNew.trim();
+    const confirmPin = walletPinConfirm.trim();
+    const currentPin = walletPinCurrent.trim();
+    const strengthError = getWalletPinStrengthError(nextPin);
+
+    if (strengthError) {
+      setSettingsError(strengthError);
+      return;
+    }
+
+    if (nextPin !== confirmPin) {
+      setSettingsError("Wallet PIN confirmation does not match.");
+      return;
+    }
+
+    if (!/^\d{4,6}$/.test(currentPin)) {
+      setSettingsError("Enter your current wallet PIN to change it.");
+      return;
+    }
+
+    if (currentPin === nextPin) {
+      setSettingsError("New wallet PIN cannot be the same as the old PIN.");
+      return;
+    }
+
+    try {
+      setSavingWalletPin(true);
+      await withTopProgress(() =>
+        saveWalletPin({
+          pin: nextPin,
+          currentPin,
+        }),
+      );
+      await refreshDbUser();
+      setWalletPinSet(true);
+      setWalletPinCurrent("");
+      setWalletPinNew("");
+      setWalletPinConfirm("");
+      setSettingsMessage("Wallet PIN changed successfully.");
+    } catch (error) {
+      setSettingsError(
+        error instanceof Error ? error.message : "Could not change wallet PIN.",
+      );
+    } finally {
+      setSavingWalletPin(false);
+    }
+  }
+
+  function openForgotWalletPinDialog() {
+    setWalletPinResetOpen(true);
+    setWalletPinResetOtp("");
+    setWalletPinResetNew("");
+    setWalletPinResetConfirm("");
+    setWalletPinResetMessage("");
+    setWalletPinResetError("");
+  }
+
+  async function handleRequestWalletPinResetOtp() {
+    try {
+      setWalletPinResetError("");
+      setWalletPinResetMessage("");
+      setRequestingWalletPinReset(true);
+      const response = await withTopProgress(() => requestWalletPinResetOtp());
+      setWalletPinResetMessage(response.message);
+    } catch (error) {
+      setWalletPinResetError(
+        error instanceof Error
+          ? error.message
+          : "Could not send wallet PIN reset OTP.",
+      );
+    } finally {
+      setRequestingWalletPinReset(false);
+    }
+  }
+
+  async function handleResetWalletPin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setWalletPinResetError("");
+    setWalletPinResetMessage("");
+
+    const otp = walletPinResetOtp.trim();
+    const nextPin = walletPinResetNew.trim();
+    const confirmPin = walletPinResetConfirm.trim();
+    const strengthError = getWalletPinStrengthError(nextPin);
+
+    if (!/^\d{6}$/.test(otp)) {
+      setWalletPinResetError("Enter the 6-digit OTP sent to your email.");
+      return;
+    }
+
+    if (strengthError) {
+      setWalletPinResetError(strengthError);
+      return;
+    }
+
+    if (nextPin !== confirmPin) {
+      setWalletPinResetError("Wallet PIN confirmation does not match.");
+      return;
+    }
+
+    try {
+      setResettingWalletPin(true);
+      const response = await withTopProgress(() =>
+        resetWalletPinWithOtp({ otp, pin: nextPin }),
+      );
+      await refreshDbUser();
+      setWalletPinSet(Boolean(response.user.has_wallet_pin));
+      setWalletPinCurrent("");
+      setWalletPinNew("");
+      setWalletPinConfirm("");
+      setWalletPinResetOpen(false);
+      setSettingsMessage("Wallet PIN reset successfully.");
+    } catch (error) {
+      setWalletPinResetError(
+        error instanceof Error ? error.message : "Could not reset wallet PIN.",
+      );
+    } finally {
+      setResettingWalletPin(false);
+    }
+  }
 
   async function handleDeleteFriend(friend: Friend) {
     const previousFriends = friends;
@@ -256,6 +756,7 @@ export default function AppSettings() {
           ...serverData,
           localSettings: {
             appCurrency,
+            appLanguage,
             avatarId,
             compactMode,
             confirmBeforeWalletPayment,
@@ -313,21 +814,82 @@ export default function AppSettings() {
               <span>
                 <strong>Use initials instead of photo</strong>
                 <small>
-                  Hide your profile picture and show first and last initials.
+                  Hide your profile picture and show first and last initials to
+                  friends.
                 </small>
               </span>
               <input
                 type="checkbox"
                 checked={avatarId === "initials"}
+                disabled={profileSaving || profileLoading}
                 onChange={(event) =>
-                  setAvatarId(event.target.checked ? "initials" : "current")
+                  handleAvatarModeChange(event.target.checked)
                 }
               />
             </label>
           </div>
+
+          <form
+            className="profile-photo-settings"
+            onSubmit={handleSaveProfilePhoto}
+          >
+            <div className="profile-photo-preview-row">
+              <div className="profile-photo-preview">
+                {profilePreviewUrl ? (
+                  <img src={profilePreviewUrl} alt="Profile preview" />
+                ) : (
+                  <span>{profileInitials}</span>
+                )}
+              </div>
+              <div className="profile-photo-copy">
+                <strong>Profile photo update</strong>
+                <small>
+                  Upload a profile photo securely. New uploads are stored on
+                  Cloudinary; old URL fallback still works.
+                </small>
+                <label className="settings-field profile-photo-upload-field">
+                  <span>Upload profile photo</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    disabled={profileSaving || profileLoading}
+                    onChange={(event) =>
+                      handleProfilePhotoFileChange(event.target.files?.[0] ?? null)
+                    }
+                  />
+                  {profilePhotoFile && (
+                    <small>{profilePhotoFile.name}</small>
+                  )}
+                </label>
+                <label className="settings-field profile-photo-url-field">
+                  <span>Or paste image URL</span>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/photo.jpg"
+                    value={profilePhotoUrl}
+                    disabled={profileSaving || profileLoading || Boolean(profilePhotoFile)}
+                    autoComplete="off"
+                    onChange={(event) => {
+                      setProfilePhotoFile(null);
+                      setProfilePhotoUrl(event.target.value);
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <button
+              className="dashboard-secondary-button"
+              type="submit"
+              disabled={profileSaving || profileLoading}
+            >
+              <ImagePlus size={16} />
+              {profileSaving ? "Saving profile" : "Save profile photo"}
+            </button>
+          </form>
         </article>
 
-        <article className="bento-card settings-card">
+        <article className="bento-card settings-card currency-language-card">
           <div className="bento-card-head">
             <div>
               <span>Application currency</span>
@@ -335,15 +897,30 @@ export default function AppSettings() {
             </div>
             <Coins size={22} />
           </div>
-          <label className="settings-field">
-            <span>Use this currency across the app</span>
-            <Dropdown
-              ariaLabel="Application currency"
-              value={appCurrency}
-              options={currencyOptions}
-              onChange={setAppCurrency}
-            />
-          </label>
+
+
+          <div className="settings-locale-grid">
+            <label className="settings-field">
+              <span>Use this currency across the app</span>
+              <Dropdown
+                ariaLabel="Application currency"
+                value={appCurrency}
+                options={currencyOptions}
+                onChange={handleAppCurrencyChange}
+              />
+            </label>
+
+            <label className="settings-field">
+              <span>Application language</span>
+              <Dropdown
+                ariaLabel="Application language"
+                value={appLanguage}
+                options={languageOptions}
+                onChange={handleAppLanguageChange}
+              />
+            </label>
+          </div>
+
           <div className="settings-preview">
             <span>Example display</span>
             <strong>{formatCurrency(2480)}</strong>
@@ -391,15 +968,7 @@ export default function AppSettings() {
           </div>
           <div className="settings-preview strong">
             <span>Converted amount</span>
-            <strong>
-              {
-                currencies.find((currency) => currency.code === converterTo)
-                  ?.symbol
-              }{" "}
-              {convertedAmount.toLocaleString("en-IN", {
-                maximumFractionDigits: converterTo === "JPY" ? 0 : 2,
-              })}
-            </strong>
+            <strong>{formatCurrencyValue(convertedAmount, converterTo)}</strong>
           </div>
         </article>
 
@@ -490,6 +1059,78 @@ export default function AppSettings() {
               />
             </label>
           </div>
+
+          <form className="wallet-pin-form" onSubmit={handleSaveWalletPin}>
+            <div className="wallet-pin-head">
+              <strong>Change wallet PIN</strong>
+              <small>
+                Use your old PIN to set a new 4 to 6 digit wallet PIN.
+              </small>
+            </div>
+
+            <label className="settings-field">
+              <span>Old PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={walletPinCurrent}
+                disabled={savingWalletPin || profileLoading}
+                onChange={(event) =>
+                  setWalletPinCurrent(normalizePinInput(event.target.value))
+                }
+              />
+            </label>
+
+            <div className="wallet-pin-grid">
+              <label className="settings-field">
+                <span>New PIN</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={walletPinNew}
+                  disabled={savingWalletPin || profileLoading}
+                  onChange={(event) =>
+                    setWalletPinNew(normalizePinInput(event.target.value))
+                  }
+                />
+              </label>
+              <label className="settings-field">
+                <span>Confirm new PIN</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={walletPinConfirm}
+                  disabled={savingWalletPin || profileLoading}
+                  onChange={(event) =>
+                    setWalletPinConfirm(normalizePinInput(event.target.value))
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="wallet-pin-actions-row">
+              <button
+                className="dashboard-secondary-button"
+                type="submit"
+                disabled={savingWalletPin || profileLoading || !walletPinSet}
+              >
+                <ShieldCheck size={16} />
+                {savingWalletPin ? "Changing PIN" : "Change wallet PIN"}
+              </button>
+
+              <button
+                className="wallet-pin-forgot-button"
+                type="button"
+                onClick={openForgotWalletPinDialog}
+                disabled={savingWalletPin || profileLoading || !walletPinSet}
+              >
+                Forgot old PIN?
+              </button>
+            </div>
+          </form>
         </article>
 
         <article className="bento-card settings-card">
@@ -529,7 +1170,10 @@ export default function AppSettings() {
                 type="checkbox"
                 checked={notificationPreferences.loginOtpEmails}
                 onChange={(event) =>
-                  setNotificationPreference("loginOtpEmails", event.target.checked)
+                  setNotificationPreference(
+                    "loginOtpEmails",
+                    event.target.checked,
+                  )
                 }
               />
             </label>
@@ -554,7 +1198,9 @@ export default function AppSettings() {
               <CreditCard size={19} />
               <span>
                 <strong>Room due notifications</strong>
-                <small>Show room dues and wallet payment alerts in the app.</small>
+                <small>
+                  Show room dues and wallet payment alerts in the app.
+                </small>
               </span>
               <input
                 type="checkbox"
@@ -607,15 +1253,15 @@ export default function AppSettings() {
             {visibleFriends.map((friend) => (
               <article className="settings-friend-card" key={friend.id}>
                 <div className="settings-friend-main">
-                  {friend.photo_url ? (
+                  {getFriendAvatarUrl(friend) ? (
                     <img
                       className="settings-friend-avatar"
-                      src={friend.photo_url}
+                      src={getFriendAvatarUrl(friend)}
                       alt=""
                     />
                   ) : (
                     <span className="settings-friend-avatar">
-                      {getFriendLabel(friend).slice(0, 2).toUpperCase()}
+                      {getFriendInitials(friend)}
                     </span>
                   )}
 
@@ -710,6 +1356,126 @@ export default function AppSettings() {
           )}
         </article>
       </section>
+
+
+      {walletPinResetOpen && (
+        <div className="transaction-export-backdrop" role="presentation">
+          <form
+            className="transaction-export-dialog wallet-pin-reset-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wallet-pin-reset-title"
+            onSubmit={handleResetWalletPin}
+          >
+            <div className="transaction-export-head">
+              <div>
+                <span>Forgot wallet PIN</span>
+                <h2 id="wallet-pin-reset-title">Reset with email OTP</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close wallet PIN reset dialog"
+                onClick={() => setWalletPinResetOpen(false)}
+                disabled={requestingWalletPinReset || resettingWalletPin}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="account-delete-warning wallet-pin-reset-warning">
+              <Mail size={18} />
+              <p>
+                We will send a 6-digit OTP to your registered email. The OTP
+                expires quickly and can be used only once.
+              </p>
+            </div>
+
+            <button
+              className="dashboard-secondary-button wallet-pin-otp-button"
+              type="button"
+              onClick={handleRequestWalletPinResetOtp}
+              disabled={requestingWalletPinReset || resettingWalletPin}
+            >
+              <Mail size={16} />
+              {requestingWalletPinReset ? "Sending OTP" : "Send OTP to email"}
+            </button>
+
+            <label>
+              <span>Email OTP</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={walletPinResetOtp}
+                disabled={resettingWalletPin}
+                onChange={(event) =>
+                  setWalletPinResetOtp(normalizePinInput(event.target.value))
+                }
+                autoComplete="one-time-code"
+              />
+            </label>
+
+            <div className="wallet-pin-grid">
+              <label>
+                <span>New wallet PIN</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={walletPinResetNew}
+                  disabled={resettingWalletPin}
+                  onChange={(event) =>
+                    setWalletPinResetNew(normalizePinInput(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                <span>Confirm new PIN</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={walletPinResetConfirm}
+                  disabled={resettingWalletPin}
+                  onChange={(event) =>
+                    setWalletPinResetConfirm(normalizePinInput(event.target.value))
+                  }
+                />
+              </label>
+            </div>
+
+            {(walletPinResetMessage || walletPinResetError) && (
+              <p
+                className={
+                  walletPinResetError
+                    ? "transaction-export-message error"
+                    : "transaction-export-message"
+                }
+              >
+                {walletPinResetError || walletPinResetMessage}
+              </p>
+            )}
+
+            <div className="transaction-export-actions">
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                onClick={() => setWalletPinResetOpen(false)}
+                disabled={resettingWalletPin}
+              >
+                Cancel
+              </button>
+              <button
+                className="dashboard-primary-button"
+                type="submit"
+                disabled={resettingWalletPin}
+              >
+                {resettingWalletPin ? "Resetting PIN" : "Reset wallet PIN"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {deleteDialogOpen && (
         <div className="transaction-export-backdrop" role="presentation">

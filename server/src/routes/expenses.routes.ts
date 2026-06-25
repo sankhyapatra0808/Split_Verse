@@ -1,13 +1,40 @@
 import express from "express";
+import { z } from "zod";
 import { db } from "../config/db.js";
 import {
   type AuthRequest,
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
 import { sendLiveUpdate } from "../liveEvents.js";
+import {
+  moneyAmountSchema,
+  parseRequestBody,
+  safeTextSchema,
+  sendValidationError,
+} from "../middleware/validateRequest.js";
 
 const router = express.Router();
 const maxExpensesPerDay = 10;
+const maxExpenseAmount = Number(process.env.MAX_EXPENSE_AMOUNT || 1000000);
+
+const createExpenseSchema = z
+  .object({
+    title: safeTextSchema("Expense title", 120),
+    category: z
+      .string()
+      .trim()
+      .max(60, "Category is too long")
+      .optional()
+      .nullable(),
+    amount: moneyAmountSchema(maxExpenseAmount),
+    expenseDate: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Expense date must be YYYY-MM-DD")
+      .optional()
+      .nullable(),
+  })
+  .strict();
 
 router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
   try {
@@ -19,21 +46,10 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       });
     }
 
-    const { title, category, amount, expenseDate } = req.body;
-
-    if (!title || !String(title).trim()) {
-      return res.status(400).json({
-        message: "Expense title is required",
-      });
-    }
-
-    const numericAmount = Number(amount);
-
-    if (!numericAmount || numericAmount <= 0) {
-      return res.status(400).json({
-        message: "Expense amount must be greater than 0",
-      });
-    }
+    const { title, category, amount: numericAmount, expenseDate } = parseRequestBody(
+      createExpenseSchema,
+      req.body,
+    );
 
     const userResult = await db.query(
       `
@@ -97,7 +113,7 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       `,
       [
         dbUserId,
-        String(title).trim(),
+        title,
         category ? String(category).trim() : "Other",
         numericAmount,
         expenseDate || null,
@@ -114,6 +130,10 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       expense: expenseResult.rows[0],
     });
   } catch (error) {
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
     console.error("Create expense failed:", error);
 
     return res.status(500).json({

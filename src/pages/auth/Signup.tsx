@@ -16,8 +16,8 @@ import {
 
 import logo from "../../assets/Logo-v2.png";
 import "../../styles/AuthPages.css";
-import { FacebookIcon, GoogleIcon } from "./SocialIcons";
-import { useAuth, type SocialProvider } from "../../context/useAuth";
+import { GoogleIcon } from "./SocialIcons";
+import { useAuth } from "../../context/useAuth";
 import { getFirebaseErrorMessage } from "../../utils/firebaseError";
 import { withTopProgress } from "../../utils/topProgress";
 
@@ -57,7 +57,7 @@ export default function Signup() {
   const [loading, setLoading] = useState(false);
   const passwordStrength = getPasswordStrength(password);
 
-  const handleSocialSignup = async (provider: SocialProvider) => {
+  const handleSocialSignup = async (provider: "google") => {
     setError("");
 
     try {
@@ -208,14 +208,14 @@ export default function Signup() {
             </button>
           </form>
 
-          <div className="auth-social" aria-label="Social signup options">
+          <div className="auth-social" aria-label="Google signup option">
             <div className="auth-divider">
               <span />
               <p>or sign up with</p>
               <span />
             </div>
 
-            <div className="auth-social-row">
+            <div className="auth-social-row single">
               <button
                 type="button"
                 className="auth-social-btn google"
@@ -225,18 +225,7 @@ export default function Signup() {
                 <span>
                   <GoogleIcon />
                 </span>
-                Google
-              </button>
-              <button
-                type="button"
-                className="auth-social-btn facebook"
-                onClick={() => handleSocialSignup("facebook")}
-                disabled
-              >
-                <span>
-                  <FacebookIcon />
-                </span>
-                Facebook
+                Continue with Google
               </button>
             </div>
           </div>

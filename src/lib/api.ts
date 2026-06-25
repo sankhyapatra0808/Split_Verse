@@ -10,6 +10,55 @@ type CachedAuthToken = {
 
 let cachedAuthToken: CachedAuthToken | null = null;
 const authTokenExpiryBufferMs = 60 * 1000;
+const smallApiCache = new Map<
+  string,
+  { expiresAt: number; promise: Promise<unknown> }
+>();
+
+function cachedApiRequest<T>(
+  cacheKey: string,
+  ttlMs: number,
+  request: () => Promise<T>,
+): Promise<T> {
+  const now = Date.now();
+  const cached = smallApiCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > now) {
+    return cached.promise as Promise<T>;
+  }
+
+  const promise = request().catch((error) => {
+    smallApiCache.delete(cacheKey);
+    throw error;
+  });
+
+  smallApiCache.set(cacheKey, {
+    expiresAt: now + ttlMs,
+    promise,
+  });
+
+  return promise;
+}
+
+function clearApiCache(prefix?: string) {
+  if (!prefix) {
+    smallApiCache.clear();
+    return;
+  }
+
+  Array.from(smallApiCache.keys())
+    .filter((key) => key.startsWith(prefix))
+    .forEach((key) => smallApiCache.delete(key));
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("splitverse:data-updated", () => {
+    clearApiCache("friends");
+    clearApiCache("dues");
+    clearApiCache("profile");
+  });
+}
+
 
 async function getCachedAuthToken() {
   const currentUser = auth.currentUser;
@@ -39,16 +88,78 @@ async function getCachedAuthToken() {
   return tokenResult.token;
 }
 
+export type AvatarMode = "photo" | "initials";
+
 export type DbUser = {
   id: string;
   firebase_uid: string;
   name: string | null;
   email: string;
   photo_url: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: AvatarMode | null;
+  display_photo_url?: string | null;
+  app_currency?: string | null;
+  app_language?: string | null;
+  has_wallet_pin?: boolean | null;
   provider: string | null;
   created_at: string;
   updated_at: string;
 };
+
+const profileDisplayCacheKey = "splitverse-profile-display";
+
+export type CachedProfileDisplay = {
+  uid: string;
+  avatarMode: AvatarMode;
+  displayPhotoUrl: string;
+  updatedAt: number;
+};
+
+function getUserDisplayPhotoUrl(user: Pick<DbUser, "avatar_mode" | "display_photo_url" | "profile_photo_url" | "photo_url">) {
+  if (user.avatar_mode === "initials") {
+    return "";
+  }
+
+  return user.display_photo_url || user.profile_photo_url || user.photo_url || "";
+}
+
+export function readCachedProfileDisplay(uid?: string | null) {
+  if (!uid) {
+    return null;
+  }
+
+  try {
+    const cached = window.localStorage.getItem(profileDisplayCacheKey);
+    if (!cached) {
+      return null;
+    }
+
+    const parsed = JSON.parse(cached) as CachedProfileDisplay;
+    return parsed.uid === uid ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function cacheProfileDisplay(user: DbUser, uid = auth.currentUser?.uid || user.firebase_uid) {
+  if (!uid) {
+    return;
+  }
+
+  const payload: CachedProfileDisplay = {
+    uid,
+    avatarMode: user.avatar_mode === "initials" ? "initials" : "photo",
+    displayPhotoUrl: getUserDisplayPhotoUrl(user),
+    updatedAt: Date.now(),
+  };
+
+  try {
+    window.localStorage.setItem(profileDisplayCacheKey, JSON.stringify(payload));
+  } catch {
+    // localStorage can be blocked; profile still works without the cache.
+  }
+}
 
 export type DashboardSummary = {
   metrics: {
@@ -233,6 +344,10 @@ export type SplitRoomMember = {
   user_id: string | null;
   display_name: string | null;
   email: string | null;
+  photo_url?: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: AvatarMode | null;
+  display_photo_url?: string | null;
   role: string;
   status: string;
   isMe: boolean;
@@ -311,10 +426,15 @@ export type PendingDue = {
 };
 
 export async function getPendingDues() {
-  return apiFetch<{ dues: PendingDue[] }>("/api/split-rooms/pending-dues");
+  return cachedApiRequest("dues:pending", 8_000, () =>
+    apiFetch<{ dues: PendingDue[] }>("/api/split-rooms/pending-dues"),
+  );
 }
 
-export async function paySplitRoomDue(itemId: string) {
+export async function paySplitRoomDue(
+  itemId: string,
+  payload: { walletPin: string },
+) {
   return apiFetch<{
     message: string;
     paidItem: {
@@ -326,6 +446,7 @@ export async function paySplitRoomDue(itemId: string) {
     };
   }>(`/api/split-rooms/items/${itemId}/pay`, {
     method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -334,6 +455,9 @@ export type Friend = {
   name: string | null;
   email: string;
   photo_url: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: AvatarMode | null;
+  display_photo_url?: string | null;
   friendship_created_at: string;
   friendship_days: number;
 };
@@ -520,32 +644,40 @@ export async function updateSplitRoomPaymentStatus(
 }
 
 export async function getFriendsSummary() {
-  return apiFetch<FriendsSummary>("/api/friends");
+  return cachedApiRequest("friends:summary", 10_000, () =>
+    apiFetch<FriendsSummary>("/api/friends"),
+  );
 }
 
 export async function sendFriendRequest(email: string) {
-  return apiFetch<{ message: string; request: FriendRequest }>(
+  const response = await apiFetch<{ message: string; request: FriendRequest }>(
     "/api/friends/requests",
     {
       method: "POST",
       body: JSON.stringify({ email }),
     },
   );
+  clearApiCache("friends");
+  return response;
 }
 
 export async function acceptFriendRequest(requestId: string) {
-  return apiFetch<{ message: string }>(
+  const response = await apiFetch<{ message: string }>(
     `/api/friends/requests/${requestId}/accept`,
     {
       method: "POST",
     },
   );
+  clearApiCache("friends");
+  return response;
 }
 
 export async function deleteFriend(friendId: string) {
-  return apiFetch<{ message: string }>(`/api/friends/${friendId}`, {
+  const response = await apiFetch<{ message: string }>(`/api/friends/${friendId}`, {
     method: "DELETE",
   });
+  clearApiCache("friends");
+  return response;
 }
 
 // Transaction History Export function
@@ -587,7 +719,146 @@ export async function getTransactions(params?: {
 }
 
 export async function getCurrentDbUser() {
-  return apiFetch<{ user: DbUser }>("/api/auth/me");
+  return cachedApiRequest("profile:me", 8_000, async () => {
+    const response = await apiFetch<{ user: DbUser }>("/api/auth/me");
+    cacheProfileDisplay(response.user);
+    return response;
+  });
+}
+
+export type UpdateProfileSettingsPayload = {
+  avatarMode?: AvatarMode;
+  profilePhotoUrl?: string | null;
+  appCurrency?: string;
+  appLanguage?: string;
+};
+
+export async function updateProfileSettings(
+  payload: UpdateProfileSettingsPayload,
+) {
+  const response = await apiFetch<{ message: string; user: DbUser }>("/api/auth/profile", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  clearApiCache("profile");
+  cacheProfileDisplay(response.user);
+  return response;
+}
+
+export async function uploadProfilePhoto(file: File) {
+  const token = await getCachedAuthToken();
+  const formData = new FormData();
+  formData.append("photo", file);
+
+  const response = await fetch(`${API_URL}/api/auth/profile-photo`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || "Failed to upload profile photo");
+  }
+
+  clearApiCache("profile");
+  cacheProfileDisplay(data.user);
+  return data as { message: string; user: DbUser };
+}
+
+export type SaveWalletPinPayload = {
+  pin: string;
+  currentPin?: string;
+};
+
+export async function saveWalletPin(payload: SaveWalletPinPayload) {
+  const response = await apiFetch<{ message: string; user: DbUser }>("/api/auth/wallet-pin", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  clearApiCache("profile");
+  cacheProfileDisplay(response.user);
+  return response;
+}
+
+export async function requestWalletPinResetOtp() {
+  return apiFetch<{ message: string; expiresInSeconds: number }>(
+    "/api/auth/wallet-pin/reset-otp/request",
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export type ResetWalletPinWithOtpPayload = {
+  otp: string;
+  pin: string;
+};
+
+export async function resetWalletPinWithOtp(
+  payload: ResetWalletPinWithOtpPayload,
+) {
+  const response = await apiFetch<{ message: string; user: DbUser }>(
+    "/api/auth/wallet-pin/reset",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+  clearApiCache("profile");
+  cacheProfileDisplay(response.user);
+  return response;
+}
+
+export async function verifyWalletPin(pin: string) {
+  return apiFetch<{ verified: boolean }>("/api/auth/wallet-pin/verify", {
+    method: "POST",
+    body: JSON.stringify({ pin }),
+  });
+}
+
+export type RazorpayWalletOrderResponse = {
+  keyId: string;
+  orderId: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  prefill: {
+    name?: string;
+    email?: string;
+  };
+};
+
+export async function createRazorpayWalletOrder(payload: {
+  amount: number;
+  method?: WalletTopUpMethod;
+}) {
+  return apiFetch<RazorpayWalletOrderResponse>(
+    "/api/payments/razorpay/wallet-order",
+    {
+      method: "POST",
+      body: JSON.stringify({ ...payload, currency: "INR" }),
+    },
+  );
+}
+
+export async function verifyRazorpayWalletPayment(payload: {
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature: string;
+}) {
+  return apiFetch<{ message: string; walletBalance: number }>(
+    "/api/payments/razorpay/verify-wallet-payment",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export type UserDataExport = {

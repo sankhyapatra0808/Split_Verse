@@ -1,7 +1,10 @@
 import authRoutes from "./routes/auth.routes.js";
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
+import path from "node:path";
 import cors from "cors";
-import { testDbConnection, db } from "./config/db.js";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import { testDbConnection, db, warmDatabaseConnection } from "./config/db.js";
 import {
   ensurePerformanceIndexes,
   ensurePerformanceIndexesInBackground,
@@ -14,6 +17,7 @@ import friendRoutes, {
 } from "./routes/friends.routes.js";
 import transactionRoutes from "./routes/transactions.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
+import paymentRoutes, { razorpayWebhookHandler } from "./routes/payments.routes.js";
 import { registerLiveClient } from "./liveEvents.js";
 import { compressResponses } from "./middleware/compressResponses.js";
 import {
@@ -26,16 +30,86 @@ const app = express();
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+const CLIENT_URLS = (process.env.CLIENT_URLS || CLIENT_URL)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set(CLIENT_URLS);
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT || "100kb";
+const setupRoutesEnabled = process.env.ENABLE_SETUP_ROUTES === "true";
+const setupRouteSecret = process.env.SETUP_ROUTE_SECRET || "";
+
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  }),
+);
 
 app.use(
   cors({
-    origin: CLIENT_URL,
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
-  })
+  }),
 );
 
+const apiLimiter = rateLimit({
+  windowMs: Number(process.env.API_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  limit: Number(process.env.API_RATE_LIMIT_MAX || 700),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many requests. Please slow down." },
+});
+
+const authLimiter = rateLimit({
+  windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  limit: Number(process.env.AUTH_RATE_LIMIT_MAX || 80),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many auth attempts. Please try again later." },
+});
+
+function protectSetupRoutes(req: Request, res: Response, next: NextFunction) {
+  if (!setupRoutesEnabled) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  if (!setupRouteSecret || req.header("x-setup-secret") !== setupRouteSecret) {
+    return res.status(403).json({ message: "Setup route is protected" });
+  }
+
+  next();
+}
+
+app.use("/api", apiLimiter);
+app.use("/api/auth", authLimiter);
 app.use(compressResponses());
-app.use(express.json());
+// Keep this only as a fallback for old local profile-photo URLs. New uploads go to Cloudinary.
+app.use(
+  "/uploads",
+  express.static(path.join(process.cwd(), "uploads"), {
+    immutable: true,
+    maxAge: "7d",
+  }),
+);
+
+app.post(
+  "/api/payments/razorpay/webhook",
+  express.raw({ type: "application/json", limit: process.env.RAZORPAY_WEBHOOK_BODY_LIMIT || "1mb" }),
+  razorpayWebhookHandler,
+);
+
+app.use(express.json({ limit: jsonBodyLimit }));
 
 app.get("/", (_req, res) => {
   res.json({
@@ -110,7 +184,7 @@ app.get("/api/live/events", verifyFirebaseToken, async (req: AuthRequest, res) =
   }
 });
 
-app.post("/api/setup/users-table", async (_req, res) => {
+app.post("/api/setup/users-table", protectSetupRoutes, async (_req, res) => {
   try {
     await db.query(`
       CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -141,7 +215,7 @@ app.post("/api/setup/users-table", async (_req, res) => {
   }
 });
 
-app.post("/api/setup/app-tables", async (_req, res) => {
+app.post("/api/setup/app-tables", protectSetupRoutes, async (_req, res) => {
   try {
     await db.query(`
       CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -267,7 +341,7 @@ app.post("/api/setup/app-tables", async (_req, res) => {
   }
 });
 
-app.post("/api/setup/performance-indexes", async (_req, res) => {
+app.post("/api/setup/performance-indexes", protectSetupRoutes, async (_req, res) => {
   try {
     await ensurePerformanceIndexes();
 
@@ -294,7 +368,10 @@ app.use("/api/split-rooms", splitRoomRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/wallet", walletRoutes);
+app.use("/api/payments", paymentRoutes);
 
+
+void warmDatabaseConnection();
 
 app.listen(PORT, () => {
   console.log(`SplitVerse backend running on http://localhost:${PORT}`);

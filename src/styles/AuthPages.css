@@ -442,6 +442,10 @@ input {
   gap: 12px;
 }
 
+.auth-social-row.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .auth-social-btn {
   min-width: 0;
   height: 50px;
@@ -475,24 +479,14 @@ input {
 }
 
 .auth-social-btn span svg {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   display: block;
 }
 
 .auth-social-btn.google span {
   border: 1px solid var(--auth-hairline-soft);
   background: #ffffff;
-}
-
-.auth-social-btn.facebook span {
-  color: #ffffff;
-  background: #1877f2;
-}
-
-.auth-social-btn.x span {
-  color: #ffffff;
-  background: #0a0b0d;
 }
 
 .auth-visual {
@@ -820,6 +814,10 @@ input {
 
   .auth-social-row {
     gap: 10px;
+  }
+
+  .auth-social-row.single {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .auth-social-btn {

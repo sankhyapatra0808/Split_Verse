@@ -1,14 +1,64 @@
 import express from "express";
+import { z } from "zod";
 import { db } from "../config/db.js";
 import {
   type AuthRequest,
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
 import { sendLiveUpdate } from "../liveEvents.js";
+import {
+  sendWalletPinError,
+  verifyWalletPinForUser,
+} from "../utils/walletPin.js";
+import {
+  moneyAmountSchema,
+  parseRequestBody,
+  safeTextSchema,
+  sendValidationError,
+} from "../middleware/validateRequest.js";
 
 const router = express.Router();
 const maxSplitRoomsPerDay = 10;
 const splitRoomMemberInsertChunkSize = 500;
+const maxSplitRoomItemAmount = Number(process.env.MAX_SPLIT_ROOM_ITEM_AMOUNT || 1000000);
+
+const createSplitRoomSchema = z
+  .object({
+    name: safeTextSchema("Room name", 100),
+    category: z.string().trim().max(60, "Category is too long").optional().default("general"),
+    members: z.array(z.string().trim().max(120, "Member value is too long")).max(20, "You can add up to 20 members").optional().default([]),
+  })
+  .strict();
+
+const createSplitRoomItemSchema = z
+  .object({
+    title: safeTextSchema("Item name", 120),
+    amount: moneyAmountSchema(maxSplitRoomItemAmount),
+    assignedMemberId: z.string().trim().uuid("Invalid assigned member"),
+  })
+  .strict();
+
+const updateSplitRoomItemSchema = z
+  .object({
+    title: safeTextSchema("Item name", 120),
+    amount: moneyAmountSchema(maxSplitRoomItemAmount),
+  })
+  .strict();
+
+const paymentStatusSchema = z
+  .object({
+    paymentStatus: z.enum(["no_one_paid", "all_paid", "complete"]),
+  })
+  .strict();
+
+const walletPaymentSchema = z
+  .object({
+    walletPin: z
+      .string({ message: "Wallet PIN is required" })
+      .trim()
+      .regex(/^\d{4,6}$/, "Wallet PIN must be 4 to 6 digits"),
+  })
+  .strict();
 let splitRoomTablesReady: Promise<void> | null = null;
 
 type DbUserRow = {
@@ -23,6 +73,10 @@ type RoomMemberRow = {
   user_id: string | null;
   display_name: string | null;
   email: string | null;
+  photo_url?: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: "photo" | "initials" | null;
+  display_photo_url?: string | null;
   role: string;
   status: string;
 };
@@ -78,6 +132,11 @@ async function getRoomUserIds(roomId: string) {
 }
 
 async function ensureSplitRoomTables() {
+  // Table creation is handled by migrations. Keep this legacy setup disabled in normal requests.
+  if (process.env.ENABLE_LEGACY_ROUTE_TABLE_SETUP !== "true") {
+    return;
+  }
+
   await db.query(`
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -253,13 +312,25 @@ function serializeRoom(
   const amountByMember = new Map<string, number>();
   const outstandingByMember = new Map<string, number>();
   const collectedByMember = new Map<string, number>();
-  const serializedMembers = members.map((member) => ({
-    ...member,
-    isMe:
-      member.user_id === currentUser.id ||
-      member.email?.toLowerCase() === currentUser.email.toLowerCase(),
-    isOwner: member.role === "owner",
-  }));
+  const serializedMembers = members.map((member) => {
+    const avatarMode = member.avatar_mode === "initials" ? "initials" : "photo";
+
+    return {
+      ...member,
+      avatar_mode: avatarMode,
+      display_photo_url:
+        avatarMode === "initials"
+          ? null
+          : member.display_photo_url ||
+            member.profile_photo_url ||
+            member.photo_url ||
+            null,
+      isMe:
+        member.user_id === currentUser.id ||
+        member.email?.toLowerCase() === currentUser.email.toLowerCase(),
+      isOwner: member.role === "owner",
+    };
+  });
   const memberById = new Map(
     serializedMembers.map((member) => [member.id, member]),
   );
@@ -416,10 +487,27 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const [memberResult, itemResult] = await Promise.all([
       db.query<RoomMemberRow>(
         `
-        SELECT id, room_id, user_id, display_name, email, role, status
-        FROM split_room_members
-        WHERE room_id = ANY($1::uuid[])
-        ORDER BY created_at ASC;
+        SELECT
+          member.id,
+          member.room_id,
+          COALESCE(member.user_id, user_profile.id) AS user_id,
+          COALESCE(member.display_name, user_profile.name) AS display_name,
+          COALESCE(member.email, user_profile.email) AS email,
+          user_profile.photo_url,
+          user_profile.profile_photo_url,
+          COALESCE(user_profile.avatar_mode, 'photo') AS avatar_mode,
+          CASE
+            WHEN user_profile.avatar_mode = 'initials' THEN NULL
+            ELSE COALESCE(user_profile.profile_photo_url, user_profile.photo_url)
+          END AS display_photo_url,
+          member.role,
+          member.status
+        FROM split_room_members member
+        LEFT JOIN users user_profile
+          ON user_profile.id = member.user_id
+          OR (member.user_id IS NULL AND LOWER(user_profile.email) = LOWER(member.email))
+        WHERE member.room_id = ANY($1::uuid[])
+        ORDER BY member.created_at ASC;
         `,
         [roomIds],
       ),
@@ -479,13 +567,11 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       return res.status(404).json({ message: "User not found in database" });
     }
 
-    const name = String(req.body.name ?? "").trim();
-    const category = String(req.body.category ?? "general").trim();
-    const members = parseMembers(req.body.members);
-
-    if (!name) {
-      return res.status(400).json({ message: "Room name is required" });
-    }
+    const { name, category, members: suppliedMembers } = parseRequestBody(
+      createSplitRoomSchema,
+      req.body,
+    );
+    const members = parseMembers(suppliedMembers);
 
     const roomsCreatedTodayResult = await client.query(
       `
@@ -572,6 +658,10 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
     });
   } catch (error) {
     await client.query("ROLLBACK");
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
     console.error("Create split room failed:", error);
 
     return res.status(500).json({
@@ -602,23 +692,10 @@ router.post(
       }
 
       const roomId = getRouteParam(req, "roomId");
-      const title = String(req.body.title ?? "").trim();
-      const assignedMemberId = String(req.body.assignedMemberId ?? "").trim();
-      const amount = Number(req.body.amount);
-
-      if (!title) {
-        return res.status(400).json({ message: "Item name is required" });
-      }
-
-      if (!assignedMemberId) {
-        return res.status(400).json({ message: "Assigned member is required" });
-      }
-
-      if (!amount || amount <= 0) {
-        return res
-          .status(400)
-          .json({ message: "Amount must be greater than 0" });
-      }
+      const { title, assignedMemberId, amount } = parseRequestBody(
+        createSplitRoomItemSchema,
+        req.body,
+      );
 
       if (!roomId) {
         return res.status(400).json({ message: "Room id is required" });
@@ -755,6 +832,10 @@ router.post(
         item: itemResult.rows[0],
       });
     } catch (error) {
+      if (sendValidationError(res, error)) {
+        return;
+      }
+
       console.error("Add split item failed:", error);
 
       return res.status(500).json({
@@ -993,21 +1074,13 @@ router.patch(
       }
 
       const itemId = getRouteParam(req, "itemId");
-      const title = String(req.body.title ?? "").trim();
-      const amount = Number(req.body.amount);
+      const { title, amount } = parseRequestBody(
+        updateSplitRoomItemSchema,
+        req.body,
+      );
 
       if (!itemId) {
         return res.status(400).json({ message: "Item id is required" });
-      }
-
-      if (!title) {
-        return res.status(400).json({ message: "Item name is required" });
-      }
-
-      if (!Number.isFinite(amount) || amount <= 0) {
-        return res
-          .status(400)
-          .json({ message: "Amount must be greater than 0" });
       }
 
       await client.query("BEGIN");
@@ -1109,6 +1182,10 @@ router.patch(
       });
     } catch (error) {
       await client.query("ROLLBACK");
+
+      if (sendValidationError(res, error)) {
+        return;
+      }
 
       console.error("Update split item failed:", error);
 
@@ -1459,7 +1536,7 @@ router.patch(
       }
 
       const roomId = getRouteParam(req, "roomId");
-      const paymentStatus = normalizePaymentStatus(req.body.paymentStatus);
+      const { paymentStatus } = parseRequestBody(paymentStatusSchema, req.body);
 
       if (!roomId) {
         return res.status(400).json({ message: "Room id is required" });
@@ -1544,6 +1621,10 @@ router.patch(
       });
     } catch (error) {
       await client.query("ROLLBACK");
+      if (sendValidationError(res, error)) {
+        return;
+      }
+
       console.error("Update split room payment status failed:", error);
 
       return res.status(500).json({
@@ -1694,6 +1775,23 @@ router.post(
 
       const payerUserId = userResult.rows[0].id;
       const payerEmail = userResult.rows[0].email;
+      const { walletPin } = parseRequestBody(walletPaymentSchema, req.body);
+
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1::text));", [
+        payerUserId,
+      ]);
+      try {
+        await verifyWalletPinForUser(client, payerUserId, walletPin);
+      } catch (pinError) {
+        await client.query("COMMIT");
+
+        if (sendWalletPinError(res, pinError)) {
+          return;
+        }
+
+        throw pinError;
+      }
+
       const itemId = getRouteParam(req, "itemId");
 
       if (!itemId) {
@@ -1897,7 +1995,11 @@ router.post(
         },
       });
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
+
+      if (sendValidationError(res, error) || sendWalletPinError(res, error)) {
+        return;
+      }
 
       console.error("Pay due from wallet failed:", error);
 

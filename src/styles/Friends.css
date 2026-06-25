@@ -383,3 +383,121 @@
   display: none;
 }
 
+
+
+/* FINAL Friends page layout polish */
+.friends-grid .page-hero-card {
+  grid-column: span 8;
+}
+
+.friends-grid .friend-request-card,
+.friends-grid .friend-inbox-card {
+  grid-column: span 4;
+}
+
+.friends-grid .friends-list-card {
+  grid-column: span 8;
+  align-self: start;
+}
+
+.friends-grid .friend-sent-card {
+  grid-column: 9 / span 4;
+  align-self: start;
+}
+
+.friends-grid .friend-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  max-height: 262px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.friends-grid .friend-row {
+  min-width: 0;
+  min-height: 55px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: center;
+  gap: 12px;
+  padding: 14px;
+}
+
+.friends-grid .friend-row div {
+  min-width: 0;
+  align-content: center;
+}
+
+.friends-grid .friend-row strong,
+.friends-grid .friend-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friends-grid .friend-row em {
+  display: none !important;
+}
+
+.friends-grid .friend-inbox-card .friend-request-list,
+.friends-grid .friend-sent-card .friend-request-list {
+  max-height: 132px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.friends-grid .friend-request-row {
+  min-height: 58px;
+}
+
+@media (max-width: 1180px) {
+  .friends-grid .page-hero-card,
+  .friends-grid .friends-list-card {
+    grid-column: span 12;
+  }
+
+  .friends-grid .friend-request-card,
+  .friends-grid .friend-inbox-card,
+  .friends-grid .friend-sent-card {
+    grid-column: span 4;
+  }
+}
+
+@media (max-width: 860px) {
+  .friends-grid .page-hero-card,
+  .friends-grid .friend-request-card,
+  .friends-grid .friend-inbox-card,
+  .friends-grid .friend-sent-card,
+  .friends-grid .friends-list-card {
+    grid-column: span 12;
+  }
+
+  .friends-grid .friend-list {
+    grid-template-columns: 1fr;
+    max-height: 462px;
+  }
+
+  .friends-grid .friend-row {
+    min-height: 55px;
+  }
+
+  .friends-grid .friend-inbox-card .friend-request-list,
+  .friends-grid .friend-sent-card .friend-request-list {
+    max-height: 150px;
+  }
+}
+
+@media (max-width: 560px) {
+  .friends-grid .friend-list {
+    max-height: 432px;
+    padding-right: 0;
+  }
+
+  .friends-grid .friend-row {
+    min-height: 86px;
+    padding: 12px;
+  }
+}

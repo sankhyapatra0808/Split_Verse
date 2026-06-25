@@ -12,6 +12,7 @@ import {
   type User,
 } from "firebase/auth";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -19,10 +20,8 @@ import {
 } from "react";
 import {
   auth,
-  facebookProvider,
   googleProvider,
   isFirebaseConfigured,
-  twitterProvider,
 } from "../config/firebase";
 
 import {
@@ -41,8 +40,6 @@ export type { SocialProvider } from "./useAuth";
 
 const socialProviders = {
   google: googleProvider,
-  facebook: facebookProvider,
-  twitter: twitterProvider,
 };
 
 const firebaseSetupError =
@@ -85,6 +82,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [dbUser, setDbUser] = useState<DbUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const refreshDbUser = useCallback(async () => {
+    if (!auth.currentUser) {
+      setDbUser(null);
+      return null;
+    }
+
+    const response = await getCurrentDbUser();
+    setDbUser(response.user);
+    return response.user;
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser && isRememberedSessionExpired()) {
@@ -105,8 +113,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       try {
-        const response = await getCurrentDbUser();
-        setDbUser(response.user);
+        await refreshDbUser();
       } catch (error) {
         console.error("Failed to load database user:", error);
         setDbUser(null);
@@ -116,7 +123,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     });
 
     return unsubscribe;
-  }, []);
+  }, [refreshDbUser]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -231,13 +238,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         await sendPasswordResetEmail(auth, email);
       },
 
+      refreshDbUser,
+
       async logout() {
         window.localStorage.removeItem(rememberedSessionExpiryKey);
         setDbUser(null);
         await signOut(auth);
       },
     }),
-    [user, dbUser, loading]
+    [user, dbUser, loading, refreshDbUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

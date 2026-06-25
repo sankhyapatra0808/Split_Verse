@@ -1,16 +1,33 @@
 import express from "express";
+import { z } from "zod";
 import { db } from "../config/db.js";
 import {
   type AuthRequest,
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
 import { sendLiveUpdate } from "../liveEvents.js";
+import {
+  moneyAmountSchema,
+  parseRequestBody,
+  sendValidationError,
+} from "../middleware/validateRequest.js";
 
 const router = express.Router();
-const topUpMethods = new Set(["UPI", "Card", "Net banking"]);
+const topUpMethodValues = ["UPI", "Card", "Net banking"] as const;
+const topUpMethods = new Set<string>(topUpMethodValues);
 const topUpDescriptionPrefix = "Wallet top-up via ";
-const maxTopUpPerTransaction = 10000;
-const maxTopUpPerDay = 100000;
+const maxTopUpPerTransaction = Number(process.env.MAX_TOP_UP_PER_TRANSACTION || 10000);
+const maxTopUpPerDay = Number(process.env.MAX_TOP_UP_PER_DAY || 100000);
+const devWalletTopUpEnabled =
+  process.env.NODE_ENV !== "production" ||
+  process.env.ENABLE_DEV_WALLET_TOP_UP === "true";
+
+const topUpSchema = z
+  .object({
+    amount: moneyAmountSchema(maxTopUpPerTransaction),
+    method: z.enum(topUpMethodValues).optional(),
+  })
+  .strict();
 
 async function getDbUserId(firebaseUid: string) {
   const userResult = await db.query(
@@ -106,6 +123,8 @@ router.get("/top-ups", verifyFirebaseToken, async (req: AuthRequest, res) => {
 });
 
 router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  const client = await db.connect();
+
   try {
     const firebaseUser = req.user;
 
@@ -115,39 +134,45 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
       });
     }
 
-    const { amount, method } = req.body;
-
-    const numericAmount = Number(amount);
-    const paymentMethod =
-      typeof method === "string" && topUpMethods.has(method) ? method : null;
-
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return res.status(400).json({
-        message: "Top-up amount must be greater than 0",
+    if (!devWalletTopUpEnabled) {
+      return res.status(403).json({
+        message: "Direct wallet top-up is disabled in production. Use the verified payment flow.",
       });
     }
 
-    if (numericAmount > maxTopUpPerTransaction) {
-      return res.status(400).json({
-        message: "Wallet top-up cannot exceed Rs. 10,000 per transaction",
-      });
-    }
+    const { amount: numericAmount, method } = parseRequestBody(
+      topUpSchema,
+      req.body,
+    );
+    const paymentMethod = method ?? null;
 
-    if (method && !paymentMethod) {
-      return res.status(400).json({
-        message: "Unsupported top-up method",
-      });
-    }
+    await client.query("BEGIN");
 
-    const dbUserId = await getDbUserId(firebaseUser.uid);
+    const userResult = await client.query(
+      `
+      SELECT id
+      FROM users
+      WHERE firebase_uid = $1
+      FOR UPDATE;
+      `,
+      [firebaseUser.uid],
+    );
+
+    const dbUserId = userResult.rows[0]?.id ?? null;
 
     if (!dbUserId) {
+      await client.query("ROLLBACK");
+
       return res.status(404).json({
         message: "User not found in database",
       });
     }
 
-    const topUpTodayResult = await db.query(
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1::text));", [
+      dbUserId,
+    ]);
+
+    const topUpTodayResult = await client.query(
       `
       SELECT COALESCE(SUM(amount), 0)::float AS top_up_total
       FROM wallet_transactions
@@ -164,12 +189,14 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const topUpToday = Number(topUpTodayResult.rows[0].top_up_total);
 
     if (topUpToday + numericAmount > maxTopUpPerDay) {
+      await client.query("ROLLBACK");
+
       return res.status(429).json({
-        message: "Wallet top-up limit is Rs. 100,000 per day",
+        message: `Wallet top-up limit is Rs. ${maxTopUpPerDay.toLocaleString("en-IN")} per day`,
       });
     }
 
-    const transactionResult = await db.query(
+    const transactionResult = await client.query(
       `
       INSERT INTO wallet_transactions (
         user_id,
@@ -192,7 +219,7 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
       ],
     );
 
-    const balanceResult = await db.query(
+    const balanceResult = await client.query(
       `
       SELECT
         COALESCE(
@@ -211,6 +238,8 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
       [dbUserId],
     );
 
+    await client.query("COMMIT");
+
     sendLiveUpdate([dbUserId], {
       type: "money",
       reason: "wallet-top-up",
@@ -225,11 +254,19 @@ router.post("/top-up", verifyFirebaseToken, async (req: AuthRequest, res) => {
       walletBalance: Number(balanceResult.rows[0].wallet_balance),
     });
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
     console.error("Wallet top-up failed:", error);
 
     return res.status(500).json({
       message: "Failed to top up wallet",
     });
+  } finally {
+    client.release();
   }
 });
 

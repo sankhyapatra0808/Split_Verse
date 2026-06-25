@@ -3,7 +3,7 @@ import type { User } from "firebase/auth";
 
 import type { DbUser, EmailLoginOtpSession } from "../lib/api";
 
-export type SocialProvider = "google" | "facebook" | "twitter";
+export type SocialProvider = "google";
 
 export type AuthContextValue = {
   user: User | null;
@@ -36,6 +36,7 @@ export type AuthContextValue = {
     remember?: boolean
   ) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  refreshDbUser: () => Promise<DbUser | null>;
   logout: () => Promise<void>;
 };
 
