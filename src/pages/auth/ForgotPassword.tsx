@@ -4,13 +4,11 @@ import { ArrowLeft, ArrowRight, Mail } from "lucide-react";
 
 import logo from "../../assets/Logo-v2.png";
 import "../../styles/AuthPages.css";
-import { useAuth } from "../../context/useAuth";
-import { getFirebaseErrorMessage } from "../../utils/firebaseError";
+import { requestPasswordResetOtp } from "../../lib/api";
 import { withTopProgress } from "../../utils/topProgress";
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
-  const { resetPassword } = useAuth();
 
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
@@ -22,17 +20,26 @@ export default function ForgotPassword() {
     setError("");
     setMessage("");
 
-    if (!email.trim()) {
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedEmail) {
       setError("Please enter your email address.");
       return;
     }
 
     try {
       setLoading(true);
-      await withTopProgress(() => resetPassword(email.trim()));
-      setMessage("Password reset link sent. Please check your inbox.");
+      const response = await withTopProgress(() =>
+        requestPasswordResetOtp(trimmedEmail),
+      );
+      setMessage(response.message);
+      navigate(`/reset-password?email=${encodeURIComponent(trimmedEmail)}`);
     } catch (resetError) {
-      setError(getFirebaseErrorMessage(resetError));
+      setError(
+        resetError instanceof Error
+          ? resetError.message
+          : "Could not send password reset code. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -47,6 +54,7 @@ export default function ForgotPassword() {
             type="button"
             onClick={() => navigate("/login")}
             aria-label="Back to login"
+            disabled={loading}
           >
             <ArrowLeft size={18} />
           </button>
@@ -65,7 +73,10 @@ export default function ForgotPassword() {
           <div className="auth-heading">
             <span className="auth-kicker">Account recovery</span>
             <h1 id="forgot-title">Reset your password.</h1>
-            <p>Enter your registered email and we will send a reset link.</p>
+            <p>
+              Enter your registered email. We will send a 6-digit password
+              reset code to your inbox.
+            </p>
           </div>
 
           <form onSubmit={handleReset} className="auth-form">
@@ -79,6 +90,7 @@ export default function ForgotPassword() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   autoComplete="email"
+                  disabled={loading}
                 />
               </div>
             </label>
@@ -87,7 +99,7 @@ export default function ForgotPassword() {
             {message && <p className="auth-success">{message}</p>}
 
             <button type="submit" className="auth-submit" disabled={loading}>
-              {loading ? "Sending reset link" : "Send reset link"}
+              {loading ? "Sending reset code" : "Send reset code"}
               <ArrowRight size={18} />
             </button>
           </form>

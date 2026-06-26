@@ -70,6 +70,24 @@ const walletPinOtpPepper =
   process.env.SETUP_ROUTE_SECRET ||
   "splitverse-local-wallet-pin-otp-pepper";
 
+const passwordResetOtpLength = 6;
+const passwordResetOtpExpiryMs = Number(
+  process.env.PASSWORD_RESET_OTP_EXPIRY_MS || 10 * 60 * 1000,
+);
+const passwordResetOtpMaxAttempts = Number(
+  process.env.PASSWORD_RESET_OTP_MAX_ATTEMPTS || 5,
+);
+const passwordResetOtpMaxRequests = Number(
+  process.env.PASSWORD_RESET_OTP_MAX_REQUESTS || 3,
+);
+const passwordResetOtpWindowMinutes = Number(
+  process.env.PASSWORD_RESET_OTP_WINDOW_MINUTES || 15,
+);
+const passwordResetOtpPepper =
+  process.env.PASSWORD_RESET_OTP_PEPPER ||
+  walletPinOtpPepper ||
+  "splitverse-local-password-reset-otp-pepper";
+
 const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
 const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY?.trim();
 const cloudinaryApiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
@@ -132,6 +150,40 @@ const walletPinResetSchema = z
     pin: walletPinValueSchema,
   })
   .strict();
+
+const passwordResetEmailSchema = z
+  .string({ message: "Email address is required" })
+  .trim()
+  .email("Enter a valid email address")
+  .max(254, "Email address is too long")
+  .transform((value) => value.toLowerCase());
+
+const passwordResetPasswordSchema = z
+  .string({ message: "New password is required" })
+  .min(6, "Password must be at least 6 characters")
+  .max(128, "Password is too long");
+
+const passwordResetRequestSchema = z
+  .object({
+    email: passwordResetEmailSchema,
+  })
+  .strict();
+
+const passwordResetConfirmSchema = z
+  .object({
+    email: passwordResetEmailSchema,
+    otp: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, "Enter the 6-digit password reset code"),
+    password: passwordResetPasswordSchema,
+    confirmPassword: passwordResetPasswordSchema,
+  })
+  .strict()
+  .refine((value) => value.password === value.confirmPassword, {
+    message: "Re-entered password does not match",
+    path: ["confirmPassword"],
+  });
 
 const maxProfilePhotoSizeBytes = 3 * 1024 * 1024;
 const allowedProfilePhotoMimeTypes = new Set([
@@ -233,6 +285,25 @@ function hashWalletPinResetOtp(otp: string, userId: string) {
     .digest("hex");
 }
 
+function createPasswordResetOtp() {
+  return crypto
+    .randomInt(10 ** (passwordResetOtpLength - 1), 10 ** passwordResetOtpLength)
+    .toString();
+}
+
+function hashPasswordResetOtp(otp: string, firebaseUid: string, email: string) {
+  return crypto
+    .createHmac("sha256", passwordResetOtpPepper)
+    .update(`${firebaseUid}:${email.toLowerCase()}:${otp}`)
+    .digest("hex");
+}
+
+function getFirebaseAdminErrorCode(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code ?? "")
+    : "";
+}
+
 async function getAuthUserProfile(client: Queryable, userId: string) {
   const result = await client.query(
     `
@@ -308,6 +379,45 @@ async function sendWalletPinResetOtpEmail({
 
   if (!emailResult.ok) {
     console.error("Wallet PIN reset OTP email failed:", emailResult);
+    return emailResult.reason;
+  }
+
+  return "sent";
+}
+
+async function sendPasswordResetOtpEmail({
+  email,
+  otp,
+}: {
+  email: string;
+  otp: string;
+}) {
+  if (!isEmailConfigured()) {
+    return "not_configured";
+  }
+
+  const emailResult = await sendTransactionalEmail({
+    to: email,
+    subject: "Reset your SplitVerse password",
+    text: `Your SplitVerse password reset code is ${otp}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
+    html: `
+      <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0a0b0d;">
+        <h1 style="font-size:24px;margin:0 0 12px;">Reset your SplitVerse password</h1>
+        <p style="font-size:15px;line-height:1.5;margin:0 0 18px;">
+          Use this code to create a new SplitVerse login password. It expires in 10 minutes.
+        </p>
+        <div style="display:inline-block;padding:14px 18px;border-radius:14px;background:#f7f7f7;border:1px solid #dee1e6;font-size:28px;font-weight:800;letter-spacing:8px;">
+          ${otp}
+        </div>
+        <p style="font-size:13px;line-height:1.5;margin:18px 0 0;color:#5b616e;">
+          If you did not request this password reset, ignore this email.
+        </p>
+      </div>
+    `,
+  });
+
+  if (!emailResult.ok) {
+    console.error("Password reset OTP email failed through Brevo SMTP:", emailResult);
     return emailResult.reason;
   }
 
@@ -591,6 +701,220 @@ router.post("/email-login-otp/verify", (req, res) => {
   return res.json({
     verified: true,
   });
+});
+
+
+router.post("/password-reset/request", async (req, res) => {
+  try {
+    const { email } = parseRequestBody(passwordResetRequestSchema, req.body);
+
+    if (!isEmailConfigured()) {
+      return res.status(503).json({
+        message:
+          "Password reset email delivery is not configured. Add Brevo SMTP settings in server/.env.",
+      });
+    }
+
+    let firebaseUser;
+
+    try {
+      firebaseUser = await adminAuth.getUserByEmail(email);
+    } catch (error) {
+      if (getFirebaseAdminErrorCode(error) === "auth/user-not-found") {
+        return res.json({
+          message:
+            "If this email has a SplitVerse account, a password reset code has been sent.",
+          expiresInSeconds: Math.floor(passwordResetOtpExpiryMs / 1000),
+        });
+      }
+
+      throw error;
+    }
+
+    const requestCountResult = await db.query(
+      `
+      SELECT COUNT(*)::int AS request_count
+      FROM password_reset_otps
+      WHERE LOWER(email) = LOWER($1)
+      AND created_at >= NOW() - ($2::int * INTERVAL '1 minute');
+      `,
+      [email, passwordResetOtpWindowMinutes],
+    );
+    const requestCount = Number(requestCountResult.rows[0]?.request_count ?? 0);
+
+    if (requestCount >= passwordResetOtpMaxRequests) {
+      return res.status(429).json({
+        message: "Too many password reset requests. Please try again later.",
+      });
+    }
+
+    const otp = createPasswordResetOtp();
+    const otpHash = hashPasswordResetOtp(otp, firebaseUser.uid, email);
+    const expiresAt = new Date(Date.now() + passwordResetOtpExpiryMs);
+
+    await db.query(
+      `
+      INSERT INTO password_reset_otps (
+        email,
+        firebase_uid,
+        otp_hash,
+        expires_at
+      )
+      VALUES ($1, $2, $3, $4);
+      `,
+      [email, firebaseUser.uid, otpHash, expiresAt],
+    );
+
+    const emailStatus = await sendPasswordResetOtpEmail({ email, otp });
+
+    if (emailStatus !== "sent") {
+      return res.status(503).json({
+        message:
+          emailStatus === "not_configured"
+            ? "Password reset email delivery is not configured. Add Brevo SMTP settings in server/.env."
+            : "Could not send the password reset email. Please try again.",
+      });
+    }
+
+    return res.status(201).json({
+      message: "Password reset code sent. Check your email inbox or spam folder.",
+      expiresInSeconds: Math.floor(passwordResetOtpExpiryMs / 1000),
+    });
+  } catch (error) {
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
+    console.error("Request password reset failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to request password reset",
+    });
+  }
+});
+
+router.post("/password-reset/confirm", async (req, res) => {
+  const client = await db.connect();
+
+  try {
+    const { email, otp, password } = parseRequestBody(
+      passwordResetConfirmSchema,
+      req.body,
+    );
+
+    await client.query("BEGIN");
+
+    const otpResult = await client.query(
+      `
+      SELECT
+        id,
+        email,
+        firebase_uid,
+        otp_hash,
+        attempts,
+        expires_at <= NOW() AS is_expired
+      FROM password_reset_otps
+      WHERE LOWER(email) = LOWER($1)
+      AND consumed_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT 1
+      FOR UPDATE;
+      `,
+      [email],
+    );
+
+    const otpRow = otpResult.rows[0];
+
+    if (!otpRow) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        message: "Password reset code expired or not found. Request a new code.",
+      });
+    }
+
+    if (Number(otpRow.attempts) >= passwordResetOtpMaxAttempts) {
+      await client.query(
+        `
+        UPDATE password_reset_otps
+        SET consumed_at = NOW()
+        WHERE id = $1;
+        `,
+        [otpRow.id],
+      );
+      await client.query("COMMIT");
+
+      return res.status(429).json({
+        message: "Too many incorrect codes. Request a new password reset code.",
+      });
+    }
+
+    if (otpRow.is_expired) {
+      await client.query(
+        `
+        UPDATE password_reset_otps
+        SET consumed_at = NOW()
+        WHERE id = $1;
+        `,
+        [otpRow.id],
+      );
+      await client.query("COMMIT");
+
+      return res.status(410).json({
+        message: "Password reset code expired. Request a new code.",
+      });
+    }
+
+    const expectedHash = hashPasswordResetOtp(otp, otpRow.firebase_uid, email);
+    const matches = timingSafeEqualHex(expectedHash, otpRow.otp_hash);
+
+    if (!matches) {
+      await client.query(
+        `
+        UPDATE password_reset_otps
+        SET attempts = attempts + 1
+        WHERE id = $1;
+        `,
+        [otpRow.id],
+      );
+      await client.query("COMMIT");
+
+      return res.status(401).json({
+        message: "Incorrect password reset code",
+      });
+    }
+
+    await adminAuth.updateUser(otpRow.firebase_uid, { password });
+    await adminAuth.revokeRefreshTokens(otpRow.firebase_uid).catch(() => undefined);
+
+    await client.query(
+      `
+      UPDATE password_reset_otps
+      SET consumed_at = NOW()
+      WHERE id = $1;
+      `,
+      [otpRow.id],
+    );
+    await client.query("COMMIT");
+
+    return res.json({
+      message: "Password changed successfully. You can now log in again.",
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
+    console.error("Confirm password reset failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to reset password",
+    });
+  } finally {
+    client.release();
+  }
 });
 
 router.post(

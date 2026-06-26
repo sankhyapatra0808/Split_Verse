@@ -522,6 +522,57 @@ export async function getExchangeRates(
   return data as ExchangeRatesResponse;
 }
 
+
+async function publicApiFetch<T>(
+  endpoint: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(`${API_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || "API request failed");
+  }
+
+  return data;
+}
+
+export async function requestPasswordResetOtp(email: string) {
+  return publicApiFetch<{ message: string; expiresInSeconds: number }>(
+    "/api/auth/password-reset/request",
+    {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    },
+  );
+}
+
+export type ResetPasswordWithOtpPayload = {
+  email: string;
+  otp: string;
+  password: string;
+  confirmPassword: string;
+};
+
+export async function resetPasswordWithOtp(
+  payload: ResetPasswordWithOtpPayload,
+) {
+  return publicApiFetch<{ message: string }>(
+    "/api/auth/password-reset/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {},
