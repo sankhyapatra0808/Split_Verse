@@ -482,6 +482,46 @@ export type FriendsSummary = {
   sentRequests: FriendRequest[];
 };
 
+
+export type ExchangeRatesSource = "live" | "cache" | "stale-cache" | "fallback";
+
+export type ExchangeRatesResponse = {
+  base: string;
+  rates: Record<string, number>;
+  source: ExchangeRatesSource;
+  provider: string;
+  fetchedAt: string | null;
+  expiresAt: string | null;
+};
+
+export async function getExchangeRates(
+  base = "INR",
+  symbols: string[] = [],
+) {
+  const searchParams = new URLSearchParams({ base });
+
+  if (symbols.length > 0) {
+    searchParams.set("symbols", symbols.join(","));
+  }
+
+  const response = await fetch(
+    `${API_URL}/api/exchange-rates?${searchParams.toString()}`,
+    {
+      headers: {
+        Accept: "application/json",
+      },
+    },
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || "Failed to load exchange rates");
+  }
+
+  return data as ExchangeRatesResponse;
+}
+
 export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {},

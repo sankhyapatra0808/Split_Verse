@@ -184,6 +184,46 @@ function getWalletPinStrengthError(pin: string) {
 }
 
 
+
+function formatExchangeRateStatus({
+  error,
+  fetchedAt,
+  loading,
+  source,
+}: {
+  error: string;
+  fetchedAt: string | null;
+  loading: boolean;
+  source: string;
+}) {
+  if (loading) {
+    return "Loading realtime exchange rates...";
+  }
+
+  if (source === "fallback") {
+    return error
+      ? `Using fallback rates. ${error}`
+      : "Using fallback exchange rates.";
+  }
+
+  const updatedText = fetchedAt
+    ? new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(fetchedAt))
+    : "recently";
+
+  if (source === "live") {
+    return `Rates updated: ${updatedText}`;
+  }
+
+  if (source === "stale-cache") {
+    return `Using last available cached rates from ${updatedText}.`;
+  }
+
+  return `Using cached exchange rates from ${updatedText}.`;
+}
+
 export default function AppSettings() {
   const navigate = useNavigate();
   const { user, logout, refreshDbUser } = useAuth();
@@ -200,6 +240,10 @@ export default function AppSettings() {
     defaultTopUpMethod,
     languages,
     notificationPreferences,
+    exchangeRatesError,
+    exchangeRatesFetchedAt,
+    exchangeRatesLoading,
+    exchangeRatesSource,
     privacyMode,
     settlementReminders,
     clearLocalAppSettings,
@@ -258,6 +302,12 @@ export default function AppSettings() {
     converterFrom,
     converterTo,
   );
+  const exchangeRateStatusText = formatExchangeRateStatus({
+    error: exchangeRatesError,
+    fetchedAt: exchangeRatesFetchedAt,
+    loading: exchangeRatesLoading,
+    source: exchangeRatesSource,
+  });
   const currencyOptions: DropdownOption<CurrencyCode>[] = currencies.map(
     (currency) => ({
       value: currency.code,
@@ -986,6 +1036,7 @@ export default function AppSettings() {
             <span>Converted amount</span>
             <strong>{formatCurrencyValue(convertedAmount, converterTo)}</strong>
           </div>
+          <p className="dashboard-muted-text">{exchangeRateStatusText}</p>
         </article>
 
         <article className="bento-card settings-card">

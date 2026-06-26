@@ -8,7 +8,6 @@ import {
   IndianRupee,
   Menu,
   ReceiptText,
-  Search,
   ShieldCheck,
   UsersRound,
   WalletCards,

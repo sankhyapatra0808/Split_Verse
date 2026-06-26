@@ -25,6 +25,7 @@ export type AppLanguageCode =
   | "pt";
 export type AvatarId = "current" | "initials";
 export type WalletTopUpMethod = "UPI" | "Card" | "Net banking";
+export type ExchangeRatesSource = "live" | "cache" | "stale-cache" | "fallback";
 
 export type CurrencyOption = {
   code: CurrencyCode;
@@ -67,6 +68,12 @@ export type AppSettingsValue = {
   defaultTopUpMethod: WalletTopUpMethod;
   confirmBeforeWalletPayment: boolean;
   notificationPreferences: NotificationPreferences;
+  exchangeRates: Record<CurrencyCode, number>;
+  exchangeRatesSource: ExchangeRatesSource;
+  exchangeRatesFetchedAt: string | null;
+  exchangeRatesExpiresAt: string | null;
+  exchangeRatesLoading: boolean;
+  exchangeRatesError: string;
   currencies: CurrencyOption[];
   languages: LanguageOption[];
   setAvatarId: (avatarId: AvatarId) => void;

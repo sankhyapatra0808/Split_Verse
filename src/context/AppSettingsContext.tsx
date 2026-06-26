@@ -8,11 +8,13 @@ import {
   type CurrencyCode,
   type CurrencyFormatOptions,
   type CurrencyOption,
+  type ExchangeRatesSource,
   type LanguageOption,
   type NotificationPreferences,
   type WalletTopUpMethod,
 } from "./useAppSettings";
 import { observeUiTranslations } from "../i18n/uiTranslations";
+import { getExchangeRates } from "../lib/api";
 
 const settingsStorageKey = "splitverse-app-settings";
 
@@ -214,8 +216,36 @@ function getLanguage(languageCode: AppLanguageCode) {
   return languages.find((language) => language.code === languageCode) ?? languages[0];
 }
 
+
 function getCurrencyFractionDigits(currencyCode: CurrencyCode) {
   return currencyCode === "JPY" || currencyCode === "CNY" ? 0 : 2;
+}
+
+function getStaticExchangeRates(): Record<CurrencyCode, number> {
+  return currencies.reduce(
+    (rates, currency) => ({
+      ...rates,
+      [currency.code]: currency.rateFromInr,
+    }),
+    {} as Record<CurrencyCode, number>,
+  );
+}
+
+function normalizeExchangeRates(
+  rates: Record<string, number> | undefined,
+): Record<CurrencyCode, number> {
+  const nextRates = getStaticExchangeRates();
+  nextRates.INR = 1;
+
+  currencies.forEach((currency) => {
+    const rate = Number(rates?.[currency.code]);
+
+    if (Number.isFinite(rate) && rate > 0) {
+      nextRates[currency.code] = rate;
+    }
+  });
+
+  return nextRates;
 }
 
 export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
@@ -271,8 +301,69 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
     useState<NotificationPreferences>(
       normalizeNotificationPreferences(storedSettings.notificationPreferences),
     );
+  const [exchangeRates, setExchangeRates] = useState<Record<CurrencyCode, number>>(
+    () => getStaticExchangeRates(),
+  );
+  const [exchangeRatesSource, setExchangeRatesSource] =
+    useState<ExchangeRatesSource>("fallback");
+  const [exchangeRatesFetchedAt, setExchangeRatesFetchedAt] = useState<string | null>(
+    null,
+  );
+  const [exchangeRatesExpiresAt, setExchangeRatesExpiresAt] = useState<string | null>(
+    null,
+  );
+  const [exchangeRatesLoading, setExchangeRatesLoading] = useState(true);
+  const [exchangeRatesError, setExchangeRatesError] = useState("");
 
   useEffect(() => observeUiTranslations(appLanguage), [appLanguage]);
+
+  useEffect(() => {
+    let active = true;
+    const symbols = currencies
+      .map((currency) => currency.code)
+      .filter((currency) => currency !== "INR");
+
+    async function loadExchangeRates() {
+      try {
+        setExchangeRatesLoading(true);
+        setExchangeRatesError("");
+        const response = await getExchangeRates("INR", symbols);
+
+        if (!active) {
+          return;
+        }
+
+        setExchangeRates(normalizeExchangeRates(response.rates));
+        setExchangeRatesSource(response.source);
+        setExchangeRatesFetchedAt(response.fetchedAt);
+        setExchangeRatesExpiresAt(response.expiresAt);
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+
+        setExchangeRates(getStaticExchangeRates());
+        setExchangeRatesSource("fallback");
+        setExchangeRatesFetchedAt(null);
+        setExchangeRatesExpiresAt(null);
+        setExchangeRatesError(
+          error instanceof Error
+            ? error.message
+            : "Could not load live exchange rates.",
+        );
+      } finally {
+        if (active) {
+          setExchangeRatesLoading(false);
+        }
+      }
+    }
+
+    void loadExchangeRates();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const persist = useCallback((updates: StoredSettings) => {
     saveSettings({
@@ -321,9 +412,27 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
     setNotificationPreferencesState(defaultNotificationPreferences);
   }, [detectedCurrency, detectedLanguage]);
 
+  const currenciesWithLiveRates = useMemo<CurrencyOption[]>(
+    () =>
+      currencies.map((currency) => ({
+        ...currency,
+        rateFromInr: exchangeRates[currency.code] ?? currency.rateFromInr,
+      })),
+    [exchangeRates],
+  );
+
   const value = useMemo<AppSettingsValue>(
     () => {
       const activeLocale = getLanguage(appLanguage).locale;
+
+      function getRateFromInr(currencyCode: CurrencyCode) {
+        const fallbackRate = getCurrency(currencyCode).rateFromInr;
+        const liveRate = exchangeRates[currencyCode];
+
+        return Number.isFinite(liveRate) && liveRate > 0
+          ? liveRate
+          : fallbackRate;
+      }
 
       function formatCurrencyValue(
         amount: number,
@@ -366,7 +475,13 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
         defaultTopUpMethod,
         confirmBeforeWalletPayment,
         notificationPreferences,
-        currencies,
+        exchangeRates,
+        exchangeRatesSource,
+        exchangeRatesFetchedAt,
+        exchangeRatesExpiresAt,
+        exchangeRatesLoading,
+        exchangeRatesError,
+        currencies: currenciesWithLiveRates,
         languages,
         setAvatarId(nextAvatarId) {
           setAvatarIdState(nextAvatarId);
@@ -422,12 +537,14 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
         },
         clearLocalAppSettings,
         convertCurrency(amount, fromCurrency, toCurrency) {
-          const amountInInr = amount / getCurrency(fromCurrency).rateFromInr;
-          return amountInInr * getCurrency(toCurrency).rateFromInr;
+          const fromRate = getRateFromInr(fromCurrency);
+          const toRate = getRateFromInr(toCurrency);
+          const amountInInr = amount / fromRate;
+
+          return amountInInr * toRate;
         },
         formatCurrency(amountInInr, options = {}) {
-          const selectedCurrency = getCurrency(appCurrency);
-          const convertedAmount = amountInInr * selectedCurrency.rateFromInr;
+          const convertedAmount = amountInInr * getRateFromInr(appCurrency);
 
           return formatCurrencyValue(convertedAmount, appCurrency, options);
         },
@@ -446,6 +563,13 @@ export function AppSettingsProvider({ children }: AppSettingsProviderProps) {
       defaultTopUpMethod,
       detectedCurrency,
       clearLocalAppSettings,
+      currenciesWithLiveRates,
+      exchangeRates,
+      exchangeRatesError,
+      exchangeRatesExpiresAt,
+      exchangeRatesFetchedAt,
+      exchangeRatesLoading,
+      exchangeRatesSource,
       notificationPreferences,
       persist,
       privacyMode,
