@@ -237,7 +237,7 @@ Inside a split room, add expenses item by item.
 Example:
 
 ```txt
-Biryani - ₹300 - Assigned to Sankhya
+Biryani - ₹300 - Assigned to Arpan
 Pizza - ₹450 - Assigned to Harshit
 Drinks - ₹250 - Assigned to Rahul
 ```
