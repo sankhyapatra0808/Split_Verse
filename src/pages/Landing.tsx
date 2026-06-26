@@ -171,9 +171,6 @@ export default function Landing() {
         </div>
 
         <div className="nav-actions">
-          <button className="nav-icon-button" type="button" aria-label="Search">
-            <Search size={18} />
-          </button>
           <button
             className="nav-icon-button nav-menu"
             type="button"
@@ -436,8 +433,7 @@ export default function Landing() {
         </div>
 
         <div className="footer-bottom">
-          <span>Copyright 2026 SplitVerse</span>
-          <button type="button">India / English</button>
+          <span>Mobile App Coming Soon...</span>
         </div>
       </footer>
     </main>
