@@ -53,15 +53,23 @@ export function sendValidationError(res: Response, error: unknown) {
   return true;
 }
 
+function hasAtMostTwoDecimalPlaces(value: number) {
+  // Currency conversions can produce values like 2174.9500000000003 even
+  // after frontend rounding. Treat tiny floating-point noise as valid.
+  const cents = value * 100;
+  return Math.abs(cents - Math.round(cents)) < 1e-6;
+}
+
 export function moneyAmountSchema(max = 1_000_000) {
   return z.coerce
     .number({ message: "Amount is required" })
     .finite("Amount must be a valid number")
     .positive("Amount must be greater than 0")
     .max(max, `Amount cannot exceed ${max}`)
-    .refine((value) => Math.round(value * 100) === value * 100, {
+    .refine(hasAtMostTwoDecimalPlaces, {
       message: "Amount can have at most 2 decimal places",
-    });
+    })
+    .transform((value) => Math.round((value + Number.EPSILON) * 100) / 100);
 }
 
 export const uuidParamSchema = z
@@ -75,16 +83,6 @@ export const safeTextSchema = (label: string, max = 120) =>
     .trim()
     .min(1, `${label} is required`)
     .max(max, `${label} is too long`)
-    .refine((value) => {
-      for (const character of value) {
-        const code = character.charCodeAt(0);
-
-        if (code <= 0x1f || code === 0x7f) {
-          return false;
-        }
-      }
-
-      return true;
-    }, {
+    .refine((value) => !/[\u0000-\u001F\u007F]/.test(value), {
       message: `${label} contains invalid characters`,
     });

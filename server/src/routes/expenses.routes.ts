@@ -14,7 +14,7 @@ import {
 } from "../middleware/validateRequest.js";
 
 const router = express.Router();
-const maxExpensesPerDay = 10;
+const maxExpensesPerDay = 25;
 const maxExpenseAmount = Number(process.env.MAX_EXPENSE_AMOUNT || 1000000);
 
 const createExpenseSchema = z
@@ -83,7 +83,7 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
 
     if (expensesCreatedToday >= maxExpensesPerDay) {
       return res.status(429).json({
-        message: "You can add up to 10 expenses per day",
+        message: "You can add up to 25 expenses per day",
       });
     }
 

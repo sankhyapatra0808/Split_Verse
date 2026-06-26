@@ -308,6 +308,19 @@ export default function AppSettings() {
     loading: exchangeRatesLoading,
     source: exchangeRatesSource,
   });
+
+  useEffect(() => {
+    if (!settingsMessage) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setSettingsMessage("");
+    }, 3600);
+
+    return () => window.clearTimeout(timer);
+  }, [settingsMessage]);
+
   const currencyOptions: DropdownOption<CurrencyCode>[] = currencies.map(
     (currency) => ({
       value: currency.code,
@@ -1410,20 +1423,21 @@ export default function AppSettings() {
             </button>
           </div>
 
-          {(settingsMessage || settingsError) && (
+          {settingsError && (
             <p
-              className={
-                settingsError
-                  ? "settings-inline-message error"
-                  : "settings-inline-message"
-              }
+              className="settings-inline-message error"
             >
-              {settingsError || settingsMessage}
+              {settingsError}
             </p>
           )}
         </article>
       </section>
 
+      {settingsMessage && (
+        <div className="settings-bottom-toast" role="status" aria-live="polite">
+          {settingsMessage}
+        </div>
+      )}
 
       {walletPinResetOpen && (
         <div className="transaction-export-backdrop" role="presentation">

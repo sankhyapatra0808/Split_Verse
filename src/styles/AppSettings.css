@@ -478,6 +478,26 @@
   background: rgba(207, 32, 47, 0.08);
 }
 
+.settings-bottom-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 220;
+  width: min(420px, calc(100% - 32px));
+  box-sizing: border-box;
+  transform: translateX(-50%);
+  padding: 12px 16px;
+  border: 1px solid rgba(5, 177, 105, 0.16);
+  border-radius: 999px;
+  color: var(--dash-success);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 40px rgba(10, 11, 13, 0.14);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+}
+
 .danger-zone-card .settings-danger-button,
 .danger-zone-card .settings-safe-button,
 .danger-zone-card .settings-outline-danger-button {
@@ -498,6 +518,11 @@
   .danger-zone-card .settings-safe-button,
   .danger-zone-card .settings-outline-danger-button {
     width: 100%;
+  }
+
+  .settings-bottom-toast {
+    bottom: 14px;
+    border-radius: 16px;
   }
 }
 

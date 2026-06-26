@@ -1,8 +1,27 @@
 /* Wallet Top-Up page styles */
-.page-hero-card p,
-.balance-total-card p,
-.history-summary-card p,
-.topup-summary-card p {
+
+.wallet-topup-grid {
+  --wallet-topup-card-height: 336px;
+  align-items: start;
+  gap: 12px;
+}
+
+.wallet-topup-grid .bento-card {
+  box-sizing: border-box;
+  min-height: var(--wallet-topup-card-height);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.wallet-topup-grid .page-hero-card {
+  grid-column: span 8;
+  gap: 16px;
+  padding: 22px;
+}
+
+.wallet-topup-grid .page-hero-card p,
+.wallet-topup-grid .topup-summary-card p,
+.wallet-topup-grid .razorpay-helper-text {
   max-width: 680px;
   margin: 0;
   color: var(--dash-body);
@@ -10,108 +29,109 @@
   line-height: 1.5;
 }
 
-
-.room-form-card,
-.account-breakdown-card,
-.payment-method-card {
-  grid-column: span 4;
-  min-height: 180px;
-  display: grid;
-  gap: 16px;
-  padding: 18px;
+.wallet-topup-grid .page-hero-card.dark p {
+  color: var(--dash-muted-soft);
 }
 
-
-.assignment-card,
-.member-balance-card,
-.balance-card,
-.balance-settings-card,
-.topup-form-card,
-.topup-summary-card,
-.recent-topups-card,
-.history-summary-card {
-  grid-column: span 4;
+.wallet-topup-grid .topup-form-card,
+.wallet-topup-grid .payment-method-card,
+.wallet-topup-grid .topup-summary-card,
+.wallet-topup-grid .recent-topups-card {
   display: grid;
-  gap: 16px;
+  align-content: start;
+  gap: 14px;
   padding: 18px;
+  border-radius: 20px;
+  background: var(--dash-canvas);
+  box-shadow: 0 10px 26px rgba(10, 11, 13, 0.045);
 }
 
+.wallet-topup-grid .topup-form-card {
+  grid-column: span 6;
+}
 
-.balance-total-details > span,
-.topup-summary-card > span,
-.history-summary-card > span {
+.wallet-topup-grid .payment-method-card {
+  grid-column: span 3;
+}
+
+.wallet-topup-grid .topup-summary-card {
+  grid-column: span 4;
+  align-content: space-between;
+  border-color: rgba(0, 82, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(0, 82, 255, 0.035), rgba(255, 255, 255, 0)),
+    var(--dash-canvas);
+}
+
+.wallet-topup-grid .recent-topups-card {
+  grid-column: span 3;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.wallet-topup-grid .topup-summary-card > span {
   color: var(--dash-muted);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 800;
   line-height: 1.5;
   text-transform: uppercase;
 }
 
-
-.balance-total-card strong,
-.topup-summary-card strong,
-.history-summary-card strong {
+.wallet-topup-grid .topup-summary-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--dash-ink);
   font-family: var(--dash-mono);
-  font-size: 30px;
+  font-size: clamp(28px, 3.5vw, 42px);
   font-weight: 500;
   line-height: 1.05;
 }
 
-
-.room-card-list,
-.compact-list,
-.settlement-list,
-.transaction-list,
-.method-list {
+.wallet-topup-grid .dashboard-form {
   display: grid;
-  gap: 9px;
+  gap: 12px;
 }
 
-
-.room-row,
-.compact-list div,
-.settlement-row,
-.transaction-row,
-.method-row {
-  min-height: 52px;
+.wallet-topup-grid .dashboard-form label {
+  min-width: 0;
   display: grid;
-  align-items: center;
-  gap: 9px;
-  padding: 8px;
-  border: 1px solid var(--dash-hairline-soft);
-  border-radius: 16px;
-  background: var(--dash-surface-soft);
+  gap: 7px;
 }
 
+.wallet-topup-grid .dashboard-form label span {
+  color: var(--dash-body);
+  font-size: 13px;
+  font-weight: 700;
+}
 
-.room-row strong,
-.compact-list strong,
-.settlement-row strong,
-.transaction-row strong,
-.method-row strong {
+.wallet-topup-grid .dashboard-form input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 46px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 14px;
+  outline: 0;
+  padding: 0 14px;
   color: var(--dash-ink);
+  background: var(--dash-canvas);
+  font: inherit;
   font-size: 14px;
   font-weight: 600;
 }
 
-
-.room-row span,
-.compact-list span,
-.settlement-row span,
-.transaction-row span,
-.method-row span {
-  color: var(--dash-body);
-  font-size: 13px;
-  font-weight: 500;
+.wallet-topup-grid .dashboard-form input:focus {
+  border-color: rgba(0, 82, 255, 0.42);
+  box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.09);
 }
 
+.wallet-topup-grid .dashboard-primary-button {
+  min-height: 46px;
+}
 
 .amount-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
 }
-
 
 .amount-grid button {
   min-height: 46px;
@@ -122,33 +142,51 @@
   cursor: pointer;
   font: inherit;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
 }
 
+.amount-grid button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 82, 255, 0.24);
+}
 
 .amount-grid button.active {
-  border-color: rgba(0, 82, 255, 0.28);
+  border-color: rgba(0, 82, 255, 0.32);
   color: var(--dash-primary);
-  background: rgba(0, 82, 255, 0.06);
+  background: rgba(0, 82, 255, 0.07);
 }
 
+.method-list {
+  display: grid;
+  gap: 9px;
+}
 
 .method-row {
+  min-height: 54px;
+  display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 16px;
+  color: var(--dash-ink);
+  background: var(--dash-surface-soft);
   cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
 }
-
 
 .method-row input {
   accent-color: var(--dash-primary);
 }
-
-
-.method-row.active {
-  border-color: rgba(0, 82, 255, 0.28);
-  background: rgba(0, 82, 255, 0.06);
-}
-
 
 .method-row > span {
   width: 38px;
@@ -160,158 +198,105 @@
   background: var(--dash-canvas);
 }
 
-
-.topup-summary-card {
-  align-content: space-between;
-  min-height: 190px;
+.method-row strong {
+  min-width: 0;
+  color: var(--dash-ink);
+  font-size: 14px;
+  font-weight: 700;
 }
 
+.method-row.active {
+  border-color: rgba(0, 82, 255, 0.32);
+  background: rgba(0, 82, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(0, 82, 255, 0.04);
+}
 
-.recent-topups-card {
-  min-height: 190px;
+.wallet-topup-grid .recent-topups-card .compact-list {
+  min-height: 0;
+  display: grid;
   align-content: start;
-  gap: 16px;
-}
-
-
-.recent-topups-card .compact-list {
   gap: 8px;
+  overflow: hidden;
 }
 
-
-.recent-topups-card .compact-list div {
+.wallet-topup-grid .recent-topups-card .compact-list div {
   min-height: 46px;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) auto;
+  align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-radius: 13px;
+  padding: 9px 10px;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 14px;
+  background: var(--dash-surface-soft);
 }
 
+.wallet-topup-grid .recent-topups-card .compact-list div:nth-child(n + 5) {
+  display: none;
+}
 
-.recent-topups-card .compact-list span,
-.recent-topups-card .compact-list strong,
-.recent-topups-card .compact-list em {
+.wallet-topup-grid .recent-topups-card .compact-list span,
+.wallet-topup-grid .recent-topups-card .compact-list strong,
+.wallet-topup-grid .recent-topups-card .compact-list em {
+  min-width: 0;
+  overflow: hidden;
   font-size: 13px;
-}
-@media (max-width: 1180px) {
-
-  .total-spend-card,
-  .room-form-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .monthly-graph-card,
-  .settings-card,
-  .history-summary-card {
-    grid-column: span 4;
-  }
-}
-@media (max-width: 860px) {
-
-  .wallet-card,
-  .monthly-graph-card,
-  .summary-card,
-  .total-spend-card,
-  .page-hero-card,
-  .room-form-card,
-  .room-list-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .settlement-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .settings-card,
-  .transaction-tools-card,
-  .transaction-table-card,
-  .friends-list-card,
-  .history-summary-card {
-    grid-column: span 12;
-  }
-
-
-  .recent-topups-card .compact-list div {
-    grid-template-columns: minmax(0, 1fr) max-content;
-    justify-items: stretch;
-  }
-
-
-  .recent-topups-card .compact-list strong {
-    justify-self: end;
-    white-space: nowrap;
-  }
-
-
-  .recent-topups-card .compact-list em {
-    grid-column: 1 / -1;
-  }
-}
-@media (max-width: 560px) {
-
-  .bento-card,
-  .expense-tracker-card,
-  .summary-card,
-  .page-hero-card,
-  .room-form-card,
-  .room-list-card,
-  .member-balance-card,
-  .assignment-card,
-  .friend-request-card,
-  .friend-inbox-card,
-  .friend-sent-card,
-  .friends-list-card,
-  .balance-card,
-  .balance-total-card,
-  .account-breakdown-card,
-  .settlement-card,
-  .balance-settings-card,
-  .topup-form-card,
-  .payment-method-card,
-  .topup-summary-card,
-  .recent-topups-card,
-  .settings-card,
-  .transaction-tools-card,
-  .transaction-table-card,
-  .history-summary-card,
-  .wallet-card,
-  .monthly-graph-card,
-  .total-spend-card {
-    border-radius: 18px;
-    padding: 18px;
-  }
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.wallet-topup-grid .recent-topups-card .compact-list span {
+  color: var(--dash-body);
+  font-weight: 600;
+}
+
+.wallet-topup-grid .recent-topups-card .compact-list strong,
+.wallet-topup-grid .recent-topups-card .compact-list em {
+  color: var(--dash-ink);
+  font-family: var(--dash-mono);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.wallet-topup-grid .recent-topups-card .topup-row-skeleton span,
+.wallet-topup-grid .recent-topups-card .topup-row-skeleton strong,
+.wallet-topup-grid .recent-topups-card .topup-row-skeleton em {
+  display: inline-flex;
+  align-items: center;
+}
+
+.wallet-topup-grid .recent-topups-card .topup-row-skeleton strong {
+  justify-self: stretch;
+}
+
+.wallet-topup-grid .recent-topups-card .topup-row-skeleton strong .app-loading-skeleton {
+  width: min(118px, 100%);
+}
+
+.wallet-topup-grid .recent-topups-card .topup-row-skeleton em .app-loading-skeleton {
+  width: 76px;
+}
+
+.wallet-success-message,
+.wallet-error-message {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
 
 .wallet-success-message {
-  margin-top: 14px;
+  border: 1px solid rgba(5, 177, 105, 0.16);
   color: var(--dash-success);
-  font-size: 14px;
-  font-weight: 600;
+  background: rgba(5, 177, 105, 0.08);
 }
 
-
 .wallet-error-message {
-  margin-top: 14px;
+  border: 1px solid rgba(207, 32, 47, 0.16);
   color: var(--dash-danger);
-  font-size: 14px;
-  font-weight: 600;
+  background: rgba(207, 32, 47, 0.08);
 }
 
 .currency-input-helper {
@@ -321,4 +306,106 @@
   font-size: 12px;
   font-weight: 600;
   line-height: 1.35;
+}
+
+@media (min-width: 1181px) {
+  .wallet-topup-grid {
+    grid-template-areas:
+      "hero hero hero hero hero hero hero hero summary summary summary summary"
+      "form form form form form form methods methods methods recent recent recent";
+  }
+
+  .wallet-topup-grid .page-hero-card {
+    grid-area: hero;
+  }
+
+  .wallet-topup-grid .topup-summary-card {
+    grid-area: summary;
+  }
+
+  .wallet-topup-grid .topup-form-card {
+    grid-area: form;
+  }
+
+  .wallet-topup-grid .payment-method-card {
+    grid-area: methods;
+  }
+
+  .wallet-topup-grid .recent-topups-card {
+    grid-area: recent;
+  }
+}
+
+@media (max-width: 1180px) {
+  .wallet-topup-grid .page-hero-card,
+  .wallet-topup-grid .topup-form-card,
+  .wallet-topup-grid .payment-method-card,
+  .wallet-topup-grid .topup-summary-card,
+  .wallet-topup-grid .recent-topups-card {
+    grid-column: span 12;
+  }
+
+  .wallet-topup-grid .payment-method-card,
+  .wallet-topup-grid .recent-topups-card {
+    grid-column: span 6;
+  }
+}
+
+@media (max-width: 760px) {
+  .wallet-topup-grid .payment-method-card,
+  .wallet-topup-grid .recent-topups-card {
+    grid-column: span 12;
+  }
+
+  .amount-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wallet-topup-grid .recent-topups-card .compact-list div {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .wallet-topup-grid .recent-topups-card .compact-list em {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .wallet-topup-grid {
+    gap: 10px;
+  }
+
+  .wallet-topup-grid .page-hero-card,
+  .wallet-topup-grid .topup-form-card,
+  .wallet-topup-grid .payment-method-card,
+  .wallet-topup-grid .topup-summary-card,
+  .wallet-topup-grid .recent-topups-card {
+    border-radius: 18px;
+    padding: 16px;
+  }
+
+  .wallet-topup-grid .bento-card-head {
+    align-items: flex-start;
+  }
+
+  .wallet-topup-grid .bento-card-head h2 {
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  .method-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .method-row input {
+    grid-row: span 2;
+  }
+
+  .method-row > span {
+    grid-column: 2;
+  }
+
+  .method-row strong {
+    grid-column: 2;
+  }
 }

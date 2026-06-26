@@ -7,10 +7,11 @@ import {
   Smartphone,
 } from "lucide-react";
 import {
+  createRazorpayWalletOrder,
   getRecentWalletTopUps,
   type WalletTopUpItem,
   type WalletTopUpMethod,
-  topUpWallet,
+  verifyRazorpayWalletPayment,
 } from "../lib/api";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { useAppSettings } from "../context/useAppSettings";
@@ -18,12 +19,69 @@ import { withTopProgress } from "../utils/topProgress";
 import DashboardLayout from "./dashboard/DashboardLayout";
 import "../styles/WalletTopUp.css";
 
-const amounts = [500, 1000, 2000, 5000];
+const amounts = [500, 1000, 2000, 5000, 7500, 10000];
+const maxTopUpAmountInInr = 100000;
 const methods = [
   { label: "UPI", value: "UPI", icon: Smartphone },
   { label: "Card", value: "Card", icon: CreditCard },
   { label: "Net banking", value: "Net banking", icon: Landmark },
 ] satisfies { label: string; value: WalletTopUpMethod; icon: LucideIcon }[];
+
+type RazorpayCheckoutResponse = {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+};
+
+type RazorpayCheckoutOptions = {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill?: {
+    name?: string;
+    email?: string;
+  };
+  theme?: {
+    color?: string;
+  };
+  handler: (response: RazorpayCheckoutResponse) => void | Promise<void>;
+  modal?: {
+    ondismiss?: () => void;
+  };
+};
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayCheckoutOptions) => { open: () => void };
+  }
+}
+
+const razorpayScriptUrl = "https://checkout.razorpay.com/v1/checkout.js";
+let razorpayScriptPromise: Promise<void> | null = null;
+
+function loadRazorpayCheckout() {
+  if (window.Razorpay) {
+    return Promise.resolve();
+  }
+
+  if (razorpayScriptPromise) {
+    return razorpayScriptPromise;
+  }
+
+  razorpayScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = razorpayScriptUrl;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load Razorpay Checkout"));
+    document.body.appendChild(script);
+  });
+
+  return razorpayScriptPromise;
+}
 
 function formatTopUpDate(dateValue: string) {
   if (!dateValue) {
@@ -32,12 +90,10 @@ function formatTopUpDate(dateValue: string) {
 
   const rawValue = String(dateValue);
 
-  // If backend already sends DD-MM-YYYY, show it directly.
   if (/^\d{2}-\d{2}-\d{4}$/.test(rawValue)) {
     return rawValue;
   }
 
-  // If backend sends YYYY-MM-DD, convert to DD-MM-YYYY.
   if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
     const [year, month, day] = rawValue.split("-");
     return `${day}-${month}-${year}`;
@@ -140,6 +196,69 @@ export default function WalletTopUp() {
     };
   }, []);
 
+  async function openRazorpayCheckout() {
+    const order = await createRazorpayWalletOrder({
+      amount: topUpAmount,
+      method: selectedMethod,
+    });
+
+    await loadRazorpayCheckout();
+
+    const RazorpayCheckout = window.Razorpay;
+
+    if (!RazorpayCheckout) {
+      throw new Error("Razorpay Checkout is unavailable. Please try again.");
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      let completed = false;
+      const checkout = new RazorpayCheckout({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: order.name,
+        description: order.description,
+        order_id: order.orderId,
+        prefill: order.prefill,
+        theme: {
+          color: "#0052ff",
+        },
+        handler: async (response) => {
+          completed = true;
+
+          try {
+            const verified = await verifyRazorpayWalletPayment({
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            });
+
+            window.dispatchEvent(new Event("splitverse:data-updated"));
+            setMessage(
+              `Wallet topped up successfully. New balance: ${formatCurrency(
+                verified.walletBalance,
+              )}`,
+            );
+            setCustomAmount("");
+            await loadRecentTopUps({ silent: true });
+            resolve();
+          } catch (verifyError) {
+            reject(verifyError);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            if (!completed) {
+              reject(new Error("Payment cancelled before completion."));
+            }
+          },
+        },
+      });
+
+      checkout.open();
+    });
+  }
+
   async function handleTopUp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -149,34 +268,24 @@ export default function WalletTopUp() {
       return;
     }
 
+    if (topUpAmount > maxTopUpAmountInInr) {
+      setError(`Wallet top-up cannot exceed ${formatCurrencyValue(maxTopUpAmountInInr, "INR")}.`);
+      setMessage("");
+      return;
+    }
+
     setSubmitting(true);
     setError("");
     setMessage("");
 
     try {
-      await withTopProgress(async () => {
-        const response = await topUpWallet({
-          amount: topUpAmount,
-          method: selectedMethod,
-        });
-
-        window.dispatchEvent(new Event("splitverse:data-updated"));
-
-        setMessage(
-          `Wallet topped up successfully. New balance: ${formatCurrency(
-            response.walletBalance,
-          )}`,
-        );
-
-        setCustomAmount("");
-        await loadRecentTopUps({ silent: true });
-      });
+      await withTopProgress(openRazorpayCheckout);
     } catch (err) {
-      console.error("Wallet top-up failed:", err);
+      console.error("Razorpay wallet top-up failed:", err);
       setError(
         err instanceof Error
           ? err.message
-          : "Could not top up wallet. Please try again.",
+          : "Could not complete Razorpay top-up. Please try again.",
       );
     } finally {
       setSubmitting(false);
@@ -185,18 +294,18 @@ export default function WalletTopUp() {
 
   return (
     <DashboardLayout eyebrow="Top-up">
-      <section className="dashboard-page-grid">
+      <section className="dashboard-page-grid wallet-topup-grid">
         <article className="bento-card page-hero-card dark">
           <div className="bento-card-head">
             <div>
               <span>Wallet Top-Up</span>
-              <h2>Add money before the group settles.</h2>
+              <h2>Add money securely with Razorpay.</h2>
             </div>
             <PlusCircle size={24} />
           </div>
           <p>
-            Prepare your wallet for room settlements, reminders, and quick
-            reimbursements without leaving SplitVerse.
+            SplitVerse creates a Razorpay order in INR and credits your wallet
+            only after the payment signature is verified by the backend.
           </p>
         </article>
 
@@ -231,7 +340,6 @@ export default function WalletTopUp() {
               <input
                 type="number"
                 min="1"
-                max="10000"
                 step="0.01"
                 inputMode="decimal"
                 placeholder="Custom amount"
@@ -249,7 +357,7 @@ export default function WalletTopUp() {
               type="submit"
               disabled={submitting}
             >
-              {submitting ? "Adding money" : "Add money to wallet"}
+              {submitting ? "Opening Razorpay" : "Pay with Razorpay"}
             </button>
             {message && <p className="wallet-success-message">{message}</p>}
             {error && <p className="wallet-error-message">{error}</p>}
@@ -259,8 +367,8 @@ export default function WalletTopUp() {
         <article className="bento-card payment-method-card">
           <div className="bento-card-head">
             <div>
-              <span>Payment method</span>
-              <h2>Pick a source</h2>
+              <span>Preferred method</span>
+              <h2>Checkout source</h2>
             </div>
           </div>
           <div className="method-list">
@@ -287,6 +395,10 @@ export default function WalletTopUp() {
               );
             })}
           </div>
+          <p className="razorpay-helper-text">
+            Razorpay will still show all enabled payment methods from your
+            Razorpay Dashboard. This selection is saved in SplitVerse history.
+          </p>
         </article>
 
         <article className="bento-card topup-summary-card">
@@ -295,8 +407,8 @@ export default function WalletTopUp() {
             {formatCurrency(Number.isFinite(topUpAmount) ? topUpAmount : 0)}
           </strong>
           <p>
-            This top-up will be added through {selectedMethod}. Your wallet
-            balance updates as soon as the payment is recorded.
+            The app can accept your selected display currency, but Razorpay and
+            SplitVerse wallet accounting stay in INR for safe settlement.
           </p>
         </article>
 
@@ -309,12 +421,16 @@ export default function WalletTopUp() {
           </div>
           <div className="compact-list">
             {loadingTopUps && (
-              <div>
+              <div className="topup-row-skeleton" aria-label="Loading recent top-up">
                 <span>
                   <LoadingSkeleton />
                 </span>
-                <strong>{formatCurrency(0)}</strong>
-                <em>--</em>
+                <strong>
+                  <LoadingSkeleton wide />
+                </strong>
+                <em>
+                  <LoadingSkeleton />
+                </em>
               </div>
             )}
 

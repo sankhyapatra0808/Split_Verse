@@ -151,7 +151,6 @@ export default function Dashboard() {
     convertCurrency,
     currencies,
     formatCurrency,
-    formatCurrencyValue,
   } = useAppSettings();
   const [dashboardSummary, setDashboardSummary] =
     useState<DashboardSummary | null>(null);
@@ -166,11 +165,6 @@ export default function Dashboard() {
   });
   const activeCurrency =
     currencies.find((currency) => currency.code === appCurrency) ?? currencies[0];
-  const expenseInputAmount = Number(expenseForm.amount);
-  const expenseInputAmountInInr = Number.isFinite(expenseInputAmount)
-    ? roundMoney(convertCurrency(expenseInputAmount, appCurrency, "INR"))
-    : 0;
-
   function convertSelectedCurrencyInputToInr(amount: number) {
     return roundMoney(convertCurrency(amount, appCurrency, "INR"));
   }

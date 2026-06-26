@@ -705,21 +705,17 @@ router.post(
         `
       SELECT room.id, room.name
       FROM split_rooms room
-      INNER JOIN split_room_members member
-        ON member.room_id = room.id
       WHERE room.id = $1
-      AND (
-        room.owner_user_id = $2
-        OR member.user_id = $2
-        OR LOWER(member.email) = LOWER($3)
-      )
+      AND room.owner_user_id = $2
       LIMIT 1;
       `,
-        [roomId, dbUser.id, dbUser.email],
+        [roomId, dbUser.id],
       );
 
       if (accessResult.rows.length === 0) {
-        return res.status(404).json({ message: "Room not found" });
+        return res.status(403).json({
+          message: "Only the room owner can add items to this room",
+        });
       }
 
       const assignedMemberResult = await db.query<RoomMemberRow>(
