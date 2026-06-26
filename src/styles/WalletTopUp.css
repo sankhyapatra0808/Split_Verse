@@ -314,10 +314,11 @@
   font-weight: 600;
 }
 
-.razorpay-helper-text {
-  margin: 2px 0 0;
-  color: var(--dash-body);
-  font-size: 13px;
+.currency-input-helper {
+  display: block;
+  margin-top: 4px;
+  color: var(--dash-muted);
+  font-size: 12px;
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.35;
 }

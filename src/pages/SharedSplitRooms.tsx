@@ -145,8 +145,19 @@ function getItemPlaceholder(category?: string | null) {
   }
 }
 
+function roundMoney(amount: number) {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
+
 export default function SharedSplitRooms() {
-  const { confirmBeforeWalletPayment, formatCurrency } = useAppSettings();
+  const {
+    appCurrency,
+    confirmBeforeWalletPayment,
+    convertCurrency,
+    currencies,
+    formatCurrency,
+    formatCurrencyValue,
+  } = useAppSettings();
   const [searchParams] = useSearchParams();
   const roomIdFromNotification = searchParams.get("roomId") || "";
   const [rooms, setRooms] = useState<SplitRoom[]>([]);
@@ -177,13 +188,29 @@ export default function SharedSplitRooms() {
   const [collectingMemberId, setCollectingMemberId] = useState("");
   const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
   const [payingDueId, setPayingDueId] = useState("");
-  const [walletPinByItemId, setWalletPinByItemId] = useState<Record<string, string>>({});
-  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [paymentDialogMemberId, setPaymentDialogMemberId] = useState("");
+  const [expandedDueMemberId, setExpandedDueMemberId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const friendDropdownRef = useRef<HTMLDivElement | null>(null);
   const optimisticIdRef = useRef(0);
+  const activeCurrency =
+    currencies.find((currency) => currency.code === appCurrency) ?? currencies[0];
+  const itemInputAmount = Number(itemAmount);
+  const itemInputAmountInInr = Number.isFinite(itemInputAmount)
+    ? convertSelectedCurrencyInputToInr(itemInputAmount)
+    : 0;
+  const editInputAmount = Number(editItemAmount);
+  const editInputAmountInInr = Number.isFinite(editInputAmount)
+    ? convertSelectedCurrencyInputToInr(editInputAmount)
+    : 0;
+
+  function convertSelectedCurrencyInputToInr(amount: number) {
+    return roundMoney(convertCurrency(amount, appCurrency, "INR"));
+  }
+
+  function convertInrToSelectedCurrencyInput(amountInInr: number) {
+    return roundMoney(convertCurrency(amountInInr, "INR", appCurrency));
+  }
 
   const selectedRoom = useMemo(
     () => rooms.find((room) => room.id === selectedRoomId) ?? rooms[0],
@@ -222,6 +249,13 @@ export default function SharedSplitRooms() {
       })),
     [sortedMembers],
   );
+  const selectedRoomPendingDues = useMemo(
+    () =>
+      selectedRoom
+        ? pendingDues.filter((due) => due.roomId === selectedRoom.id)
+        : [],
+    [pendingDues, selectedRoom],
+  );
   const selectedFriendNames = useMemo(
     () =>
       selectedFriendEmails
@@ -247,49 +281,7 @@ export default function SharedSplitRooms() {
     );
   }, [friends, trimmedFriendSearch]);
   const itemPlaceholder = getItemPlaceholder(selectedRoom?.category);
-  const selectedRoomItems = useMemo(
-    () => selectedRoom?.items ?? [],
-    [selectedRoom],
-  );
-  const paymentDialogMember = useMemo(
-    () =>
-      selectedRoom?.members.find(
-        (member) => member.id === paymentDialogMemberId,
-      ) ?? null,
-    [paymentDialogMemberId, selectedRoom],
-  );
-  const paymentDialogBalance = useMemo(
-    () =>
-      selectedRoom?.balances.find(
-        (balance) => balance.memberId === paymentDialogMemberId,
-      ) ?? null,
-    [paymentDialogMemberId, selectedRoom],
-  );
-  const paymentDialogItems = useMemo(
-    () =>
-      paymentDialogMemberId
-        ? selectedRoomItems
-            .filter(
-              (item) => item.assigned_member_id === paymentDialogMemberId,
-            )
-            .sort((left, right) => {
-              if (left.isCollected === right.isCollected) {
-                return left.title.localeCompare(right.title);
-              }
-
-              return left.isCollected ? 1 : -1;
-            })
-        : [],
-    [paymentDialogMemberId, selectedRoomItems],
-  );
-  const paymentDialogPendingTotal = paymentDialogItems.reduce(
-    (sum, item) => sum + (item.isCollected ? 0 : Number(item.amount)),
-    0,
-  );
-  const paymentDialogPaidTotal = paymentDialogItems.reduce(
-    (sum, item) => sum + (item.isCollected ? Number(item.amount) : 0),
-    0,
-  );
+  const selectedRoomItems = selectedRoom?.items ?? [];
   const removableMemberCount = useMemo(
     () =>
       selectedRoom
@@ -350,25 +342,6 @@ export default function SharedSplitRooms() {
   ) {
     emitSplitVerseUpdates({ pendingDuesChanged });
     void reloadSplitRoomData(preferredRoomId);
-  }
-
-  function openMemberPaymentDialog(memberId: string) {
-    if (!selectedRoom) {
-      return;
-    }
-
-    setPaymentDialogMemberId(memberId);
-    setPaymentDialogOpen(true);
-  }
-
-  function closeMemberPaymentDialog() {
-    if (payingDueId) {
-      return;
-    }
-
-    setPaymentDialogOpen(false);
-    setPaymentDialogMemberId("");
-    setWalletPinByItemId({});
   }
 
   useEffect(() => {
@@ -493,8 +466,7 @@ export default function SharedSplitRooms() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setPaymentDialogOpen(false);
-      setPaymentDialogMemberId("");
+      setExpandedDueMemberId("");
     }, 0);
 
     return () => window.clearTimeout(timer);
@@ -825,7 +797,7 @@ export default function SharedSplitRooms() {
     setHistoryDialogOpen(true);
     setEditingItemId(item.id);
     setEditItemTitle(item.title);
-    setEditItemAmount(String(item.amount));
+    setEditItemAmount(String(convertInrToSelectedCurrencyInput(item.amount)));
     setMessage("");
     setError("");
   }
@@ -948,7 +920,7 @@ export default function SharedSplitRooms() {
     setError("");
 
     const title = editItemTitle.trim();
-    const amount = Number(editItemAmount);
+    const amountInSelectedCurrency = Number(editItemAmount);
 
     if (!selectedRoom) {
       setError("Choose a room first.");
@@ -965,8 +937,20 @@ export default function SharedSplitRooms() {
       return;
     }
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Amount must be greater than 0.");
+    if (
+      !Number.isFinite(amountInSelectedCurrency) ||
+      amountInSelectedCurrency <= 0
+    ) {
+      setError(`Amount must be greater than 0 ${appCurrency}.`);
+      return;
+    }
+
+    const amountInInr = convertSelectedCurrencyInputToInr(
+      amountInSelectedCurrency,
+    );
+
+    if (!Number.isFinite(amountInInr) || amountInInr <= 0) {
+      setError("Could not convert this amount to INR. Try again.");
       return;
     }
 
@@ -979,7 +963,7 @@ export default function SharedSplitRooms() {
       setRooms((prev) =>
         prev.map((room) =>
           room.id === selectedRoom.id
-            ? updateRoomItemOptimistically(room, editingItemId, title, amount)
+            ? updateRoomItemOptimistically(room, editingItemId, title, amountInInr)
             : room,
         ),
       );
@@ -989,7 +973,7 @@ export default function SharedSplitRooms() {
       await withTopProgress(async () => {
         await updateSplitRoomItem(editingItemId, {
           title,
-          amount,
+          amount: amountInInr,
         });
         refreshSplitRoomDataInBackground(selectedRoom.id);
       });
@@ -1125,15 +1109,27 @@ export default function SharedSplitRooms() {
       return;
     }
 
-    const numericAmount = Number(itemAmount);
+    const amountInSelectedCurrency = Number(itemAmount);
 
     if (!itemTitle.trim()) {
       setError("Item name is required.");
       return;
     }
 
-    if (!numericAmount || numericAmount <= 0) {
-      setError("Amount must be greater than 0.");
+    if (
+      !Number.isFinite(amountInSelectedCurrency) ||
+      amountInSelectedCurrency <= 0
+    ) {
+      setError(`Amount must be greater than 0 ${appCurrency}.`);
+      return;
+    }
+
+    const numericAmount = convertSelectedCurrencyInputToInr(
+      amountInSelectedCurrency,
+    );
+
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      setError("Could not convert this amount to INR. Try again.");
       return;
     }
 
@@ -1301,13 +1297,6 @@ export default function SharedSplitRooms() {
     setMessage("");
     setError("");
 
-    const walletPin = (walletPinByItemId[itemId] || "").trim();
-
-    if (!/^\d{4,6}$/.test(walletPin)) {
-      setError("Enter your 4 to 6 digit wallet PIN to pay from wallet.");
-      return;
-    }
-
     const dueToPay = pendingDues.find((due) => due.id === itemId);
 
     if (confirmBeforeWalletPayment) {
@@ -1322,6 +1311,12 @@ export default function SharedSplitRooms() {
       }
     }
 
+    const walletPin = window.prompt("Enter your wallet PIN to pay from wallet.");
+
+    if (!walletPin?.trim()) {
+      return;
+    }
+
     const previousRooms = rooms;
     const previousPendingDues = pendingDues;
 
@@ -1331,12 +1326,7 @@ export default function SharedSplitRooms() {
       setMessage("Due paid.");
 
       await withTopProgress(async () => {
-        await paySplitRoomDue(itemId, { walletPin });
-        setWalletPinByItemId((prev) => {
-          const next = { ...prev };
-          delete next[itemId];
-          return next;
-        });
+        await paySplitRoomDue(itemId, { walletPin: walletPin.trim() });
         setMessage("Due paid from wallet successfully.");
         refreshSplitRoomDataInBackground(selectedRoomId);
       });
@@ -1397,10 +1387,9 @@ export default function SharedSplitRooms() {
               <span>Friends</span>
 
               {friends.length === 0 ? (
-                <span
-                  className="dashboard-value-skeleton wide"
-                  aria-label="No friends available"
-                />
+                <p className="dashboard-muted-text">
+                  No friends yet. Add friends first from the Friends page.
+                </p>
               ) : (
                 <div className="friend-dropdown" ref={friendDropdownRef}>
                   <button
@@ -1574,26 +1563,25 @@ export default function SharedSplitRooms() {
             <div className="member-balance-list">
               {selectedRoom?.balances.length
                 ? selectedRoom.balances.map((balance) => {
-                    const balanceMember = selectedRoom.members.find(
-                      (member) => member.id === balance.memberId,
-                    );
-                    const memberItems = selectedRoomItems.filter(
-                      (item) => item.assigned_member_id === balance.memberId,
-                    );
-                    const hasMePendingItems =
-                      balance.isMe && memberItems.some((item) => !item.isCollected);
+                    const hasWalletDues =
+                      balance.isMe && selectedRoomPendingDues.length > 0;
                     const hasUnpaidDue =
-                      hasMePendingItems ||
+                      hasWalletDues ||
                       (!balance.isMe && balance.outstandingAmount > 0);
-                    const canOpenPaymentDialog = balance.isMe;
+                    const expanded =
+                      hasWalletDues && expandedDueMemberId === balance.memberId;
                     const rowClassName = [
                       "member-balance-row",
                       balance.isCollected ? "collected" : "",
                       hasUnpaidDue ? "unpaid" : "",
-                      canOpenPaymentDialog ? "payment-dialog-trigger" : "",
+                      hasWalletDues ? "expandable" : "",
+                      expanded ? "expanded" : "",
                     ]
                       .filter(Boolean)
                       .join(" ");
+                    const balanceMember = selectedRoom.members.find(
+                      (member) => member.id === balance.memberId,
+                    );
 
                     return (
                       <div
@@ -1602,23 +1590,33 @@ export default function SharedSplitRooms() {
                       >
                         <div
                           className={rowClassName}
-                          role={canOpenPaymentDialog ? "button" : undefined}
-                          tabIndex={canOpenPaymentDialog ? 0 : undefined}
+                          role={hasWalletDues ? "button" : undefined}
+                          tabIndex={hasWalletDues ? 0 : undefined}
                           onClick={() => {
-                            if (canOpenPaymentDialog) {
-                              openMemberPaymentDialog(balance.memberId);
+                            if (!hasWalletDues) {
+                              return;
                             }
+
+                            setExpandedDueMemberId((current) =>
+                              current === balance.memberId
+                                ? ""
+                                : balance.memberId,
+                            );
                           }}
                           onKeyDown={(event) => {
                             if (
-                              !canOpenPaymentDialog ||
+                              !hasWalletDues ||
                               (event.key !== "Enter" && event.key !== " ")
                             ) {
                               return;
                             }
 
                             event.preventDefault();
-                            openMemberPaymentDialog(balance.memberId);
+                            setExpandedDueMemberId((current) =>
+                              current === balance.memberId
+                                ? ""
+                                : balance.memberId,
+                            );
                           }}
                         >
                           {renderMemberMiniAvatar(balanceMember)}
@@ -1637,6 +1635,13 @@ export default function SharedSplitRooms() {
                               ? formatCurrency(balance.amount)
                               : formatCurrency(balance.outstandingAmount)}
                           </em>
+                          {hasWalletDues && (
+                            <ChevronDown
+                              className="member-due-chevron"
+                              size={16}
+                              aria-hidden="true"
+                            />
+                          )}
                           {!balance.isMe &&
                             balance.outstandingAmount > 0 &&
                             selectedRoom.isOwner && (
@@ -1661,6 +1666,36 @@ export default function SharedSplitRooms() {
                               </button>
                             )}
                         </div>
+
+                        {expanded && (
+                          <div className="room-pending-dues-panel">
+                            <span>Pay from wallet</span>
+                            <div className="room-pending-due-list">
+                              {selectedRoomPendingDues.map((due) => (
+                                <div
+                                  className="room-pending-due-row"
+                                  key={due.id}
+                                >
+                                  <div>
+                                    <strong>{due.title}</strong>
+                                    <small>
+                                      Pay to{" "}
+                                      {due.receiverName || due.receiverEmail}
+                                    </small>
+                                  </div>
+                                  <em>{formatCurrency(due.amount)}</em>
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePayDue(due.id)}
+                                    disabled={payingDueId === due.id}
+                                  >
+                                    {payingDueId === due.id ? "Paying" : "Pay"}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })
@@ -1700,7 +1735,7 @@ export default function SharedSplitRooms() {
               />
             </label>
             <label>
-              <span>Amount</span>
+              <span>Amount ({activeCurrency.symbol} {appCurrency})</span>
               <input
                 type="number"
                 min="0"
@@ -1796,109 +1831,6 @@ export default function SharedSplitRooms() {
         )}
       </section>
 
-      {paymentDialogOpen && selectedRoom && paymentDialogMember && (
-        <div className="split-room-payment-backdrop" role="presentation">
-          <div
-            className="split-room-payment-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="split-room-payment-title"
-          >
-            <div className="split-room-payment-head">
-              <div>
-                <span>My room payments</span>
-                <h2 id="split-room-payment-title">{selectedRoom.name}</h2>
-                <p>{getMemberName(paymentDialogMember)}</p>
-              </div>
-              <button
-                type="button"
-                aria-label="Close payment details"
-                onClick={closeMemberPaymentDialog}
-                disabled={Boolean(payingDueId)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="split-room-payment-stats">
-              <div>
-                <span>Assigned</span>
-                <strong>{formatCurrency(paymentDialogBalance?.amount ?? 0)}</strong>
-              </div>
-              <div>
-                <span>Pending</span>
-                <strong>{formatCurrency(paymentDialogPendingTotal)}</strong>
-              </div>
-              <div>
-                <span>Paid</span>
-                <strong>{formatCurrency(paymentDialogPaidTotal)}</strong>
-              </div>
-            </div>
-
-            <div className="split-room-payment-list">
-              {paymentDialogItems.length === 0 && (
-                <p className="dashboard-muted-text">
-                  No items assigned to you in this room yet.
-                </p>
-              )}
-
-              {paymentDialogItems.map((item) => (
-                <div
-                  className={
-                    item.isCollected
-                      ? "split-room-payment-row paid"
-                      : "split-room-payment-row"
-                  }
-                  key={item.id}
-                >
-                  <ReceiptText size={17} />
-                  <div>
-                    <strong>{item.title}</strong>
-                    <small>
-                      {item.isCollected
-                        ? "Paid / collected"
-                        : "Waiting for payment"}
-                    </small>
-                  </div>
-                  <em>{formatCurrency(item.amount)}</em>
-                  {item.isCollected ? (
-                    <span className="split-room-payment-status">Paid</span>
-                  ) : (
-                    <div className="split-room-payment-action">
-                      <label>
-                        <span>Wallet PIN</span>
-                        <input
-                          type="password"
-                          inputMode="numeric"
-                          pattern="\d{4,6}"
-                          maxLength={6}
-                          placeholder="4-6 digits"
-                          value={walletPinByItemId[item.id] || ""}
-                          disabled={payingDueId === item.id}
-                          onChange={(event) =>
-                            setWalletPinByItemId((prev) => ({
-                              ...prev,
-                              [item.id]: event.target.value.replace(/\D/g, "").slice(0, 6),
-                            }))
-                          }
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handlePayDue(item.id)}
-                        disabled={payingDueId === item.id}
-                      >
-                        {payingDueId === item.id ? "Paying" : "Pay"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
       {historyDialogOpen && selectedRoom && (
         <div className="split-room-history-backdrop" role="presentation">
           <div
@@ -1974,7 +1906,7 @@ export default function SharedSplitRooms() {
                         </label>
 
                         <label>
-                          <span>Amount</span>
+                          <span>Amount ({activeCurrency.symbol} {appCurrency})</span>
                           <input
                             type="number"
                             min="0"
@@ -1985,6 +1917,11 @@ export default function SharedSplitRooms() {
                             }
                             disabled={updatingItemId === item.id}
                           />
+                          {appCurrency !== "INR" && editItemAmount && (
+                            <small className="currency-input-helper">
+                              Saved internally as {formatCurrencyValue(editInputAmountInInr, "INR")}
+                            </small>
+                          )}
                         </label>
 
                         <div className="split-room-history-edit-actions">

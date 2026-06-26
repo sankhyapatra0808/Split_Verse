@@ -141,8 +141,18 @@ function formatPeakDay(month: MonthlySpendMonth) {
   return suppliedDay;
 }
 
+function roundMoney(amount: number) {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
+
 export default function Dashboard() {
-  const { formatCurrency } = useAppSettings();
+  const {
+    appCurrency,
+    convertCurrency,
+    currencies,
+    formatCurrency,
+    formatCurrencyValue,
+  } = useAppSettings();
   const [dashboardSummary, setDashboardSummary] =
     useState<DashboardSummary | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
@@ -154,6 +164,16 @@ export default function Dashboard() {
     category: "Food",
     amount: "",
   });
+  const activeCurrency =
+    currencies.find((currency) => currency.code === appCurrency) ?? currencies[0];
+  const expenseInputAmount = Number(expenseForm.amount);
+  const expenseInputAmountInInr = Number.isFinite(expenseInputAmount)
+    ? roundMoney(convertCurrency(expenseInputAmount, appCurrency, "INR"))
+    : 0;
+
+  function convertSelectedCurrencyInputToInr(amount: number) {
+    return roundMoney(convertCurrency(amount, appCurrency, "INR"));
+  }
 
   async function reloadDashboard({ silent = false } = {}) {
     if (!silent) {
@@ -219,15 +239,27 @@ export default function Dashboard() {
     event.preventDefault();
 
     const title = expenseForm.title.trim();
-    const amount = Number(expenseForm.amount);
+    const amountInSelectedCurrency = Number(expenseForm.amount);
 
     if (!title) {
       setExpenseFormError("Expense title is required.");
       return;
     }
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setExpenseFormError("Amount must be greater than 0.");
+    if (
+      !Number.isFinite(amountInSelectedCurrency) ||
+      amountInSelectedCurrency <= 0
+    ) {
+      setExpenseFormError(`Amount must be greater than 0 ${appCurrency}.`);
+      return;
+    }
+
+    const amountInInr = convertSelectedCurrencyInputToInr(
+      amountInSelectedCurrency,
+    );
+
+    if (!Number.isFinite(amountInInr) || amountInInr <= 0) {
+      setExpenseFormError("Could not convert this amount to INR. Try again.");
       return;
     }
 
@@ -241,10 +273,10 @@ export default function Dashboard() {
         await createExpense({
           title,
           category: expenseForm.category,
-          amount,
+          amount: amountInInr,
         });
 
-        applyInstantExpenseToDashboard(amount);
+        applyInstantExpenseToDashboard(amountInInr);
         setExpenseForm({
           title: "",
           category: "Food",
@@ -441,9 +473,11 @@ export default function Dashboard() {
             </label>
 
             <label>
-              <span>Amount</span>
+              <span>Amount ({appCurrency})</span>
               <span className="expense-amount-field">
-                <IndianRupee size={16} aria-hidden="true" />
+                <span className="expense-currency-symbol" aria-hidden="true">
+                  {activeCurrency.symbol}
+                </span>
                 <input
                   type="number"
                   min="1"
