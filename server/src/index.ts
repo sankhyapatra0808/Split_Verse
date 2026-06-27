@@ -50,23 +50,19 @@ app.use(
   }),
 );
 
-const corsOptions = {
-  origin: [
-    "http://localhost:5173",
-    "https://split-verse.vercel.app",
-  ],
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
-};
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
 
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
-
-// routes should come AFTER cors
-app.get("/api/exchange-rates", async (req, res) => {
-  res.json({ message: "exchange route working" });
-});
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  }),
+);
 
 const apiLimiter = rateLimit({
   windowMs: Number(process.env.API_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
@@ -366,7 +362,6 @@ app.post("/api/setup/performance-indexes", protectSetupRoutes, async (_req, res)
 
 ensurePerformanceIndexesInBackground();
 
-app.use(cors());
 app.use("/api/exchange-rates", exchangeRatesRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
