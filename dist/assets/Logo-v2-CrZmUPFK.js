@@ -1,0 +1,1 @@
+var e=`/assets/Logo-v2-BtYvasot.png`;export{e as t};

@@ -8,7 +8,6 @@ pnpm-debug.log*
 lerna-debug.log*
 
 
-dist
 dist-ssr
 *.local
 
@@ -16,7 +15,6 @@ node_modules
 .env
 .env.example
 server/node_modules
-server/dist
 server/.env
 server/.env.example
 
