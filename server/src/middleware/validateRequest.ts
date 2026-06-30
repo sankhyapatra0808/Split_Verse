@@ -72,6 +72,14 @@ export function moneyAmountSchema(max = 1_000_000) {
     .transform((value) => Math.round((value + Number.EPSILON) * 100) / 100);
 }
 
+function hasControlCharacter(value: string) {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+
+    return code <= 31 || code === 127;
+  });
+}
+
 export const uuidParamSchema = z
   .string()
   .trim()
@@ -83,6 +91,6 @@ export const safeTextSchema = (label: string, max = 120) =>
     .trim()
     .min(1, `${label} is required`)
     .max(max, `${label} is too long`)
-    .refine((value) => !/[\u0000-\u001F\u007F]/.test(value), {
+    .refine((value) => !hasControlCharacter(value), {
       message: `${label} contains invalid characters`,
     });

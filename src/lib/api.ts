@@ -372,6 +372,8 @@ export type SplitRoomItem = {
   assigned_member_id: string;
   title: string;
   amount: number;
+  settledAmount?: number;
+  pendingAmount?: number;
   collected_at: string | null;
   expense_id: string | null;
   isCollected: boolean;
@@ -425,10 +427,75 @@ export type PendingDue = {
   createdAt: string;
 };
 
+export type NetSettlementBreakdown = {
+  itemId: string;
+  roomId: string;
+  roomName: string;
+  title: string;
+  direction: string;
+  amount: number;
+  originalAmount: number;
+  settledAmount: number;
+  createdAt: string;
+};
+
+export type NetSettlement = {
+  fromUserId: string;
+  fromName: string | null;
+  fromEmail: string;
+  toUserId: string;
+  toName: string | null;
+  toEmail: string;
+  amount: number;
+  currency: "INR";
+  isOutgoing: boolean;
+  isIncoming: boolean;
+  breakdown: NetSettlementBreakdown[];
+};
+
+export type NetSettlementsResponse = {
+  settlements: NetSettlement[];
+  summary: {
+    outgoingTotal: number;
+    incomingTotal: number;
+    netPosition: number;
+    currency: "INR";
+  };
+};
+
 export async function getPendingDues() {
   return cachedApiRequest("dues:pending", 8_000, () =>
     apiFetch<{ dues: PendingDue[] }>("/api/split-rooms/pending-dues"),
   );
+}
+
+export async function getNetSettlements() {
+  return cachedApiRequest("dues:net-settlements", 8_000, () =>
+    apiFetch<NetSettlementsResponse>("/api/split-rooms/net-settlements"),
+  );
+}
+
+export async function payNetSettlement(payload: {
+  toUserId: string;
+  walletPin: string;
+}) {
+  const response = await apiFetch<{
+    message: string;
+    settlement: {
+      fromUserId: string;
+      toUserId: string;
+      amount: number;
+      currency: "INR";
+      offsetAmount: number;
+      expenseId: string;
+    };
+  }>("/api/split-rooms/net-settlements/pay", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  clearApiCache("dues");
+  return response;
 }
 
 export async function paySplitRoomDue(
@@ -595,6 +662,61 @@ export async function apiFetch<T>(
   }
 
   return data;
+}
+
+export type PublicPageContent = {
+  sections?: {
+    heading: string;
+    body: string;
+    bullets?: string[];
+  }[];
+  highlights?: { label: string; value: string }[];
+  actions?: { label: string; href: string }[];
+  contactChannels?: { label: string; value: string; href?: string }[];
+};
+
+export type PublicPage = {
+  slug: string;
+  title: string;
+  eyebrow: string | null;
+  summary: string | null;
+  content: PublicPageContent;
+  updatedAt: string;
+};
+
+export async function getPublicPage(slug: string) {
+  return publicApiFetch<{ page: PublicPage }>(`/api/public-pages/${slug}`);
+}
+
+export async function sendContactMessage(payload: {
+  name: string;
+  email: string;
+  subject?: string;
+  message: string;
+}) {
+  return publicApiFetch<{ message: string; request: { id: string; createdAt: string } }>(
+    "/api/public-pages/contact/messages",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function createSupportTicket(payload: {
+  name: string;
+  email: string;
+  subject: string;
+  category?: string;
+  message: string;
+}) {
+  return publicApiFetch<{ message: string; ticket: { id: string; createdAt: string } }>(
+    "/api/public-pages/support/tickets",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function getDashboardSummary() {

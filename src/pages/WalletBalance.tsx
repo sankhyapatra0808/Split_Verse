@@ -306,14 +306,17 @@ export default function WalletBalance() {
                 const personName = isIncoming
                   ? settlement.fromName || settlement.fromEmail
                   : settlement.toName || settlement.toEmail;
+                const settlementLabel = isIncoming
+                  ? `${personName} - pays you`
+                  : `You - pay ${personName}`;
 
                 return (
                   <div className="transaction-row" key={settlement.id}>
                     <div>
-                      <strong>
-                        {isIncoming ? "You will receive" : "You need to pay"}
-                      </strong>
-                      <span>{personName}</span>
+                      <strong>{settlementLabel}</strong>
+                      <span>
+                        {isIncoming ? "Incoming settlement" : "Outgoing settlement"}
+                      </span>
                     </div>
 
                     <em>

@@ -21,12 +21,15 @@ import {
   deleteSplitRoom,
   deleteSplitRoomItem,
   getFriendsSummary,
+  getNetSettlements,
   getPendingDues,
   getSplitRooms,
+  payNetSettlement,
   paySplitRoomDue,
   removeSplitRoomMember,
   updateSplitRoomItem,
   type Friend,
+  type NetSettlement,
   type PendingDue,
   type SplitRoom,
 } from "../lib/api";
@@ -186,6 +189,15 @@ export default function SharedSplitRooms() {
   const [deletingRoomId, setDeletingRoomId] = useState("");
   const [collectingMemberId, setCollectingMemberId] = useState("");
   const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
+  const [netSettlements, setNetSettlements] = useState<NetSettlement[]>([]);
+  const [netSettlementPinDialogOpen, setNetSettlementPinDialogOpen] = useState(false);
+  const [netSettlementTargetUserId, setNetSettlementTargetUserId] = useState("");
+  const [netSettlementWalletPin, setNetSettlementWalletPin] = useState("");
+  const [netSettlementDialogError, setNetSettlementDialogError] = useState("");
+  const [payingNetSettlementUserId, setPayingNetSettlementUserId] = useState("");
+  const [netSettlementInfoDialog, setNetSettlementInfoDialog] = useState<
+    "payable" | "receivable" | null
+  >(null);
   const [payingDueId, setPayingDueId] = useState("");
   const [paymentDueId, setPaymentDueId] = useState("");
   const [paymentWalletPin, setPaymentWalletPin] = useState("");
@@ -254,6 +266,54 @@ export default function SharedSplitRooms() {
     () => pendingDues.find((due) => due.id === paymentDueId) ?? null,
     [paymentDueId, pendingDues],
   );
+
+  const outgoingNetSettlements = useMemo(
+    () => netSettlements.filter((settlement) => settlement.isOutgoing),
+    [netSettlements],
+  );
+  const incomingNetSettlements = useMemo(
+    () => netSettlements.filter((settlement) => settlement.isIncoming),
+    [netSettlements],
+  );
+  const netSettlementTarget = useMemo(
+    () =>
+      netSettlements.find(
+        (settlement) =>
+          settlement.isOutgoing && settlement.toUserId === netSettlementTargetUserId,
+      ) ?? null,
+    [netSettlementTargetUserId, netSettlements],
+  );
+  const netSettlementOutgoingTotal = useMemo(
+    () =>
+      outgoingNetSettlements.reduce(
+        (sum, settlement) => sum + Number(settlement.amount || 0),
+        0,
+      ),
+    [outgoingNetSettlements],
+  );
+  const netSettlementIncomingTotal = useMemo(
+    () =>
+      incomingNetSettlements.reduce(
+        (sum, settlement) => sum + Number(settlement.amount || 0),
+        0,
+      ),
+    [incomingNetSettlements],
+  );
+  const visibleNetSettlements = useMemo(
+    () =>
+      netSettlementInfoDialog === "payable"
+        ? outgoingNetSettlements
+        : netSettlementInfoDialog === "receivable"
+          ? incomingNetSettlements
+          : [],
+    [incomingNetSettlements, netSettlementInfoDialog, outgoingNetSettlements],
+  );
+  const visibleNetSettlementTotal =
+    netSettlementInfoDialog === "payable"
+      ? netSettlementOutgoingTotal
+      : netSettlementInfoDialog === "receivable"
+        ? netSettlementIncomingTotal
+        : 0;
   const paymentRoom = useMemo(
     () =>
       paymentDue
@@ -337,7 +397,10 @@ export default function SharedSplitRooms() {
     );
   }, [friends, trimmedFriendSearch]);
   const itemPlaceholder = getItemPlaceholder(selectedRoom?.category);
-  const selectedRoomItems = selectedRoom?.items ?? [];
+  const selectedRoomItems = useMemo(
+    () => selectedRoom?.items ?? [],
+    [selectedRoom],
+  );
   const removableMemberCount = useMemo(
     () =>
       selectedRoom
@@ -358,9 +421,10 @@ export default function SharedSplitRooms() {
   );
 
   const reloadSplitRoomData = async (preferredRoomId?: string) => {
-    const [roomData, duesData] = await Promise.all([
+    const [roomData, duesData, netData] = await Promise.all([
       getSplitRooms(),
       getPendingDues(),
+      getNetSettlements(),
     ]);
 
     setRooms(roomData.rooms);
@@ -378,6 +442,7 @@ export default function SharedSplitRooms() {
         : roomData.rooms[0]?.id || "",
     );
     setPendingDues(duesData.dues);
+    setNetSettlements(netData.settlements);
   };
 
   function emitSplitVerseUpdates({ pendingDuesChanged = true } = {}) {
@@ -407,10 +472,11 @@ export default function SharedSplitRooms() {
       try {
         setLoading(true);
         setError("");
-        const [roomData, friendsData, duesData] = await Promise.all([
+        const [roomData, friendsData, duesData, netData] = await Promise.all([
           getSplitRooms(),
           getFriendsSummary(),
           getPendingDues(),
+          getNetSettlements(),
         ]);
 
         if (!active) {
@@ -427,6 +493,7 @@ export default function SharedSplitRooms() {
         );
         setFriends(friendsData.friends);
         setPendingDues(duesData.dues);
+        setNetSettlements(netData.settlements);
       } catch (loadError) {
         if (active) {
           setError(
@@ -1434,6 +1501,7 @@ export default function SharedSplitRooms() {
 
     const previousRooms = rooms;
     const previousPendingDues = pendingDues;
+    const previousNetSettlements = netSettlements;
 
     try {
       setPayingDueId(paymentMode === "all" ? "all" : firstPaymentTargetDue.id);
@@ -1459,6 +1527,7 @@ export default function SharedSplitRooms() {
     } catch (payError) {
       setRooms(previousRooms);
       setPendingDues(previousPendingDues);
+      setNetSettlements(previousNetSettlements);
       setPaymentDialogError(
         `${
           payError instanceof Error
@@ -1472,212 +1541,276 @@ export default function SharedSplitRooms() {
     }
   };
 
+
+  function openNetSettlementPinDialog(settlement: NetSettlement) {
+    setMessage("");
+    setError("");
+    setNetSettlementDialogError("");
+    setNetSettlementWalletPin("");
+    setNetSettlementTargetUserId(settlement.toUserId);
+    setNetSettlementPinDialogOpen(true);
+  }
+
+  function closeNetSettlementPinDialog() {
+    if (payingNetSettlementUserId) {
+      return;
+    }
+
+    setNetSettlementPinDialogOpen(false);
+    setNetSettlementTargetUserId("");
+    setNetSettlementWalletPin("");
+    setNetSettlementDialogError("");
+  }
+
+  async function handleConfirmNetSettlementPayment(event: FormEvent) {
+    event.preventDefault();
+    setMessage("");
+    setError("");
+    setNetSettlementDialogError("");
+
+    if (!netSettlementTarget) {
+      setNetSettlementDialogError("Choose an adjusted settlement first.");
+      return;
+    }
+
+    const walletPin = netSettlementWalletPin.trim();
+
+    if (!/^\d{4,6}$/.test(walletPin)) {
+      setNetSettlementDialogError("Enter your 4 to 6 digit wallet PIN.");
+      return;
+    }
+
+    const previousRooms = rooms;
+    const previousPendingDues = pendingDues;
+    const previousNetSettlements = netSettlements;
+
+    try {
+      setPayingNetSettlementUserId(netSettlementTarget.toUserId);
+      setMessage("Processing adjusted settlement...");
+
+      await withTopProgress(async () => {
+        const response = await payNetSettlement({
+          toUserId: netSettlementTarget.toUserId,
+          walletPin,
+        });
+
+        setMessage(
+          `${response.message}. ${formatCurrency(
+            response.settlement.offsetAmount,
+          )} was adjusted automatically.`,
+        );
+        setNetSettlementPinDialogOpen(false);
+        setNetSettlementTargetUserId("");
+        setNetSettlementWalletPin("");
+        refreshSplitRoomDataInBackground(selectedRoomId);
+      });
+    } catch (settlementError) {
+      setRooms(previousRooms);
+      setPendingDues(previousPendingDues);
+      setNetSettlements(previousNetSettlements);
+      setNetSettlementDialogError(
+        settlementError instanceof Error
+          ? settlementError.message
+          : "Failed to pay adjusted settlement",
+      );
+      setMessage("");
+    } finally {
+      setPayingNetSettlementUserId("");
+    }
+  }
+
   return (
     <DashboardLayout eyebrow="Shared rooms">
       <section className="dashboard-page-grid split-rooms-grid">
-        <article className="bento-card page-hero-card dark">
-          <div className="bento-card-head">
-            <div>
-              <span>Split among friends</span>
-              <h2>Shared Split Rooms</h2>
+          <article className="bento-card room-form-card">
+            <div className="bento-card-head">
+              <div>
+                <span>Create room</span>
+                <h2>Start a new split</h2>
+              </div>
+              <Plus size={23} />
             </div>
-            <UsersRound size={24} />
-          </div>
-          <p>
-            Create focused rooms for trips, meals, subscriptions, and flatmate
-            expenses. New rooms and receipt items are saved to your account.
-          </p>
-        </article>
 
-        <article className="bento-card room-form-card">
-          <div className="bento-card-head">
-            <div>
-              <span>Create room</span>
-              <h2>Start a new split</h2>
-            </div>
-            <Plus size={23} />
-          </div>
+            <form className="dashboard-form" onSubmit={handleCreateRoom}>
+              <label>
+                <span>Room name</span>
+                <input
+                  type="text"
+                  placeholder="Weekend dinner"
+                  value={roomName}
+                  onChange={(event) => setRoomName(event.target.value)}
+                  disabled={savingRoom}
+                />
+              </label>
+              <label className="friend-picker-label">
+                <span>Friends</span>
 
-          <form className="dashboard-form" onSubmit={handleCreateRoom}>
-            <label>
-              <span>Room name</span>
-              <input
-                type="text"
-                placeholder="Weekend dinner"
-                value={roomName}
-                onChange={(event) => setRoomName(event.target.value)}
+                {friends.length === 0 ? (
+                  <p
+                    className="dashboard-muted-text split-room-friends-skeleton"
+                    aria-label="No friends yet. Add friends first from the Friends page."
+                  >
+                    <LoadingSkeleton wide />
+                  </p>
+                ) : (
+                  <div className="friend-dropdown" ref={friendDropdownRef}>
+                    <button
+                      className="friend-dropdown-trigger"
+                      type="button"
+                      onClick={() => setFriendPickerOpen((open) => !open)}
+                      disabled={savingRoom}
+                      aria-expanded={friendPickerOpen}
+                    >
+                      <span>
+                        {selectedFriendEmails.length > 0
+                          ? selectedFriendNames
+                          : "Choose friends"}
+                      </span>
+                      <ChevronDown size={17} />
+                    </button>
+
+                    {friendPickerOpen && (
+                      <div className="friend-dropdown-menu">
+                        <label className="friend-picker-search">
+                          <span>Search friends</span>
+                          <input
+                            type="search"
+                            placeholder="Search by name or email"
+                            value={friendSearch}
+                            onChange={(event) =>
+                              setFriendSearch(event.target.value)
+                            }
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                        </label>
+
+                        {filteredFriends.length === 0 && (
+                          <p className="friend-picker-empty">
+                            You are not friends with {trimmedFriendSearch}.
+                          </p>
+                        )}
+
+                        {filteredFriends.map((friend) => {
+                          const checked = selectedFriendEmails.includes(
+                            friend.email,
+                          );
+
+                          return (
+                            <button
+                              type="button"
+                              className={
+                                checked
+                                  ? "friend-picker-chip active"
+                                  : "friend-picker-chip"
+                              }
+                              key={friend.id}
+                              onClick={() => toggleSelectedFriend(friend.email)}
+                              disabled={savingRoom}
+                            >
+                              {renderFriendMiniAvatar(friend)}
+
+                              <strong>
+                                {friend.name || friend.email.split("@")[0]}
+                                <small>
+                                  {formatFriendshipAge(friend.friendship_days)}
+                                </small>
+                              </strong>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </label>
+              <label>
+                <span>Category</span>
+                <Dropdown
+                  ariaLabel="Room category"
+                  value={roomCategory}
+                  options={categoryOptions}
+                  onChange={setRoomCategory}
+                  disabled={savingRoom}
+                />
+              </label>
+              <button
+                className="dashboard-primary-button"
+                type="submit"
                 disabled={savingRoom}
-              />
-            </label>
-            <label className="friend-picker-label">
-              <span>Friends</span>
+              >
+                {savingRoom ? "Creating room" : "Create room"}
+              </button>
+            </form>
+          </article>
 
-              {friends.length === 0 ? (
-                <p
-                  className="dashboard-muted-text split-room-friends-skeleton"
-                  aria-label="No friends yet. Add friends first from the Friends page."
-                >
+          <article className="bento-card room-list-card">
+            <div className="bento-card-head">
+              <div>
+                <span>Rooms</span>
+                <h2>Active rooms</h2>
+              </div>
+              <CalendarDays size={23} />
+            </div>
+
+            <div className="room-card-list compact">
+              {loading && (
+                <p className="dashboard-muted-text">
                   <LoadingSkeleton wide />
                 </p>
-              ) : (
-                <div className="friend-dropdown" ref={friendDropdownRef}>
-                  <button
-                    className="friend-dropdown-trigger"
-                    type="button"
-                    onClick={() => setFriendPickerOpen((open) => !open)}
-                    disabled={savingRoom}
-                    aria-expanded={friendPickerOpen}
-                  >
-                    <span>
-                      {selectedFriendEmails.length > 0
-                        ? selectedFriendNames
-                        : "Choose friends"}
-                    </span>
-                    <ChevronDown size={17} />
-                  </button>
-
-                  {friendPickerOpen && (
-                    <div className="friend-dropdown-menu">
-                      <label className="friend-picker-search">
-                        <span>Search friends</span>
-                        <input
-                          type="search"
-                          placeholder="Search by name or email"
-                          value={friendSearch}
-                          onChange={(event) =>
-                            setFriendSearch(event.target.value)
-                          }
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      </label>
-
-                      {filteredFriends.length === 0 && (
-                        <p className="friend-picker-empty">
-                          You are not friends with {trimmedFriendSearch}.
-                        </p>
-                      )}
-
-                      {filteredFriends.map((friend) => {
-                        const checked = selectedFriendEmails.includes(
-                          friend.email,
-                        );
-
-                        return (
-                          <button
-                            type="button"
-                            className={
-                              checked
-                                ? "friend-picker-chip active"
-                                : "friend-picker-chip"
-                            }
-                            key={friend.id}
-                            onClick={() => toggleSelectedFriend(friend.email)}
-                            disabled={savingRoom}
-                          >
-                            {renderFriendMiniAvatar(friend)}
-
-                            <strong>
-                              {friend.name || friend.email.split("@")[0]}
-                              <small>
-                                {formatFriendshipAge(friend.friendship_days)}
-                              </small>
-                            </strong>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
               )}
-            </label>
-            <label>
-              <span>Category</span>
-              <Dropdown
-                ariaLabel="Room category"
-                value={roomCategory}
-                options={categoryOptions}
-                onChange={setRoomCategory}
-                disabled={savingRoom}
-              />
-            </label>
-            <button
-              className="dashboard-primary-button"
-              type="submit"
-              disabled={savingRoom}
-            >
-              {savingRoom ? "Creating room" : "Create room"}
-            </button>
-          </form>
-        </article>
-
-        <article className="bento-card room-list-card">
-          <div className="bento-card-head">
-            <div>
-              <span>Rooms</span>
-              <h2>Active rooms</h2>
+              {!loading && rooms.length === 0 && (
+                <p className="dashboard-muted-text">
+                  Create your first split room.
+                </p>
+              )}
+              {rooms.map((room) => (
+                <div
+                  className={
+                    selectedRoom?.id === room.id
+                      ? "room-row room-row-live active"
+                      : "room-row room-row-live"
+                  }
+                  key={room.id}
+                >
+                  <button
+                    className="room-select-button"
+                    type="button"
+                    onClick={() => setSelectedRoomId(room.id)}
+                  >
+                    <div>
+                      <strong>{room.name}</strong>
+                      <span>
+                        {room.memberCount} members
+                        {room.isOwner ? " - Owner" : ""}
+                      </span>
+                    </div>
+                    <em>{formatCurrency(room.outstandingAmount)}{" "}due</em>
+                  </button>
+                  <span className="status-pill">{room.status}</span>
+                  <button
+                    className="room-delete-button"
+                    type="button"
+                    aria-label={`Delete ${room.name}`}
+                    title={
+                      !room.isOwner
+                        ? "Only the room owner can delete this room"
+                        : room.outstandingAmount > 0
+                          ? "All member payments must be done before deleting this room"
+                          : "Delete room"
+                    }
+                    onClick={() => handleDeleteRoom(room)}
+                    disabled={
+                      !room.isOwner ||
+                      room.outstandingAmount > 0 ||
+                      deletingRoomId === room.id
+                    }
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
             </div>
-            <CalendarDays size={23} />
-          </div>
-
-          <div className="room-card-list compact">
-            {loading && (
-              <p className="dashboard-muted-text">
-                <LoadingSkeleton wide />
-              </p>
-            )}
-            {!loading && rooms.length === 0 && (
-              <p className="dashboard-muted-text">
-                Create your first split room.
-              </p>
-            )}
-            {rooms.map((room) => (
-              <div
-                className={
-                  selectedRoom?.id === room.id
-                    ? "room-row room-row-live active"
-                    : "room-row room-row-live"
-                }
-                key={room.id}
-              >
-                <button
-                  className="room-select-button"
-                  type="button"
-                  onClick={() => setSelectedRoomId(room.id)}
-                >
-                  <div>
-                    <strong>{room.name}</strong>
-                    <span>
-                      {room.memberCount} members
-                      {room.isOwner ? " - Owner" : ""}
-                    </span>
-                  </div>
-                  <em>{formatCurrency(room.outstandingAmount)}{" "}due</em>
-                </button>
-                <span className="status-pill">{room.status}</span>
-                <button
-                  className="room-delete-button"
-                  type="button"
-                  aria-label={`Delete ${room.name}`}
-                  title={
-                    !room.isOwner
-                      ? "Only the room owner can delete this room"
-                      : room.outstandingAmount > 0
-                        ? "All member payments must be done before deleting this room"
-                        : "Delete room"
-                  }
-                  onClick={() => handleDeleteRoom(room)}
-                  disabled={
-                    !room.isOwner ||
-                    room.outstandingAmount > 0 ||
-                    deletingRoomId === room.id
-                  }
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </article>
+          </article>
 
         <article className="bento-card member-balance-card">
           <div className="bento-card-head">
@@ -1924,6 +2057,44 @@ export default function SharedSplitRooms() {
           </div>
         </article>
 
+        <article className="bento-card net-settlement-card">
+          <div className="net-settlement-panel">
+            <div className="bento-card-head">
+              <div>
+                <span>Adjusted settlements</span>
+                <h2>Final payable after adjustment</h2>
+              </div>
+              <WalletCards size={23} />
+            </div>
+
+            <p className="dashboard-muted-text net-settlement-note">
+              SplitVerse cancels opposite dues between the same friends first, then
+              shows only the final amount that actually needs to move.
+            </p>
+
+            <div className="net-settlement-summary">
+              <button
+                className="net-settlement-metric payable"
+                type="button"
+                onClick={() => setNetSettlementInfoDialog("payable")}
+              >
+                <span>Payable</span>
+                <strong>{formatCurrency(netSettlementOutgoingTotal)}</strong>
+                <em>You pay after offsets</em>
+              </button>
+              <button
+                className="net-settlement-metric receivable"
+                type="button"
+                onClick={() => setNetSettlementInfoDialog("receivable")}
+              >
+                <span>Receivable</span>
+                <strong>{formatCurrency(netSettlementIncomingTotal)}</strong>
+                <em>You receive after offsets</em>
+              </button>
+            </div>
+          </div>
+        </article>
+
         {(message || error) && (
           <article
             className={
@@ -1934,6 +2105,258 @@ export default function SharedSplitRooms() {
           </article>
         )}
       </section>
+
+      {netSettlementInfoDialog && (
+        <div className="split-room-payment-backdrop" role="presentation">
+          <div
+            className="split-room-payment-dialog net-settlement-info-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="net-settlement-info-title"
+          >
+            <div className="split-room-payment-head">
+              <div>
+                <span>Adjusted settlements</span>
+                <h2 id="net-settlement-info-title">
+                  {netSettlementInfoDialog === "payable"
+                    ? "Payable details"
+                    : "Receivable details"}
+                </h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close adjusted settlement details"
+                onClick={() => setNetSettlementInfoDialog(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="split-room-payment-summary net-settlement-info-summary">
+              <div>
+                <span>Final amount</span>
+                <strong>{formatCurrency(visibleNetSettlementTotal)}</strong>
+                <small>After opposite dues are adjusted</small>
+              </div>
+              <div>
+                <span>Direction</span>
+                <strong>
+                  {netSettlementInfoDialog === "payable"
+                    ? "You pay"
+                    : "You receive"}
+                </strong>
+                <small>Calculated across shared split rooms</small>
+              </div>
+              <div>
+                <span>People</span>
+                <strong>{visibleNetSettlements.length}</strong>
+                <small>
+                  {visibleNetSettlements.length === 1
+                    ? "Adjusted settlement"
+                    : "Adjusted settlements"}
+                </small>
+              </div>
+            </div>
+
+            <div className="split-room-payment-method net-settlement-info-note">
+              <WalletCards size={20} />
+              <div>
+                <strong>Final payable after adjustment</strong>
+                <small>
+                  SplitVerse cancels opposite dues between the same friends first,
+                  then shows only the final amount that actually needs to move.
+                </small>
+              </div>
+            </div>
+
+            <div className="net-settlement-list net-settlement-detail-list">
+              {loading && (
+                <p className="dashboard-muted-text net-settlement-empty">
+                  <LoadingSkeleton wide />
+                </p>
+              )}
+
+              {!loading && visibleNetSettlements.length === 0 && (
+                <p className="dashboard-muted-text net-settlement-empty">
+                  No {netSettlementInfoDialog} adjusted settlements yet.
+                </p>
+              )}
+
+              {visibleNetSettlements.map((settlement) => {
+                const fromLabel = settlement.isOutgoing
+                  ? "You"
+                  : settlement.fromName || settlement.fromEmail;
+                const toLabel = settlement.isIncoming
+                  ? "you"
+                  : settlement.toName || settlement.toEmail;
+                const counterparty = settlement.isOutgoing
+                  ? settlement.toName || settlement.toEmail
+                  : settlement.fromName || settlement.fromEmail;
+                const directionLabel = settlement.isOutgoing
+                  ? "Payable"
+                  : "Receivable";
+                const directionClass = settlement.isOutgoing
+                  ? "payable"
+                  : "receivable";
+                const settlementTitle = settlement.isOutgoing
+                  ? `You - pay ${toLabel}`
+                  : `${fromLabel} - pays you`;
+
+                return (
+                  <div
+                    className={[
+                      "net-settlement-row",
+                      settlement.isOutgoing ? "outgoing" : "incoming",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={`${settlement.fromUserId}-${settlement.toUserId}`}
+                  >
+                    <div className="net-settlement-row-main">
+                      <span
+                        className={`net-settlement-direction-pill ${directionClass}`}
+                      >
+                        {directionLabel}
+                      </span>
+                      <strong>{settlementTitle}</strong>
+                      <span>
+                        {settlement.breakdown.length} room item
+                        {settlement.breakdown.length === 1 ? "" : "s"} adjusted
+                        with {counterparty}
+                      </span>
+                      <ul>
+                        {settlement.breakdown.map((line) => (
+                          <li key={`${line.itemId}-${line.direction}`}>
+                            <span>{line.direction}</span>
+                            <em>
+                              {`${line.roomName} - ${line.title} - ${formatCurrency(line.amount)}`}
+                            </em>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <aside className="net-settlement-amount-panel">
+                      <span>Final amount</span>
+                      <strong>{formatCurrency(settlement.amount)}</strong>
+                      {settlement.isOutgoing ? (
+                        <button
+                          className="dashboard-primary-button"
+                          type="button"
+                          onClick={() => {
+                            setNetSettlementInfoDialog(null);
+                            openNetSettlementPinDialog(settlement);
+                          }}
+                          disabled={
+                            payingNetSettlementUserId === settlement.toUserId
+                          }
+                        >
+                          {payingNetSettlementUserId === settlement.toUserId
+                            ? "Paying"
+                            : "Pay net"}
+                        </button>
+                      ) : (
+                        <span className="status-pill">Receivable</span>
+                      )}
+                    </aside>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="split-room-payment-actions">
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                onClick={() => setNetSettlementInfoDialog(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {netSettlementPinDialogOpen && netSettlementTarget && (
+        <div className="split-room-payment-pin-backdrop" role="presentation">
+          <form
+            className="split-room-payment-pin-dialog net-settlement-pin-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="net-settlement-payment-title"
+            onSubmit={handleConfirmNetSettlementPayment}
+          >
+            <div className="split-room-payment-head">
+              <div>
+                <span>Adjusted wallet payment</span>
+                <h2 id="net-settlement-payment-title">Pay final net amount</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close adjusted settlement payment"
+                onClick={closeNetSettlementPinDialog}
+                disabled={Boolean(payingNetSettlementUserId)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="split-room-payment-pin-summary">
+              <span>
+                To {netSettlementTarget.toName || netSettlementTarget.toEmail}
+              </span>
+              <strong>{formatCurrency(netSettlementTarget.amount)}</strong>
+              <small>
+                Opposite dues are adjusted first. Only this final amount will be
+                paid from your wallet.
+              </small>
+            </div>
+
+            <label className="settings-field split-room-payment-pin-field">
+              <span>Wallet PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="\d{4,6}"
+                maxLength={6}
+                placeholder="Enter 4 to 6 digit PIN"
+                value={netSettlementWalletPin}
+                disabled={Boolean(payingNetSettlementUserId)}
+                onChange={(event) =>
+                  setNetSettlementWalletPin(
+                    event.target.value.replace(/\D/g, "").slice(0, 6),
+                  )
+                }
+              />
+            </label>
+
+            {netSettlementDialogError && (
+              <p className="split-room-payment-error">
+                {netSettlementDialogError}
+              </p>
+            )}
+
+            <div className="split-room-payment-actions">
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                onClick={closeNetSettlementPinDialog}
+                disabled={Boolean(payingNetSettlementUserId)}
+              >
+                Cancel
+              </button>
+              <button
+                className="dashboard-primary-button"
+                type="submit"
+                disabled={Boolean(payingNetSettlementUserId)}
+              >
+                {payingNetSettlementUserId
+                  ? "Paying"
+                  : `Pay ${formatCurrency(netSettlementTarget.amount)}`}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {paymentDue && paymentRoom && (
         <div className="split-room-payment-backdrop" role="presentation">
@@ -1976,7 +2399,7 @@ export default function SharedSplitRooms() {
               <div>
                 <span>Your due</span>
                 <strong>{formatCurrency(paymentDue.amount)}</strong>
-                <small>For {" "}{paymentDue.title}</small>
+                <small>{`For ${paymentDue.title}`}</small>
               </div>
             </div>
 
@@ -1984,7 +2407,9 @@ export default function SharedSplitRooms() {
               <WalletCards size={20} />
               <div>
                 <strong>Pay from SplitVerse Wallet</strong>
-                <small>{" "}Select one item or use Pay All for every pending due in this room.</small>
+                <small>
+                  Select one item or use Pay All for every pending due in this room.
+                </small>
               </div>
             </div>
 
@@ -1994,7 +2419,7 @@ export default function SharedSplitRooms() {
                 <div>
                   <span>Member details</span>
                   <small>
-                    {" "}Total items assigned to you: {" "} {formatCurrency(paymentMemberTotal)}
+                    {`Total items assigned to you: ${formatCurrency(paymentMemberTotal)}`}
                   </small>
                 </div>
               </div>
@@ -2065,7 +2490,7 @@ export default function SharedSplitRooms() {
 
             {paymentPendingItems.length > 1 && (
               <p className="split-room-payment-note">
-                You have {" "}{paymentPendingItems.length}{" "} pending items in this room.
+                {`You have ${paymentPendingItems.length} pending items in this room.`}
                 Use Pay All to clear every pending item in this room.
               </p>
             )}
@@ -2097,7 +2522,7 @@ export default function SharedSplitRooms() {
                 onClick={() => openPaymentPinDialog("single")}
                 disabled={Boolean(payingDueId)}
               >
-                Pay {" "}{formatCurrency(paymentDue.amount)}
+                {`Pay ${formatCurrency(paymentDue.amount)}`}
               </button>
             </div>
           </div>
@@ -2320,8 +2745,9 @@ export default function SharedSplitRooms() {
                         <div className="room-item-meta">
                           <span>{item.title}</span>
                           <strong>
-                            Assigned to{" "}
-                            {getRoomItemMemberName(item.assigned_member_id)}
+                            {`Assigned to ${getRoomItemMemberName(
+                              item.assigned_member_id,
+                            )}`}
                           </strong>
                         </div>
                         <em>{formatCurrency(item.amount)}</em>

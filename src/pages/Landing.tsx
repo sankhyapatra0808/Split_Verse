@@ -18,13 +18,6 @@ import { useAppSettings } from "../context/useAppSettings";
 import iconimage from "../assets/Logo-v2.png";
 import "../styles/Landing.css";
 
-const navLinks = [
-  { label: "Friends", href: "#friends" },
-  { label: "Rooms", href: "#rooms" },
-  { label: "Trips", href: "#workflow" },
-  { label: "Dashboard", href: "#preview" },
-];
-
 const proofPoints = ["Item-wise bills", "Room balances", "Manual settlements"];
 
 const heroStats = [
@@ -109,19 +102,37 @@ const steps = [
 const footerColumns = [
   {
     heading: "Product",
-    links: ["Bill splitting", "Rooms", "Wallet log", "Balances"],
+    links: [
+      { label: "Bill splitting", href: "#features" },
+      { label: "Rooms", href: "#rooms" },
+      { label: "Wallet log", href: "#preview" },
+      { label: "Balances", href: "#preview" },
+    ],
   },
   {
     heading: "Use cases",
-    links: ["Restaurants", "Flatmates", "Trips", "Team lunches"],
+    links: [
+      { label: "Restaurants", href: "#friends" },
+      { label: "Flatmates", href: "#rooms" },
+      { label: "Trips", href: "#workflow" },
+      { label: "Team lunches", href: "#features" },
+    ],
   },
   {
     heading: "Company",
-    links: ["About", "Careers", "News", "Contact"],
+    links: [
+      { label: "About", href: "/about" },
+      { label: "Contact", href: "/contact" },
+    ],
   },
   {
     heading: "Help",
-    links: ["Support", "Privacy", "Terms", "Security"],
+    links: [
+      { label: "Support", href: "/support" },
+      { label: "Privacy", href: "/privacy" },
+      { label: "Terms", href: "/terms" },
+      { label: "Security", href: "/security" },
+    ],
   },
 ];
 
@@ -160,14 +171,6 @@ export default function Landing() {
 
           <span className="brand-text">SplitVerse</span>
         </Link>
-
-        <div className="nav-link-group">
-          {navLinks.map((link) => (
-            <a href={link.href} key={link.label}>
-              {link.label}
-            </a>
-          ))}
-        </div>
 
         <div className="nav-actions">
           <button
@@ -422,11 +425,17 @@ export default function Landing() {
           {footerColumns.map((column) => (
             <div key={column.heading}>
               <h3>{column.heading}</h3>
-              {column.links.map((link) => (
-                <a href="#rooms" key={link}>
-                  {link}
-                </a>
-              ))}
+              {column.links.map((link) =>
+                link.href.startsWith("/") ? (
+                  <Link to={link.href} key={link.label}>
+                    {link.label}
+                  </Link>
+                ) : (
+                  <a href={link.href} key={link.label}>
+                    {link.label}
+                  </a>
+                )
+              )}
             </div>
           ))}
         </div>

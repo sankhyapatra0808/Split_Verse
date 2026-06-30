@@ -18,6 +18,12 @@ const WalletTopUp = lazy(() => import("./pages/WalletTopUp"));
 const TransactionHistory = lazy(() => import("./pages/TransactionHistory"));
 const AppSettings = lazy(() => import("./pages/AppSettings"));
 const Friends = lazy(() => import("./pages/Friends"));
+const AboutCompany = lazy(() => import("./pages/AboutCompany"));
+const Contact = lazy(() => import("./pages/Contact"));
+const Support = lazy(() => import("./pages/Support"));
+const Privacy = lazy(() => import("./pages/Privacy"));
+const Terms = lazy(() => import("./pages/Terms"));
+const Security = lazy(() => import("./pages/Security"));
 
 function publicPage(page: ReactNode) {
   return <Suspense fallback={null}>{page}</Suspense>;
@@ -65,6 +71,12 @@ function App() {
         <Route path="/signup" element={publicPage(<Signup />)} />
         <Route path="/forgot-password" element={publicPage(<ForgotPassword />)} />
         <Route path="/reset-password" element={publicPage(<ResetPassword />)} />
+        <Route path="/about" element={publicPage(<AboutCompany />)} />
+        <Route path="/contact" element={publicPage(<Contact />)} />
+        <Route path="/support" element={publicPage(<Support />)} />
+        <Route path="/privacy" element={publicPage(<Privacy />)} />
+        <Route path="/terms" element={publicPage(<Terms />)} />
+        <Route path="/security" element={publicPage(<Security />)} />
 
         <Route path="/dashboard" element={dashboardPage(<Dashboard />, "dashboard")} />
         <Route path="/split-rooms" element={dashboardPage(<SharedSplitRooms />, "splitRooms")} />

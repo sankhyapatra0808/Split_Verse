@@ -50,50 +50,100 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const dbUserId = userResult.rows[0].id;
     const dbUserEmail = userResult.rows[0].email;
 
-    const pendingSplitDuesResult = await db.query(
+    const adjustedSplitSettlementResult = await db.query(
       `
-      SELECT
-        COALESCE(SUM(split_room_items.amount)::float, 0) AS pending_payment
-      FROM split_room_items
-      JOIN split_room_members
-        ON split_room_members.id = split_room_items.assigned_member_id
-      JOIN split_rooms
-        ON split_rooms.id = split_room_items.room_id
-      WHERE (
-        split_room_members.user_id = $1
-        OR LOWER(COALESCE(split_room_members.email, '')) = LOWER($2)
+      WITH settled AS (
+        SELECT
+          item_id,
+          COALESCE(SUM(amount)::float, 0) AS settled_amount
+        FROM split_room_item_settlements
+        GROUP BY item_id
+      ),
+      debt_lines AS (
+        SELECT
+          GREATEST(
+            item.amount::float - COALESCE(settled.settled_amount, 0),
+            0
+          ) AS pending_amount,
+          debtor_user.id AS debtor_user_id,
+          owner_user.id AS creditor_user_id
+        FROM split_room_items item
+        INNER JOIN split_room_members member
+          ON member.id = item.assigned_member_id
+        INNER JOIN split_rooms room
+          ON room.id = item.room_id
+        INNER JOIN users AS owner_user
+          ON owner_user.id = room.owner_user_id
+        LEFT JOIN users AS member_user
+          ON member_user.id = member.user_id
+        LEFT JOIN users AS email_user
+          ON member.user_id IS NULL
+          AND member.email IS NOT NULL
+          AND LOWER(email_user.email) = LOWER(member.email)
+        INNER JOIN users AS debtor_user
+          ON debtor_user.id = COALESCE(member_user.id, email_user.id)
+        LEFT JOIN settled
+          ON settled.item_id = item.id
+        WHERE item.collected_at IS NULL
+        AND room.owner_user_id <> debtor_user.id
+        AND (
+          room.owner_user_id = $1
+          OR debtor_user.id = $1
+        )
+      ),
+      pair_lines AS (
+        SELECT
+          CASE
+            WHEN debtor_user_id < creditor_user_id THEN debtor_user_id
+            ELSE creditor_user_id
+          END AS user_a,
+          CASE
+            WHEN debtor_user_id < creditor_user_id THEN creditor_user_id
+            ELSE debtor_user_id
+          END AS user_b,
+          CASE
+            WHEN debtor_user_id < creditor_user_id THEN pending_amount
+            ELSE -pending_amount
+          END AS signed_amount
+        FROM debt_lines
+        WHERE pending_amount > 0
+      ),
+      pair_totals AS (
+        SELECT
+          user_a,
+          user_b,
+          SUM(signed_amount)::float AS net_amount
+        FROM pair_lines
+        GROUP BY user_a, user_b
+      ),
+      net_rows AS (
+        SELECT
+          CASE WHEN net_amount > 0 THEN user_a ELSE user_b END AS from_user_id,
+          CASE WHEN net_amount > 0 THEN user_b ELSE user_a END AS to_user_id,
+          ABS(net_amount)::float AS amount
+        FROM pair_totals
+        WHERE ABS(net_amount) >= 0.01
       )
-      AND split_rooms.owner_user_id <> $1
-      AND split_room_items.collected_at IS NULL;
-      `,
-      [dbUserId, dbUserEmail],
-    );
-
-    const receivableSplitDuesResult = await db.query(
-      `
       SELECT
-        COALESCE(SUM(split_room_items.amount)::float, 0) AS receivable
-      FROM split_room_items
-      JOIN split_room_members
-        ON split_room_members.id = split_room_items.assigned_member_id
-      JOIN split_rooms
-        ON split_rooms.id = split_room_items.room_id
-      WHERE split_rooms.owner_user_id = $1
-      AND NOT (
-        split_room_members.user_id = $1
-        OR LOWER(COALESCE(split_room_members.email, '')) = LOWER($2)
-      )
-      AND split_room_items.collected_at IS NULL;
+        COALESCE(
+          SUM(CASE WHEN from_user_id = $1 THEN amount ELSE 0 END),
+          0
+        )::float AS pending_payment,
+        COALESCE(
+          SUM(CASE WHEN to_user_id = $1 THEN amount ELSE 0 END),
+          0
+        )::float AS receivable
+      FROM net_rows;
       `,
-      [dbUserId, dbUserEmail],
+      [dbUserId],
     );
 
     const pendingSplitPayment = Number(
-      pendingSplitDuesResult.rows[0].pending_payment,
+      adjustedSplitSettlementResult.rows[0].pending_payment,
     );
 
     const receivableSplitAmount = Number(
-      receivableSplitDuesResult.rows[0].receivable,
+      adjustedSplitSettlementResult.rows[0].receivable,
     );
 
     const summaryResult = await db.query(

@@ -1,0 +1,279 @@
+.public-info-page {
+  --public-primary: #0052ff;
+  --public-primary-active: #003ecc;
+  --public-ink: #0a0b0d;
+  --public-body: #5b616e;
+  --public-muted: #7c828a;
+  --public-hairline: #dee1e6;
+  --public-hairline-soft: #eef0f3;
+  --public-canvas: #ffffff;
+  --public-surface-soft: #f7f7f7;
+  --public-surface-strong: #eef0f3;
+  --public-surface-dark: #0a0b0d;
+  --public-on-dark: #ffffff;
+  --public-success: #05b169;
+  --public-danger: #cf202f;
+
+  min-height: 100vh;
+  padding: 64px 24px 96px;
+  background: var(--public-canvas);
+  color: var(--public-ink);
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  text-align: left;
+}
+
+.public-info-hero,
+.public-info-card,
+.public-info-actions {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+}
+
+.public-info-hero {
+  min-height: 340px;
+  display: grid;
+  align-items: center;
+  padding: 64px;
+  border-radius: 24px;
+  background: var(--public-surface-dark);
+  color: var(--public-on-dark);
+}
+
+.public-info-hero span,
+.public-info-card h2,
+.public-info-card span {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+.public-info-hero span {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 28px;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 100px;
+  background: #16181c;
+  color: #a8acb3;
+}
+
+.public-info-hero h1 {
+  max-width: 780px;
+  margin: 22px 0 0;
+  color: var(--public-on-dark);
+  font-size: clamp(40px, 6vw, 64px);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.public-info-hero p {
+  max-width: 760px;
+  margin: 24px 0 0;
+  color: #a8acb3;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.public-info-grid {
+  width: min(1120px, 100%);
+  margin: 24px auto 0;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.public-info-card {
+  grid-column: span 6;
+  padding: 32px;
+  border: 1px solid var(--public-hairline);
+  border-radius: 24px;
+  background: var(--public-canvas);
+}
+
+.public-info-card h2 {
+  margin: 0 0 14px;
+  color: var(--public-ink);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.33;
+}
+
+.public-info-card p,
+.public-info-card li {
+  color: var(--public-body);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.public-info-card ul {
+  margin: 16px 0 0;
+  padding-left: 20px;
+}
+
+.public-info-highlights,
+.public-info-form-card,
+.public-info-channels {
+  grid-column: 1 / -1;
+}
+
+.public-info-highlights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  background: var(--public-surface-soft);
+}
+
+.public-info-highlights > div,
+.public-info-channels a {
+  padding: 20px;
+  border: 1px solid var(--public-hairline-soft);
+  border-radius: 16px;
+  background: var(--public-canvas);
+  color: inherit;
+  text-decoration: none;
+}
+
+.public-info-highlights strong,
+.public-info-channels strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--public-ink);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.33;
+}
+
+.public-info-channels {
+  display: grid;
+  gap: 12px;
+}
+
+.public-info-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.public-info-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.public-info-form label > span,
+.public-info-channels span,
+.public-info-highlights span {
+  color: var(--public-muted);
+}
+
+.public-info-form-wide,
+.public-info-form button,
+.public-info-alert {
+  grid-column: 1 / -1;
+}
+
+.public-info-form input,
+.public-info-form select,
+.public-info-form textarea {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--public-hairline);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--public-canvas);
+  color: var(--public-ink);
+  font: inherit;
+  outline: none;
+}
+
+.public-info-form textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.public-info-form input:focus,
+.public-info-form select:focus,
+.public-info-form textarea:focus {
+  border-color: var(--public-primary);
+  box-shadow: 0 0 0 1px var(--public-primary);
+}
+
+.public-info-form button,
+.public-info-actions a {
+  min-height: 44px;
+  border: 0;
+  border-radius: 100px;
+  padding: 12px 20px;
+  background: var(--public-primary);
+  color: #ffffff;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.15;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+}
+
+.public-info-form button:hover,
+.public-info-actions a:hover {
+  background: var(--public-primary-active);
+}
+
+.public-info-form button:disabled {
+  background: #a8b8cc;
+  cursor: not-allowed;
+}
+
+.public-info-alert {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(5, 177, 105, 0.08);
+  color: var(--public-success);
+}
+
+.public-info-alert.error {
+  background: rgba(207, 32, 47, 0.08);
+  color: var(--public-danger);
+}
+
+.public-info-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+@media (max-width: 760px) {
+  .public-info-page {
+    padding: 24px 16px 72px;
+  }
+
+  .public-info-hero {
+    min-height: 300px;
+    padding: 32px 24px;
+    border-radius: 24px;
+  }
+
+  .public-info-card {
+    padding: 24px;
+  }
+
+  .public-info-card,
+  .public-info-highlights,
+  .public-info-form {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
+  }
+}

@@ -11,6 +11,7 @@ import {
 } from "./db/performanceIndexes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import exchangeRatesRoutes from "./routes/exchangeRates.routes.js";
+import publicPagesRoutes from "./routes/publicPages.routes.js";
 import expenseRoutes from "./routes/expenses.routes.js";
 import splitRoomRoutes from "./routes/splitRooms.routes.js";
 import friendRoutes, {
@@ -398,6 +399,7 @@ app.post("/api/setup/performance-indexes", protectSetupRoutes, async (_req, res)
 ensurePerformanceIndexesInBackground();
 
 app.use("/api/exchange-rates", exchangeRatesRoutes);
+app.use("/api/public-pages", publicPagesRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/expenses", expenseRoutes);

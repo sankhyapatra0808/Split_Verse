@@ -306,36 +306,6 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
       [dbUserId],
     );
 
-    const splitDuesSummaryResult = await db.query(
-      `
-      SELECT
-        COALESCE((
-          SELECT SUM(item.amount)::float
-          FROM split_room_items item
-          INNER JOIN split_room_members member
-            ON member.id = item.assigned_member_id
-          INNER JOIN split_rooms room
-            ON room.id = item.room_id
-          WHERE room.owner_user_id = $1
-          AND member.user_id <> $1
-          AND item.collected_at IS NULL
-        ), 0) AS pending_incoming,
-
-        COALESCE((
-          SELECT SUM(item.amount)::float
-          FROM split_room_items item
-          INNER JOIN split_room_members member
-            ON member.id = item.assigned_member_id
-          INNER JOIN split_rooms room
-            ON room.id = item.room_id
-          WHERE member.user_id = $1
-          AND room.owner_user_id <> $1
-          AND item.collected_at IS NULL
-        ), 0) AS pending_outgoing;
-      `,
-      [dbUserId],
-    );
-
     const recentWalletResult = await db.query(
       `
       SELECT
@@ -356,57 +326,140 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
       [dbUserId],
     );
 
-    const pendingSettlementResult = await db.query(
+    const adjustedSettlementResult = await db.query(
       `
+      WITH settled AS (
+        SELECT
+          item_id,
+          COALESCE(SUM(amount)::float, 0) AS settled_amount
+        FROM split_room_item_settlements
+        GROUP BY item_id
+      ),
+      debt_lines AS (
+        SELECT
+          item.id AS item_id,
+          item.title,
+          room.name AS room_name,
+          item.created_at,
+          GREATEST(
+            item.amount::float - COALESCE(settled.settled_amount, 0),
+            0
+          ) AS pending_amount,
+          debtor_user.id AS debtor_user_id,
+          owner_user.id AS creditor_user_id
+        FROM split_room_items item
+        INNER JOIN split_room_members member
+          ON member.id = item.assigned_member_id
+        INNER JOIN split_rooms room
+          ON room.id = item.room_id
+        INNER JOIN users AS owner_user
+          ON owner_user.id = room.owner_user_id
+        LEFT JOIN users AS member_user
+          ON member_user.id = member.user_id
+        LEFT JOIN users AS email_user
+          ON member.user_id IS NULL
+          AND member.email IS NOT NULL
+          AND LOWER(email_user.email) = LOWER(member.email)
+        INNER JOIN users AS debtor_user
+          ON debtor_user.id = COALESCE(member_user.id, email_user.id)
+        LEFT JOIN settled
+          ON settled.item_id = item.id
+        WHERE item.collected_at IS NULL
+        AND room.owner_user_id <> debtor_user.id
+        AND (
+          room.owner_user_id = $1
+          OR debtor_user.id = $1
+        )
+      ),
+      pair_lines AS (
+        SELECT
+          CASE
+            WHEN debtor_user_id < creditor_user_id THEN debtor_user_id
+            ELSE creditor_user_id
+          END AS user_a,
+          CASE
+            WHEN debtor_user_id < creditor_user_id THEN creditor_user_id
+            ELSE debtor_user_id
+          END AS user_b,
+          CASE
+            WHEN debtor_user_id < creditor_user_id THEN pending_amount
+            ELSE -pending_amount
+          END AS signed_amount,
+          item_id,
+          title,
+          room_name,
+          created_at
+        FROM debt_lines
+        WHERE pending_amount > 0
+      ),
+      pair_totals AS (
+        SELECT
+          user_a,
+          user_b,
+          SUM(signed_amount)::float AS net_amount,
+          MAX(created_at) AS created_at,
+          COUNT(*) AS item_count,
+          CASE
+            WHEN COUNT(DISTINCT room_name) = 1 THEN MIN(room_name)
+            ELSE 'Multiple rooms'
+          END AS room_name,
+          CASE
+            WHEN COUNT(*) = 1 THEN MIN(title)
+            ELSE COUNT(*)::text || ' adjusted split items'
+          END AS title
+        FROM pair_lines
+        GROUP BY user_a, user_b
+      ),
+      net_rows AS (
+        SELECT
+          CONCAT('net-', user_a, '-', user_b) AS id,
+          CASE WHEN net_amount > 0 THEN user_a ELSE user_b END AS from_user_id,
+          CASE WHEN net_amount > 0 THEN user_b ELSE user_a END AS to_user_id,
+          ABS(net_amount)::float AS amount,
+          title,
+          room_name,
+          created_at
+        FROM pair_totals
+        WHERE ABS(net_amount) >= 0.01
+      )
       SELECT
-        item.id,
-        item.amount::float,
-        item.created_at,
+        net_rows.id,
+        net_rows.amount,
+        net_rows.created_at,
         TO_CHAR(
-          item.created_at + INTERVAL '5 hours 30 minutes',
+          net_rows.created_at + INTERVAL '5 hours 30 minutes',
           'DD-MM-YYYY'
         ) AS display_date,
-        item.title,
-        room.name AS room_name,
-
-        owner_user.name AS owner_name,
-        owner_user.email AS owner_email,
-
-        assigned_user.name AS assigned_name,
-        assigned_user.email AS assigned_email,
-
+        net_rows.title,
+        net_rows.room_name,
+        from_user.name AS from_name,
+        from_user.email AS from_email,
+        to_user.name AS to_name,
+        to_user.email AS to_email,
         CASE
-          WHEN room.owner_user_id = $1 THEN 'incoming'
-          ELSE 'outgoing'
+          WHEN net_rows.from_user_id = $1 THEN 'outgoing'
+          ELSE 'incoming'
         END AS direction
-      FROM split_room_items item
-      INNER JOIN split_room_members member
-        ON member.id = item.assigned_member_id
-      INNER JOIN split_rooms room
-        ON room.id = item.room_id
-      INNER JOIN users AS owner_user
-        ON owner_user.id = room.owner_user_id
-      LEFT JOIN users AS assigned_user
-        ON assigned_user.id = member.user_id
-      WHERE
-        (
-          room.owner_user_id = $1
-          OR member.user_id = $1
-        )
-        AND room.owner_user_id <> COALESCE(member.user_id, room.owner_user_id)
-        AND item.collected_at IS NULL
-      ORDER BY item.created_at DESC
-      LIMIT 8;
+      FROM net_rows
+      INNER JOIN users AS from_user
+        ON from_user.id = net_rows.from_user_id
+      INNER JOIN users AS to_user
+        ON to_user.id = net_rows.to_user_id
+      ORDER BY net_rows.created_at DESC;
       `,
       [dbUserId],
     );
 
     const availableBalance = Number(balanceResult.rows[0].available_balance);
-    const pendingIncoming = Number(
-      splitDuesSummaryResult.rows[0].pending_incoming,
+    const pendingIncoming = adjustedSettlementResult.rows.reduce(
+      (total, row) =>
+        row.direction === "incoming" ? total + Number(row.amount) : total,
+      0,
     );
-    const pendingOutgoing = Number(
-      splitDuesSummaryResult.rows[0].pending_outgoing,
+    const pendingOutgoing = adjustedSettlementResult.rows.reduce(
+      (total, row) =>
+        row.direction === "outgoing" ? total + Number(row.amount) : total,
+      0,
     );
 
     return res.json({
@@ -426,21 +479,17 @@ router.get("/summary", verifyFirebaseToken, async (req: AuthRequest, res) => {
         displayDate: row.display_date,
       })),
 
-      pendingSettlements: pendingSettlementResult.rows.map((row) => ({
+      pendingSettlements: adjustedSettlementResult.rows.slice(0, 8).map((row) => ({
         id: row.id,
         amount: Number(row.amount),
         status: "pending",
         direction: row.direction,
         title: row.title,
         roomName: row.room_name,
-        fromName:
-          row.direction === "incoming" ? row.assigned_name : row.owner_name,
-        fromEmail:
-          row.direction === "incoming" ? row.assigned_email : row.owner_email,
-        toName:
-          row.direction === "incoming" ? row.owner_name : row.assigned_name,
-        toEmail:
-          row.direction === "incoming" ? row.owner_email : row.assigned_email,
+        fromName: row.from_name,
+        fromEmail: row.from_email,
+        toName: row.to_name,
+        toEmail: row.to_email,
         createdAt: toIsoString(row.created_at),
         displayDate: row.display_date,
       })),

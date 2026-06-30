@@ -490,7 +490,7 @@ export default function DashboardLayout({
                     Friend request from{" "}
                     {request.requester_name || request.requester_email}
                   </strong>
-                  <span>{request.requester_email}{" "}{"-"}{" "} wants to add you.</span>
+                  <span>{request.requester_email} - wants to add you.</span>
                 </button>
               ))}
               {pendingDues.map((due) => (
@@ -500,11 +500,12 @@ export default function DashboardLayout({
                   onClick={() => handlePendingDueClick(due.roomId)}
                 >
                   <strong>
-                    {due.title}{" "}-{" "}{formatCurrency(due.amount)}
+                    {due.title} - {formatCurrency(due.amount)}
                   </strong>
                   <span>
-                    {due.roomName}{" "}-{" "}Pay to{" "}
-                    {due.receiverName || due.receiverEmail}
+                    {`${due.roomName} - pay to ${
+                      due.receiverName || due.receiverEmail
+                    }`}
                   </span>
                 </button>
               ))}

@@ -68,8 +68,9 @@ button {
   z-index: 100;
   min-height: 64px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto auto;
   align-items: center;
+  justify-content: space-between;
   gap: 32px;
   padding: 0 max(24px, calc((100vw - 1200px) / 2));
   border-bottom: 1px solid rgba(222, 225, 230, 0.82);
@@ -109,24 +110,6 @@ button {
 
 .brand-mark span:first-child {
   grid-column: 1 / -1;
-}
-
-.nav-link-group {
-  display: flex;
-  justify-content: center;
-  gap: 36px;
-  color: var(--sv-ink);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.4;
-}
-
-.nav-link-group a {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-  transition: color 180ms ease;
 }
 
 .nav-actions {
@@ -871,7 +854,6 @@ button {
 }
 
 @media (hover: hover) {
-  .nav-link-group a:hover,
   .footer-grid a:hover {
     color: var(--sv-primary);
   }
@@ -983,7 +965,6 @@ button {
     font-size: 18px;
   }
 
-  .nav-link-group,
   .nav-login,
   .nav-icon-button:first-child {
     display: none;

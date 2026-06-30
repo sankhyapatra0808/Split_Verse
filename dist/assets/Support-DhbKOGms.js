@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-bzQ4Vb5N.js";import{K as t}from"./index-D2kr7Lmp.js";import{t as n}from"./PublicInfoPage-BirAWKWU.js";var r=t(),i=e();function a(){let e=(0,r.c)(1),t;return e[0]===Symbol.for(`react.memo_cache_sentinel`)?(t=(0,i.jsx)(n,{slug:`support`}),e[0]=t):t=e[0],t}export{a as default};

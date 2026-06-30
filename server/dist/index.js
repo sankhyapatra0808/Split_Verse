@@ -8,6 +8,7 @@ import { testDbConnection, db, warmDatabaseConnection } from "./config/db.js";
 import { ensurePerformanceIndexes, ensurePerformanceIndexesInBackground, } from "./db/performanceIndexes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import exchangeRatesRoutes from "./routes/exchangeRates.routes.js";
+import publicPagesRoutes from "./routes/publicPages.routes.js";
 import expenseRoutes from "./routes/expenses.routes.js";
 import splitRoomRoutes from "./routes/splitRooms.routes.js";
 import friendRoutes, { getAcceptPageCacheStats, } from "./routes/friends.routes.js";
@@ -20,11 +21,28 @@ import { getFirebaseAuthDependencyHealth, verifyFirebaseToken, } from "./middlew
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
-const CLIENT_URLS = (process.env.CLIENT_URLS || CLIENT_URL)
+const CLIENT_URLS = (process.env.CLIENT_URLS ||
+    [
+        CLIENT_URL,
+        "http://localhost:5173",
+        "https://split-verse.vercel.app",
+        "https://split-verse-ww7n.vercel.app",
+    ].join(","))
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
 const allowedOrigins = new Set(CLIENT_URLS);
+function isAllowedVercelPreview(origin) {
+    try {
+        const url = new URL(origin);
+        return (url.protocol === "https:" &&
+            url.hostname.endsWith(".vercel.app") &&
+            url.hostname.startsWith("split-verse"));
+    }
+    catch {
+        return false;
+    }
+}
 const jsonBodyLimit = process.env.JSON_BODY_LIMIT || "100kb";
 const setupRoutesEnabled = process.env.ENABLE_SETUP_ROUTES === "true";
 const setupRouteSecret = process.env.SETUP_ROUTE_SECRET || "";
@@ -34,16 +52,26 @@ app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
-app.use(cors({
+const corsOptions = {
     origin(origin, callback) {
-        if (!origin || allowedOrigins.has(origin)) {
+        if (!origin) {
             callback(null, true);
             return;
         }
-        callback(new Error("Not allowed by CORS"));
+        if (allowedOrigins.has(origin) || isAllowedVercelPreview(origin)) {
+            callback(null, true);
+            return;
+        }
+        console.warn(`CORS blocked origin: ${origin}`);
+        callback(new Error(`Not allowed by CORS: ${origin}`));
     },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
-}));
+    optionsSuccessStatus: 204,
+};
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 const apiLimiter = rateLimit({
     windowMs: Number(process.env.API_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
     limit: Number(process.env.API_RATE_LIMIT_MAX || 700),
@@ -307,6 +335,7 @@ app.post("/api/setup/performance-indexes", protectSetupRoutes, async (_req, res)
 });
 ensurePerformanceIndexesInBackground();
 app.use("/api/exchange-rates", exchangeRatesRoutes);
+app.use("/api/public-pages", publicPagesRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/expenses", expenseRoutes);

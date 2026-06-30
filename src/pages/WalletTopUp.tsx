@@ -134,6 +134,8 @@ export default function WalletTopUp() {
   const [customAmount, setCustomAmount] = useState("");
   const [selectedMethod, setSelectedMethod] =
     useState<WalletTopUpMethod>(defaultTopUpMethod);
+  const [syncedDefaultMethod, setSyncedDefaultMethod] =
+    useState<WalletTopUpMethod>(defaultTopUpMethod);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -152,9 +154,10 @@ export default function WalletTopUp() {
       ? topUpAmount
       : 0;
 
-  useEffect(() => {
+  if (syncedDefaultMethod !== defaultTopUpMethod) {
+    setSyncedDefaultMethod(defaultTopUpMethod);
     setSelectedMethod(defaultTopUpMethod);
-  }, [defaultTopUpMethod]);
+  }
 
   async function loadRecentTopUps({ silent = false } = {}) {
     if (!silent) {

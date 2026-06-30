@@ -42,7 +42,17 @@ const walletPaymentSchema = z
         .regex(/^\d{4,6}$/, "Wallet PIN must be 4 to 6 digits"),
 })
     .strict();
+const netSettlementPaymentSchema = z
+    .object({
+    toUserId: z.string().trim().uuid("Invalid settlement receiver"),
+    walletPin: z
+        .string({ message: "Wallet PIN is required" })
+        .trim()
+        .regex(/^\d{4,6}$/, "Wallet PIN must be 4 to 6 digits"),
+})
+    .strict();
 let splitRoomTablesReady = null;
+let netSettlementTablesReady = null;
 function chunkArray(values, chunkSize) {
     const chunks = [];
     for (let index = 0; index < values.length; index += chunkSize) {
@@ -124,6 +134,348 @@ async function ensureSplitRoomTablesOnce() {
         throw error;
     });
     return splitRoomTablesReady;
+}
+async function ensureNetSettlementTables() {
+    await db.query(`
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+    CREATE TABLE IF NOT EXISTS split_room_item_settlements (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      item_id UUID NOT NULL REFERENCES split_room_items(id) ON DELETE CASCADE,
+      amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+      method TEXT NOT NULL CHECK (method IN ('wallet', 'manual', 'offset')),
+      counter_item_id UUID REFERENCES split_room_items(id) ON DELETE SET NULL,
+      wallet_transaction_id UUID REFERENCES wallet_transactions(id) ON DELETE SET NULL,
+      created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS split_room_item_settlements_item_idx
+      ON split_room_item_settlements (item_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS split_room_item_settlements_counter_item_idx
+      ON split_room_item_settlements (counter_item_id)
+      WHERE counter_item_id IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS split_room_item_settlements_method_created_idx
+      ON split_room_item_settlements (method, created_at DESC);
+  `);
+}
+async function ensureNetSettlementTablesOnce() {
+    netSettlementTablesReady ??= ensureNetSettlementTables().catch((error) => {
+        netSettlementTablesReady = null;
+        throw error;
+    });
+    return netSettlementTablesReady;
+}
+function roundMoneyValue(amount) {
+    return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
+function getPersonLabel(name, email) {
+    return name?.trim() || email.split("@")[0] || "Member";
+}
+function getDebtLineQuery({ currentUserOnly = false, pairOnly = false, forUpdate = false, } = {}) {
+    const filters = [
+        "item.collected_at IS NULL",
+        "COALESCE(assigned_user.id, member.user_id) IS NOT NULL",
+        "room.owner_user_id <> COALESCE(assigned_user.id, member.user_id)",
+    ];
+    if (currentUserOnly) {
+        filters.push("(room.owner_user_id = $1 OR COALESCE(assigned_user.id, member.user_id) = $1)");
+    }
+    if (pairOnly) {
+        filters.push(`
+      (
+        (room.owner_user_id = $1 AND COALESCE(assigned_user.id, member.user_id) = $2)
+        OR
+        (room.owner_user_id = $2 AND COALESCE(assigned_user.id, member.user_id) = $1)
+      )
+    `);
+    }
+    return `
+    WITH settled AS (
+      SELECT
+        item_id,
+        COALESCE(SUM(amount), 0) AS settled_amount
+      FROM split_room_item_settlements
+      GROUP BY item_id
+    ),
+    debt_lines AS (
+      SELECT
+        item.id AS item_id,
+        item.room_id,
+        room.name AS room_name,
+        item.title AS item_title,
+        item.amount::float AS original_amount,
+        COALESCE(settled.settled_amount, 0)::float AS settled_amount,
+        GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0)::float AS pending_amount,
+        COALESCE(assigned_user.id, member.user_id) AS debtor_user_id,
+        COALESCE(assigned_user.name, member.display_name) AS debtor_name,
+        COALESCE(assigned_user.email, member.email) AS debtor_email,
+        owner_user.id AS creditor_user_id,
+        owner_user.name AS creditor_name,
+        owner_user.email AS creditor_email,
+        item.created_at
+      FROM split_room_items item
+      INNER JOIN split_room_members member
+        ON member.id = item.assigned_member_id
+      INNER JOIN split_rooms room
+        ON room.id = item.room_id
+      INNER JOIN users owner_user
+        ON owner_user.id = room.owner_user_id
+      LEFT JOIN users assigned_user
+        ON assigned_user.id = member.user_id
+        OR (
+          member.user_id IS NULL
+          AND member.email IS NOT NULL
+          AND LOWER(assigned_user.email) = LOWER(member.email)
+        )
+      LEFT JOIN settled
+        ON settled.item_id = item.id
+      WHERE ${filters.join("\n      AND ")}
+      ${forUpdate ? "FOR UPDATE OF item" : ""}
+    )
+    SELECT *
+    FROM debt_lines
+    WHERE pending_amount > 0
+    ORDER BY created_at ASC;
+  `;
+}
+async function loadNetDebtLines(client, currentUserId) {
+    const result = await client.query(getDebtLineQuery({ currentUserOnly: true }), [currentUserId]);
+    return result.rows.map((line) => ({
+        ...line,
+        original_amount: Number(line.original_amount),
+        settled_amount: Number(line.settled_amount),
+        pending_amount: Number(line.pending_amount),
+    }));
+}
+async function loadPairDebtLines(client, leftUserId, rightUserId, { forUpdate = false } = {}) {
+    const result = await client.query(getDebtLineQuery({ pairOnly: true, forUpdate }), [leftUserId, rightUserId]);
+    return result.rows.map((line) => ({
+        ...line,
+        original_amount: Number(line.original_amount),
+        settled_amount: Number(line.settled_amount),
+        pending_amount: Number(line.pending_amount),
+    }));
+}
+function serializeNetSettlements(debtLines, currentUserId) {
+    const pairMap = new Map();
+    for (const line of debtLines) {
+        if (!line.debtor_user_id || !line.creditor_user_id) {
+            continue;
+        }
+        if (line.debtor_user_id === line.creditor_user_id) {
+            continue;
+        }
+        const [userA, userB] = [line.debtor_user_id, line.creditor_user_id].sort();
+        const pairKey = `${userA}:${userB}`;
+        const direction = line.debtor_user_id === userA ? 1 : -1;
+        const existing = pairMap.get(pairKey) ?? {
+            userA,
+            userB,
+            netAmount: 0,
+            userDetails: new Map(),
+            breakdown: [],
+        };
+        existing.netAmount += line.pending_amount * direction;
+        existing.userDetails.set(line.debtor_user_id, {
+            name: line.debtor_name,
+            email: line.debtor_email,
+        });
+        existing.userDetails.set(line.creditor_user_id, {
+            name: line.creditor_name,
+            email: line.creditor_email,
+        });
+        existing.breakdown.push({
+            itemId: line.item_id,
+            roomId: line.room_id,
+            roomName: line.room_name,
+            title: line.item_title,
+            direction: `${getPersonLabel(line.debtor_name, line.debtor_email)} owes ${getPersonLabel(line.creditor_name, line.creditor_email)}`,
+            amount: roundMoneyValue(line.pending_amount),
+            originalAmount: roundMoneyValue(line.original_amount),
+            settledAmount: roundMoneyValue(line.settled_amount),
+            createdAt: line.created_at,
+        });
+        pairMap.set(pairKey, existing);
+    }
+    return Array.from(pairMap.values())
+        .map((pair) => {
+        const netAmount = roundMoneyValue(pair.netAmount);
+        if (Math.abs(netAmount) < 0.01) {
+            return null;
+        }
+        const fromUserId = netAmount > 0 ? pair.userA : pair.userB;
+        const toUserId = netAmount > 0 ? pair.userB : pair.userA;
+        const fromDetails = pair.userDetails.get(fromUserId);
+        const toDetails = pair.userDetails.get(toUserId);
+        if (!fromDetails || !toDetails) {
+            return null;
+        }
+        return {
+            fromUserId,
+            fromName: fromDetails.name,
+            fromEmail: fromDetails.email,
+            toUserId,
+            toName: toDetails.name,
+            toEmail: toDetails.email,
+            amount: Math.abs(netAmount),
+            currency: "INR",
+            isOutgoing: fromUserId === currentUserId,
+            isIncoming: toUserId === currentUserId,
+            breakdown: pair.breakdown.sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()),
+        };
+    })
+        .filter((settlement) => Boolean(settlement))
+        .sort((left, right) => {
+        if (left.isOutgoing !== right.isOutgoing) {
+            return left.isOutgoing ? -1 : 1;
+        }
+        return right.amount - left.amount;
+    });
+}
+async function insertItemSettlement(client, { itemId, amount, method, createdByUserId, counterItemId = null, walletTransactionId = null, }) {
+    await client.query(`
+    INSERT INTO split_room_item_settlements (
+      item_id,
+      amount,
+      method,
+      counter_item_id,
+      wallet_transaction_id,
+      created_by_user_id
+    )
+    VALUES ($1, $2, $3, $4, $5, $6);
+    `, [itemId, amount, method, counterItemId, walletTransactionId, createdByUserId]);
+}
+async function markFullySettledItemsCollected(client, itemIds) {
+    const uniqueItemIds = [...new Set(itemIds)].filter(Boolean);
+    if (uniqueItemIds.length === 0) {
+        return [];
+    }
+    const result = await client.query(`
+    UPDATE split_room_items item
+    SET collected_at = COALESCE(item.collected_at, NOW())
+    WHERE item.id = ANY($1::uuid[])
+    AND item.collected_at IS NULL
+    AND item.amount <= COALESCE((
+      SELECT SUM(settlement.amount)
+      FROM split_room_item_settlements settlement
+      WHERE settlement.item_id = item.id
+    ), 0)
+    RETURNING item.id, item.room_id;
+    `, [uniqueItemIds]);
+    return result.rows;
+}
+async function refreshRoomPaymentStatuses(client, roomIds) {
+    const uniqueRoomIds = [...new Set(roomIds)].filter(Boolean);
+    if (uniqueRoomIds.length === 0) {
+        return;
+    }
+    await client.query(`
+    WITH settled AS (
+      SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
+      FROM split_room_item_settlements
+      GROUP BY item_id
+    )
+    UPDATE split_rooms room
+    SET
+      payment_status = CASE
+        WHEN room.payment_status = 'complete' THEN room.payment_status
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM split_room_items item
+          INNER JOIN split_room_members member
+            ON member.id = item.assigned_member_id
+          WHERE item.room_id = room.id
+          AND item.collected_at IS NULL
+          AND GREATEST(item.amount - COALESCE((
+            SELECT settled.settled_amount
+            FROM settled
+            WHERE settled.item_id = item.id
+          ), 0), 0) > 0
+          AND NOT (
+            member.user_id = room.owner_user_id
+            OR LOWER(COALESCE(member.email, '')) = LOWER((
+              SELECT owner_user.email
+              FROM users owner_user
+              WHERE owner_user.id = room.owner_user_id
+            ))
+          )
+        ) THEN 'all_paid'
+        ELSE room.payment_status
+      END,
+      updated_at = NOW()
+    WHERE room.id = ANY($1::uuid[]);
+    `, [uniqueRoomIds]);
+}
+async function applyOffsetSettlements(client, forwardLines, reverseLines, amountToOffset, createdByUserId) {
+    let remainingOffset = roundMoneyValue(amountToOffset);
+    let forwardIndex = 0;
+    let reverseIndex = 0;
+    let forwardRemaining = forwardLines[0]?.pending_amount ?? 0;
+    let reverseRemaining = reverseLines[0]?.pending_amount ?? 0;
+    const touchedItemIds = [];
+    while (remainingOffset > 0.009 && forwardLines[forwardIndex] && reverseLines[reverseIndex]) {
+        const amount = roundMoneyValue(Math.min(remainingOffset, forwardRemaining, reverseRemaining));
+        const forwardLine = forwardLines[forwardIndex];
+        const reverseLine = reverseLines[reverseIndex];
+        await insertItemSettlement(client, {
+            itemId: forwardLine.item_id,
+            amount,
+            method: "offset",
+            counterItemId: reverseLine.item_id,
+            createdByUserId,
+        });
+        await insertItemSettlement(client, {
+            itemId: reverseLine.item_id,
+            amount,
+            method: "offset",
+            counterItemId: forwardLine.item_id,
+            createdByUserId,
+        });
+        touchedItemIds.push(forwardLine.item_id, reverseLine.item_id);
+        remainingOffset = roundMoneyValue(remainingOffset - amount);
+        forwardRemaining = roundMoneyValue(forwardRemaining - amount);
+        reverseRemaining = roundMoneyValue(reverseRemaining - amount);
+        forwardLine.pending_amount = forwardRemaining;
+        reverseLine.pending_amount = reverseRemaining;
+        if (forwardRemaining <= 0.009) {
+            forwardIndex += 1;
+            forwardRemaining = forwardLines[forwardIndex]?.pending_amount ?? 0;
+        }
+        if (reverseRemaining <= 0.009) {
+            reverseIndex += 1;
+            reverseRemaining = reverseLines[reverseIndex]?.pending_amount ?? 0;
+        }
+    }
+    return touchedItemIds;
+}
+async function applyWalletSettlement(client, lines, amountToSettle, createdByUserId, walletTransactionId) {
+    let remaining = roundMoneyValue(amountToSettle);
+    const touchedItemIds = [];
+    for (const line of lines) {
+        if (remaining <= 0.009) {
+            break;
+        }
+        if (line.pending_amount <= 0.009) {
+            continue;
+        }
+        const amount = roundMoneyValue(Math.min(remaining, line.pending_amount));
+        if (amount <= 0.009) {
+            continue;
+        }
+        await insertItemSettlement(client, {
+            itemId: line.item_id,
+            amount,
+            method: "wallet",
+            createdByUserId,
+            walletTransactionId,
+        });
+        touchedItemIds.push(line.item_id);
+        remaining = roundMoneyValue(remaining - amount);
+    }
+    return touchedItemIds;
 }
 async function getCurrentUser(firebaseUid) {
     const result = await db.query(`
@@ -210,14 +562,18 @@ function serializeRoom(room, members, items, currentUser) {
     items.forEach((item) => {
         const member = memberById.get(item.assigned_member_id);
         const amount = Number(item.amount);
+        const pendingAmount = item.collected_at
+            ? 0
+            : Math.max(Number(item.pending_amount ?? amount), 0);
+        const settledAmount = Math.max(amount - pendingAmount, Number(item.settled_amount ?? 0));
         itemCountByMember.set(item.assigned_member_id, (itemCountByMember.get(item.assigned_member_id) ?? 0) + 1);
         amountByMember.set(item.assigned_member_id, (amountByMember.get(item.assigned_member_id) ?? 0) + amount);
         if (!member?.isMe) {
-            if (item.collected_at) {
-                collectedByMember.set(item.assigned_member_id, (collectedByMember.get(item.assigned_member_id) ?? 0) + amount);
+            if (settledAmount > 0) {
+                collectedByMember.set(item.assigned_member_id, (collectedByMember.get(item.assigned_member_id) ?? 0) + settledAmount);
             }
-            else {
-                outstandingByMember.set(item.assigned_member_id, (outstandingByMember.get(item.assigned_member_id) ?? 0) + amount);
+            if (pendingAmount > 0) {
+                outstandingByMember.set(item.assigned_member_id, (outstandingByMember.get(item.assigned_member_id) ?? 0) + pendingAmount);
             }
         }
     });
@@ -263,11 +619,20 @@ function serializeRoom(room, members, items, currentUser) {
                 itemCount: itemCountByMember.get(member.id) ?? 0,
             };
         }),
-        items: items.map((item) => ({
-            ...item,
-            amount: Number(item.amount),
-            isCollected: Boolean(item.collected_at),
-        })),
+        items: items.map((item) => {
+            const amount = Number(item.amount);
+            const pendingAmount = item.collected_at
+                ? 0
+                : Math.max(Number(item.pending_amount ?? amount), 0);
+            const settledAmount = Math.max(amount - pendingAmount, Number(item.settled_amount ?? 0));
+            return {
+                ...item,
+                amount,
+                settledAmount,
+                pendingAmount,
+                isCollected: Boolean(item.collected_at) || pendingAmount <= 0,
+            };
+        }),
     };
 }
 function normalizePaymentStatus(status) {
@@ -286,6 +651,7 @@ function getRouteParam(req, paramName) {
 router.get("/", verifyFirebaseToken, async (req, res) => {
     try {
         await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
         const firebaseUser = req.user;
         if (!firebaseUser) {
             return res.status(401).json({ message: "Unauthorized" });
@@ -340,17 +706,25 @@ router.get("/", verifyFirebaseToken, async (req, res) => {
         `, [roomIds]),
             db.query(`
         SELECT
-          id,
-          room_id,
-          assigned_member_id,
-          title,
-          amount::float,
-          collected_at,
-          expense_id,
-          created_at
-        FROM split_room_items
-        WHERE room_id = ANY($1::uuid[])
-        ORDER BY created_at DESC;
+          item.id,
+          item.room_id,
+          item.assigned_member_id,
+          item.title,
+          item.amount::float,
+          COALESCE(settled.settled_amount, 0)::float AS settled_amount,
+          GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0)::float AS pending_amount,
+          item.collected_at,
+          item.expense_id,
+          item.created_at
+        FROM split_room_items item
+        LEFT JOIN (
+          SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
+          FROM split_room_item_settlements
+          GROUP BY item_id
+        ) settled
+          ON settled.item_id = item.id
+        WHERE item.room_id = ANY($1::uuid[])
+        ORDER BY item.created_at DESC;
         `, [roomIds]),
         ]);
         const rooms = roomResult.rows.map((room) => serializeRoom(room, memberResult.rows.filter((member) => member.room_id === room.id), itemResult.rows.filter((item) => item.room_id === room.id), dbUser));
@@ -361,6 +735,210 @@ router.get("/", verifyFirebaseToken, async (req, res) => {
         return res.status(500).json({
             message: "Failed to load split rooms",
         });
+    }
+});
+router.get("/net-settlements", verifyFirebaseToken, async (req, res) => {
+    try {
+        await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
+        const firebaseUser = req.user;
+        if (!firebaseUser) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const dbUser = await getCurrentUser(firebaseUser.uid);
+        if (!dbUser) {
+            return res.status(404).json({ message: "User not found in database" });
+        }
+        const debtLines = await loadNetDebtLines(db, dbUser.id);
+        const settlements = serializeNetSettlements(debtLines, dbUser.id);
+        const outgoingTotal = settlements
+            .filter((settlement) => settlement.isOutgoing)
+            .reduce((sum, settlement) => sum + settlement.amount, 0);
+        const incomingTotal = settlements
+            .filter((settlement) => settlement.isIncoming)
+            .reduce((sum, settlement) => sum + settlement.amount, 0);
+        return res.json({
+            settlements,
+            summary: {
+                outgoingTotal: roundMoneyValue(outgoingTotal),
+                incomingTotal: roundMoneyValue(incomingTotal),
+                netPosition: roundMoneyValue(incomingTotal - outgoingTotal),
+                currency: "INR",
+            },
+        });
+    }
+    catch (error) {
+        console.error("Load adjusted settlements failed:", error);
+        return res.status(500).json({
+            message: "Failed to load adjusted settlements",
+        });
+    }
+});
+router.post("/net-settlements/pay", verifyFirebaseToken, async (req, res) => {
+    const client = await db.connect();
+    try {
+        await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
+        const firebaseUser = req.user;
+        if (!firebaseUser) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const { toUserId, walletPin } = parseRequestBody(netSettlementPaymentSchema, req.body);
+        await client.query("BEGIN");
+        const payerResult = await client.query(`
+        SELECT id, name, email
+        FROM users
+        WHERE firebase_uid = $1
+        FOR UPDATE;
+        `, [firebaseUser.uid]);
+        const payer = payerResult.rows[0];
+        if (!payer) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ message: "User not found in database" });
+        }
+        if (payer.id === toUserId) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ message: "You cannot pay yourself" });
+        }
+        const receiverResult = await client.query(`
+        SELECT id, name, email
+        FROM users
+        WHERE id = $1
+        FOR UPDATE;
+        `, [toUserId]);
+        const receiver = receiverResult.rows[0];
+        if (!receiver) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ message: "Settlement receiver not found" });
+        }
+        const [leftLockId, rightLockId] = [payer.id, receiver.id].sort();
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1::text));", [
+            `${leftLockId}:${rightLockId}`,
+        ]);
+        try {
+            await verifyWalletPinForUser(client, payer.id, walletPin);
+        }
+        catch (pinError) {
+            await client.query("COMMIT");
+            if (sendWalletPinError(res, pinError)) {
+                return;
+            }
+            throw pinError;
+        }
+        const pairDebtLines = await loadPairDebtLines(client, payer.id, receiver.id, {
+            forUpdate: true,
+        });
+        const payerOwesReceiver = pairDebtLines.filter((line) => line.debtor_user_id === payer.id && line.creditor_user_id === receiver.id);
+        const receiverOwesPayer = pairDebtLines.filter((line) => line.debtor_user_id === receiver.id && line.creditor_user_id === payer.id);
+        const payerOwesTotal = roundMoneyValue(payerOwesReceiver.reduce((sum, line) => sum + line.pending_amount, 0));
+        const receiverOwesTotal = roundMoneyValue(receiverOwesPayer.reduce((sum, line) => sum + line.pending_amount, 0));
+        const netAmount = roundMoneyValue(payerOwesTotal - receiverOwesTotal);
+        if (netAmount <= 0) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+                message: "You do not owe this person anything after adjustment",
+            });
+        }
+        const balanceResult = await client.query(`
+        SELECT
+          COALESCE(
+            SUM(
+              CASE
+                WHEN type = 'credit' THEN amount
+                WHEN type = 'debit' THEN -amount
+                ELSE 0
+              END
+            )::float,
+            0
+          ) AS wallet_balance
+        FROM wallet_transactions
+        WHERE user_id = $1;
+        `, [payer.id]);
+        const walletBalance = Number(balanceResult.rows[0].wallet_balance);
+        if (walletBalance < netAmount) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ message: "Insufficient wallet balance" });
+        }
+        const touchedItemIds = [];
+        const offsetAmount = roundMoneyValue(Math.min(payerOwesTotal, receiverOwesTotal));
+        if (offsetAmount > 0) {
+            touchedItemIds.push(...(await applyOffsetSettlements(client, payerOwesReceiver, receiverOwesPayer, offsetAmount, payer.id)));
+        }
+        const walletTransactionResult = await client.query(`
+        INSERT INTO wallet_transactions (
+          user_id,
+          type,
+          amount,
+          description
+        )
+        VALUES
+          ($1, 'debit', $3, $4),
+          ($2, 'credit', $3, $5)
+        RETURNING id, user_id, type;
+        `, [
+            payer.id,
+            receiver.id,
+            netAmount,
+            `Adjusted split settlement paid to ${getPersonLabel(receiver.name, receiver.email)}`,
+            `Adjusted split settlement received from ${getPersonLabel(payer.name, payer.email)}`,
+        ]);
+        const debitWalletTransaction = walletTransactionResult.rows.find((row) => row.user_id === payer.id && row.type === "debit");
+        if (!debitWalletTransaction) {
+            throw new Error("Debit wallet transaction was not created");
+        }
+        const expenseResult = await client.query(`
+        INSERT INTO expenses (
+          user_id,
+          title,
+          category,
+          amount,
+          expense_date
+        )
+        VALUES (
+          $1,
+          $2,
+          'Shared room',
+          $3,
+          (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+        )
+        RETURNING id;
+        `, [
+            payer.id,
+            `Adjusted split settlement to ${getPersonLabel(receiver.name, receiver.email)}`,
+            netAmount,
+        ]);
+        touchedItemIds.push(...(await applyWalletSettlement(client, payerOwesReceiver, netAmount, payer.id, debitWalletTransaction.id)));
+        const collectedItems = await markFullySettledItemsCollected(client, touchedItemIds);
+        await refreshRoomPaymentStatuses(client, collectedItems.map((item) => item.room_id));
+        await client.query("COMMIT");
+        sendLiveUpdate([payer.id, receiver.id], {
+            type: "money",
+            reason: "net-settlement-paid",
+        });
+        return res.json({
+            message: "Adjusted settlement paid successfully",
+            settlement: {
+                fromUserId: payer.id,
+                toUserId: receiver.id,
+                amount: netAmount,
+                currency: "INR",
+                offsetAmount,
+                expenseId: expenseResult.rows[0].id,
+            },
+        });
+    }
+    catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        if (sendValidationError(res, error) || sendWalletPinError(res, error)) {
+            return;
+        }
+        console.error("Pay adjusted settlement failed:", error);
+        return res.status(500).json({
+            message: "Failed to pay adjusted settlement",
+        });
+    }
+    finally {
+        client.release();
     }
 });
 router.post("/", verifyFirebaseToken, async (req, res) => {
@@ -458,6 +1036,7 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
 router.post("/:roomId/items", verifyFirebaseToken, async (req, res) => {
     try {
         await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
         const firebaseUser = req.user;
         if (!firebaseUser) {
             return res.status(401).json({ message: "Unauthorized" });
@@ -1195,6 +1774,8 @@ router.delete("/:roomId", verifyFirebaseToken, async (req, res) => {
 router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
     const client = await db.connect();
     try {
+        await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
         const firebaseUser = req.user;
         if (!firebaseUser) {
             return res.status(401).json({
@@ -1242,6 +1823,8 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
           split_room_items.room_id,
           split_room_items.title,
           split_room_items.amount::float,
+          COALESCE(settled.settled_amount, 0)::float AS settled_amount,
+          GREATEST(split_room_items.amount - COALESCE(settled.settled_amount, 0), 0)::float AS pending_amount,
           split_room_items.assigned_member_id,
           split_room_items.collected_at,
           split_room_members.user_id AS assigned_user_id,
@@ -1256,8 +1839,14 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
           ON split_rooms.id = split_room_items.room_id
         JOIN users AS owner_user
           ON owner_user.id = split_rooms.owner_user_id
+        LEFT JOIN (
+          SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
+          FROM split_room_item_settlements
+          GROUP BY item_id
+        ) settled
+          ON settled.item_id = split_room_items.id
         WHERE split_room_items.id = $1
-        FOR UPDATE;
+        FOR UPDATE OF split_room_items;
         `, [itemId]);
         if (itemResult.rows.length === 0) {
             await client.query("ROLLBACK");
@@ -1266,7 +1855,7 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
             });
         }
         const item = itemResult.rows[0];
-        if (item.collected_at) {
+        if (item.collected_at || Number(item.pending_amount) <= 0) {
             await client.query("ROLLBACK");
             return res.status(400).json({
                 message: "This due is already paid",
@@ -1301,14 +1890,14 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
         WHERE user_id = $1;
         `, [payerUserId]);
         const walletBalance = Number(balanceResult.rows[0].wallet_balance);
-        const amount = Number(item.amount);
+        const amount = roundMoneyValue(Number(item.pending_amount));
         if (walletBalance < amount) {
             await client.query("ROLLBACK");
             return res.status(400).json({
                 message: "Insufficient wallet balance",
             });
         }
-        await client.query(`
+        const walletTransactionResult = await client.query(`
         INSERT INTO wallet_transactions (
           user_id,
           type,
@@ -1317,7 +1906,8 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
         )
         VALUES
           ($1, 'debit', $3, $4),
-          ($2, 'credit', $3, $5);
+          ($2, 'credit', $3, $5)
+        RETURNING id, user_id, type;
         `, [
             payerUserId,
             item.receiver_user_id,
@@ -1325,6 +1915,7 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
             `Paid ${item.title} in ${item.room_name}`,
             `Received ${item.title} from split room ${item.room_name}`,
         ]);
+        const debitWalletTransaction = walletTransactionResult.rows.find((row) => row.user_id === payerUserId && row.type === "debit");
         const expenseResult = await client.query(`
         INSERT INTO expenses (
           user_id,
@@ -1342,6 +1933,13 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
         )
         RETURNING id;
         `, [payerUserId, `${item.room_name}: ${item.title}`, amount]);
+        await insertItemSettlement(client, {
+            itemId,
+            amount,
+            method: "wallet",
+            createdByUserId: payerUserId,
+            walletTransactionId: debitWalletTransaction?.id ?? null,
+        });
         await client.query(`
         UPDATE split_room_items
         SET
@@ -1406,6 +2004,7 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
 router.get("/pending-dues", verifyFirebaseToken, async (req, res) => {
     try {
         await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
         const firebaseUser = req.user;
         if (!firebaseUser) {
             return res.status(401).json({
@@ -1428,7 +2027,7 @@ router.get("/pending-dues", verifyFirebaseToken, async (req, res) => {
         SELECT
           split_room_items.id,
           split_room_items.title,
-          split_room_items.amount::float,
+          GREATEST(split_room_items.amount - COALESCE(settled.settled_amount, 0), 0)::float AS amount,
           split_room_items.created_at,
           split_rooms.id AS room_id,
           split_rooms.name AS room_name,
@@ -1441,12 +2040,19 @@ router.get("/pending-dues", verifyFirebaseToken, async (req, res) => {
           ON split_rooms.id = split_room_items.room_id
         JOIN users AS owner_user
           ON owner_user.id = split_rooms.owner_user_id
+        LEFT JOIN (
+          SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
+          FROM split_room_item_settlements
+          GROUP BY item_id
+        ) settled
+          ON settled.item_id = split_room_items.id
         WHERE (
           split_room_members.user_id = $1
           OR LOWER(COALESCE(split_room_members.email, '')) = LOWER($2)
         )
         AND split_rooms.owner_user_id <> $1
         AND split_room_items.collected_at IS NULL
+        AND GREATEST(split_room_items.amount - COALESCE(settled.settled_amount, 0), 0) > 0
         ORDER BY split_room_items.created_at DESC;
         `, [dbUserId, dbUserEmail]);
         return res.json({
