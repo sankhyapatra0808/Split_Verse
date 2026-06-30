@@ -268,14 +268,14 @@ router.get("/summary", verifyFirebaseToken, async (req, res) => {
             0
           ) AS pending_amount,
           debtor_user.id AS debtor_user_id,
-          owner_user.id AS creditor_user_id
+          paid_by_user.id AS creditor_user_id
         FROM split_room_items item
         INNER JOIN split_room_members member
           ON member.id = item.assigned_member_id
         INNER JOIN split_rooms room
           ON room.id = item.room_id
-        INNER JOIN users AS owner_user
-          ON owner_user.id = room.owner_user_id
+        INNER JOIN users AS paid_by_user
+          ON paid_by_user.id = COALESCE(room.paid_by_user_id, room.owner_user_id)
         LEFT JOIN users AS member_user
           ON member_user.id = member.user_id
         LEFT JOIN users AS email_user
@@ -287,9 +287,9 @@ router.get("/summary", verifyFirebaseToken, async (req, res) => {
         LEFT JOIN settled
           ON settled.item_id = item.id
         WHERE item.collected_at IS NULL
-        AND room.owner_user_id <> debtor_user.id
+        AND COALESCE(room.paid_by_user_id, room.owner_user_id) <> debtor_user.id
         AND (
-          room.owner_user_id = $1
+          COALESCE(room.paid_by_user_id, room.owner_user_id) = $1
           OR debtor_user.id = $1
         )
       ),

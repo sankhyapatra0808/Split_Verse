@@ -28,6 +28,8 @@ import {
   getFriendsSummary,
   readCachedProfileDisplay,
   getPendingDues,
+  markSplitRoomReminderDiscussed,
+  muteSplitRoomReminder,
   type FriendRequest,
   type PendingDue,
 } from "../../lib/api";
@@ -96,6 +98,7 @@ export default function DashboardLayout({
     FriendRequest[]
   >([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [updatingReminderRoomId, setUpdatingReminderRoomId] = useState("");
   const [notificationsError, setNotificationsError] = useState("");
   const [profileDisplay, setProfileDisplay] = useState({
     avatarMode: cachedProfileDisplay?.avatarMode || "photo",
@@ -147,6 +150,28 @@ export default function DashboardLayout({
 
     return () => window.clearTimeout(timer);
   }, [loadProfileNotifications]);
+
+  async function handleMuteDueReminder(roomId: string) {
+    try {
+      setUpdatingReminderRoomId(roomId);
+      await muteSplitRoomReminder(roomId, 24);
+      setPendingDues((prev) => prev.filter((due) => due.roomId !== roomId));
+      window.dispatchEvent(new Event("splitverse:data-updated"));
+    } finally {
+      setUpdatingReminderRoomId("");
+    }
+  }
+
+  async function handleDiscussedDueReminder(roomId: string) {
+    try {
+      setUpdatingReminderRoomId(roomId);
+      await markSplitRoomReminderDiscussed(roomId);
+      setPendingDues((prev) => prev.filter((due) => due.roomId !== roomId));
+      window.dispatchEvent(new Event("splitverse:data-updated"));
+    } finally {
+      setUpdatingReminderRoomId("");
+    }
+  }
 
   const loadProfileDisplay = useCallback(async () => {
     if (!userId) {
@@ -494,20 +519,37 @@ export default function DashboardLayout({
                 </button>
               ))}
               {pendingDues.map((due) => (
-                <button
-                  type="button"
-                  key={due.id}
-                  onClick={() => handlePendingDueClick(due.roomId)}
-                >
-                  <strong>
-                    {due.title} - {formatCurrency(due.amount)}
-                  </strong>
-                  <span>
-                    {`${due.roomName} - pay to ${
-                      due.receiverName || due.receiverEmail
-                    }`}
-                  </span>
-                </button>
+                <div className="profile-notification-action-card" key={due.id}>
+                  <button
+                    type="button"
+                    onClick={() => handlePendingDueClick(due.roomId)}
+                  >
+                    <strong>
+                      {due.title} - {formatCurrency(due.amount)}
+                    </strong>
+                    <span>
+                      {`${due.roomName} - pay to ${
+                        due.receiverName || due.receiverEmail
+                      }`}
+                    </span>
+                  </button>
+                  <div className="profile-notification-mini-actions">
+                    <button
+                      type="button"
+                      onClick={() => handleDiscussedDueReminder(due.roomId)}
+                      disabled={updatingReminderRoomId === due.roomId}
+                    >
+                      Discussed
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMuteDueReminder(due.roomId)}
+                      disabled={updatingReminderRoomId === due.roomId}
+                    >
+                      Mute 24h
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
           )}

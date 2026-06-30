@@ -14,6 +14,7 @@ const createSplitRoomSchema = z
     name: safeTextSchema("Room name", 100),
     category: z.string().trim().max(60, "Category is too long").optional().default("general"),
     members: z.array(z.string().trim().max(120, "Member value is too long")).max(20, "You can add up to 20 members").optional().default([]),
+    paidByEmail: z.string().trim().email("Choose a valid payer").max(254).optional(),
 })
     .strict();
 const createSplitRoomItemSchema = z
@@ -49,6 +50,11 @@ const netSettlementPaymentSchema = z
         .string({ message: "Wallet PIN is required" })
         .trim()
         .regex(/^\d{4,6}$/, "Wallet PIN must be 4 to 6 digits"),
+})
+    .strict();
+const reminderActionSchema = z
+    .object({
+    mutedHours: z.number().int().min(1).max(168).optional(),
 })
     .strict();
 let splitRoomTablesReady = null;
@@ -89,6 +95,17 @@ async function ensureSplitRoomTables() {
 
     ALTER TABLE split_rooms
       ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'no_one_paid';
+
+    ALTER TABLE split_rooms
+      ADD COLUMN IF NOT EXISTS paid_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS finalized_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS archive_reason TEXT;
+
+    UPDATE split_rooms
+    SET paid_by_user_id = owner_user_id
+    WHERE paid_by_user_id IS NULL;
 
     CREATE TABLE IF NOT EXISTS split_room_members (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -159,6 +176,41 @@ async function ensureNetSettlementTables() {
 
     CREATE INDEX IF NOT EXISTS split_room_item_settlements_method_created_idx
       ON split_room_item_settlements (method, created_at DESC);
+
+    ALTER TABLE split_rooms
+      ADD COLUMN IF NOT EXISTS paid_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+
+    UPDATE split_rooms
+    SET paid_by_user_id = owner_user_id
+    WHERE paid_by_user_id IS NULL;
+
+    ALTER TABLE split_rooms
+      ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS finalized_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS archive_reason TEXT;
+
+    CREATE INDEX IF NOT EXISTS split_rooms_paid_by_idx
+      ON split_rooms (paid_by_user_id, created_at DESC)
+      WHERE paid_by_user_id IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS split_rooms_archived_idx
+      ON split_rooms (archived_at, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS split_room_reminder_preferences (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      room_id UUID NOT NULL REFERENCES split_rooms(id) ON DELETE CASCADE,
+      muted_until TIMESTAMP,
+      muted_at TIMESTAMP,
+      marked_discussed_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      CONSTRAINT split_room_reminder_preferences_unique UNIQUE (user_id, room_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS split_room_reminder_preferences_user_room_idx
+      ON split_room_reminder_preferences (user_id, room_id);
   `);
 }
 async function ensureNetSettlementTablesOnce() {
@@ -178,17 +230,17 @@ function getDebtLineQuery({ currentUserOnly = false, pairOnly = false, forUpdate
     const filters = [
         "item.collected_at IS NULL",
         "COALESCE(assigned_user.id, member.user_id) IS NOT NULL",
-        "room.owner_user_id <> COALESCE(assigned_user.id, member.user_id)",
+        "COALESCE(room.paid_by_user_id, room.owner_user_id) <> COALESCE(assigned_user.id, member.user_id)",
     ];
     if (currentUserOnly) {
-        filters.push("(room.owner_user_id = $1 OR COALESCE(assigned_user.id, member.user_id) = $1)");
+        filters.push("(COALESCE(room.paid_by_user_id, room.owner_user_id) = $1 OR COALESCE(assigned_user.id, member.user_id) = $1)");
     }
     if (pairOnly) {
         filters.push(`
       (
-        (room.owner_user_id = $1 AND COALESCE(assigned_user.id, member.user_id) = $2)
+        (COALESCE(room.paid_by_user_id, room.owner_user_id) = $1 AND COALESCE(assigned_user.id, member.user_id) = $2)
         OR
-        (room.owner_user_id = $2 AND COALESCE(assigned_user.id, member.user_id) = $1)
+        (COALESCE(room.paid_by_user_id, room.owner_user_id) = $2 AND COALESCE(assigned_user.id, member.user_id) = $1)
       )
     `);
     }
@@ -212,9 +264,9 @@ function getDebtLineQuery({ currentUserOnly = false, pairOnly = false, forUpdate
         COALESCE(assigned_user.id, member.user_id) AS debtor_user_id,
         COALESCE(assigned_user.name, member.display_name) AS debtor_name,
         COALESCE(assigned_user.email, member.email) AS debtor_email,
-        owner_user.id AS creditor_user_id,
-        owner_user.name AS creditor_name,
-        owner_user.email AS creditor_email,
+        paid_by_user.id AS creditor_user_id,
+        paid_by_user.name AS creditor_name,
+        paid_by_user.email AS creditor_email,
         item.created_at
       FROM split_room_items item
       INNER JOIN split_room_members member
@@ -223,6 +275,8 @@ function getDebtLineQuery({ currentUserOnly = false, pairOnly = false, forUpdate
         ON room.id = item.room_id
       INNER JOIN users owner_user
         ON owner_user.id = room.owner_user_id
+      INNER JOIN users paid_by_user
+        ON paid_by_user.id = COALESCE(room.paid_by_user_id, room.owner_user_id)
       LEFT JOIN users assigned_user
         ON assigned_user.id = member.user_id
         OR (
@@ -395,11 +449,11 @@ async function refreshRoomPaymentStatuses(client, roomIds) {
             WHERE settled.item_id = item.id
           ), 0), 0) > 0
           AND NOT (
-            member.user_id = room.owner_user_id
+            member.user_id = COALESCE(room.paid_by_user_id, room.owner_user_id)
             OR LOWER(COALESCE(member.email, '')) = LOWER((
-              SELECT owner_user.email
-              FROM users owner_user
-              WHERE owner_user.id = room.owner_user_id
+              SELECT paid_by_user.email
+              FROM users paid_by_user
+              WHERE paid_by_user.id = COALESCE(room.paid_by_user_id, room.owner_user_id)
             ))
           )
         ) THEN 'all_paid'
@@ -527,6 +581,13 @@ async function getVisibleSettlementUserIds(client, currentUserId, currentUserEma
     ),
     room_people AS (
       SELECT room.owner_user_id AS user_id
+      FROM split_rooms room
+      INNER JOIN visible_rooms visible
+        ON visible.id = room.id
+
+      UNION
+
+      SELECT COALESCE(room.paid_by_user_id, room.owner_user_id) AS user_id
       FROM split_rooms room
       INNER JOIN visible_rooms visible
         ON visible.id = room.id
@@ -716,7 +777,14 @@ function serializeRoom(room, members, items, currentUser) {
     return {
         ...room,
         paymentStatus,
+        paidByUserId: room.paid_by_user_id || room.owner_user_id,
+        paidByName: room.paid_by_name || null,
+        paidByEmail: room.paid_by_email || null,
         isOwner: room.owner_user_id === currentUser.id,
+        isArchived: Boolean(room.archived_at),
+        isFinalized: Boolean(room.finalized_at),
+        archivedAt: room.archived_at || null,
+        finalizedAt: room.finalized_at || null,
         memberCount: members.length,
         totalAmount: total,
         outstandingAmount,
@@ -797,14 +865,22 @@ router.get("/", verifyFirebaseToken, async (req, res) => {
       SELECT DISTINCT
         room.id,
         room.owner_user_id,
+        COALESCE(room.paid_by_user_id, room.owner_user_id) AS paid_by_user_id,
+        paid_by_user.name AS paid_by_name,
+        paid_by_user.email AS paid_by_email,
         room.name,
         room.category,
         room.payment_status,
+        room.archived_at,
+        room.finalized_at,
         room.created_at
       FROM split_rooms room
       INNER JOIN split_room_members member
         ON member.room_id = room.id
+      LEFT JOIN users AS paid_by_user
+        ON paid_by_user.id = COALESCE(room.paid_by_user_id, room.owner_user_id)
       WHERE room.owner_user_id = $1
+      OR COALESCE(room.paid_by_user_id, room.owner_user_id) = $1
       OR member.user_id = $1
       OR LOWER(member.email) = LOWER($2)
       ORDER BY room.created_at DESC;
@@ -1093,7 +1169,7 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
         if (!dbUser) {
             return res.status(404).json({ message: "User not found in database" });
         }
-        const { name, category, members: suppliedMembers } = parseRequestBody(createSplitRoomSchema, req.body);
+        const { name, category, members: suppliedMembers, paidByEmail } = parseRequestBody(createSplitRoomSchema, req.body);
         const members = parseMembers(suppliedMembers);
         const roomsCreatedTodayResult = await client.query(`
       SELECT COUNT(*)::int AS room_count
@@ -1108,12 +1184,6 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
             });
         }
         await client.query("BEGIN");
-        const roomResult = await client.query(`
-      INSERT INTO split_rooms (owner_user_id, name, category, payment_status)
-      VALUES ($1, $2, $3, 'no_one_paid')
-      RETURNING id, name, category, payment_status, created_at;
-      `, [dbUser.id, name, category || "general"]);
-        const room = roomResult.rows[0];
         const memberIdentities = members
             .map(memberToIdentity)
             .filter((identity) => identity.email !== dbUser.email.toLowerCase());
@@ -1123,6 +1193,31 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
                 .filter((email) => Boolean(email))),
         ];
         const usersByEmail = await findUsersByEmail(client, memberEmails);
+        const normalizedPaidByEmail = paidByEmail?.trim().toLowerCase() || dbUser.email.toLowerCase();
+        const paidByUser = normalizedPaidByEmail === dbUser.email.toLowerCase()
+            ? dbUser
+            : usersByEmail.get(normalizedPaidByEmail);
+        if (!paidByUser) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+                message: "The payer must be you or an active SplitVerse friend in this room.",
+            });
+        }
+        const roomResult = await client.query(`
+      INSERT INTO split_rooms (owner_user_id, paid_by_user_id, name, category, payment_status)
+      VALUES ($1, $2, $3, $4, 'no_one_paid')
+      RETURNING
+        id,
+        owner_user_id,
+        paid_by_user_id,
+        (SELECT name FROM users WHERE id = $2) AS paid_by_name,
+        (SELECT email FROM users WHERE id = $2) AS paid_by_email,
+        name,
+        category,
+        payment_status,
+        created_at;
+      `, [dbUser.id, paidByUser.id, name, category || "general"]);
+        const room = roomResult.rows[0];
         const memberRows = [
             {
                 roomId: room.id,
@@ -1191,8 +1286,16 @@ router.post("/:roomId/items", verifyFirebaseToken, async (req, res) => {
             return res.status(400).json({ message: "Room id is required" });
         }
         const accessResult = await db.query(`
-      SELECT room.id, room.name
+      SELECT
+        room.id,
+        room.name,
+        COALESCE(room.paid_by_user_id, room.owner_user_id) AS paid_by_user_id,
+        paid_by_user.email AS paid_by_email,
+        room.archived_at,
+        room.finalized_at
       FROM split_rooms room
+      INNER JOIN users paid_by_user
+        ON paid_by_user.id = COALESCE(room.paid_by_user_id, room.owner_user_id)
       WHERE room.id = $1
       AND room.owner_user_id = $2
       LIMIT 1;
@@ -1200,6 +1303,12 @@ router.post("/:roomId/items", verifyFirebaseToken, async (req, res) => {
         if (accessResult.rows.length === 0) {
             return res.status(403).json({
                 message: "Only the room owner can add items to this room",
+            });
+        }
+        const accessRoom = accessResult.rows[0];
+        if (accessRoom.archived_at || accessRoom.finalized_at) {
+            return res.status(400).json({
+                message: "This room is closed, so new items cannot be added.",
             });
         }
         const assignedMemberResult = await db.query(`
@@ -1216,6 +1325,8 @@ router.post("/:roomId/items", verifyFirebaseToken, async (req, res) => {
         const assignedMember = assignedMemberResult.rows[0];
         const isAssignedToCurrentUser = assignedMember.user_id === dbUser.id ||
             assignedMember.email?.toLowerCase() === dbUser.email.toLowerCase();
+        const isAssignedToPayer = assignedMember.user_id === accessRoom.paid_by_user_id ||
+            assignedMember.email?.toLowerCase() === accessRoom.paid_by_email.toLowerCase();
         const itemResult = await db.query(`
       INSERT INTO split_room_items (
         room_id,
@@ -1241,9 +1352,9 @@ router.post("/:roomId/items", verifyFirebaseToken, async (req, res) => {
             dbUser.id,
             title,
             amount,
-            isAssignedToCurrentUser ? new Date() : null,
+            isAssignedToPayer ? new Date() : null,
         ]);
-        if (isAssignedToCurrentUser) {
+        if (isAssignedToPayer) {
             const expenseResult = await db.query(`
         INSERT INTO expenses (
           user_id,
@@ -1260,7 +1371,7 @@ router.post("/:roomId/items", verifyFirebaseToken, async (req, res) => {
           (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
         )
         RETURNING id;
-        `, [dbUser.id, `${accessResult.rows[0].name}: ${title}`, amount]);
+        `, [accessRoom.paid_by_user_id, `${accessRoom.name}: ${title}`, amount]);
             await db.query(`
         UPDATE split_room_items
         SET expense_id = $1
@@ -1276,7 +1387,7 @@ router.post("/:roomId/items", verifyFirebaseToken, async (req, res) => {
         END,
         updated_at = NOW()
       WHERE id = $1;
-      `, [roomId, isAssignedToCurrentUser]);
+      `, [roomId, isAssignedToPayer]);
         const notifiedUserIds = await getRoomUserIds(roomId);
         sendLiveUpdate([dbUser.id, ...notifiedUserIds], {
             type: "split-room",
@@ -1320,7 +1431,7 @@ router.post("/:roomId/members/:memberId/collect", verifyFirebaseToken, async (re
         }
         await client.query("BEGIN");
         const roomResult = await client.query(`
-        SELECT id, name, owner_user_id
+        SELECT id, name, owner_user_id, archived_at, finalized_at
         FROM split_rooms
         WHERE id = $1
         AND owner_user_id = $2
@@ -1331,6 +1442,12 @@ router.post("/:roomId/members/:memberId/collect", verifyFirebaseToken, async (re
             await client.query("ROLLBACK");
             return res.status(404).json({
                 message: "Room not found or you do not own this room",
+            });
+        }
+        if (room.archived_at || room.finalized_at) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({
+                message: "Closed rooms cannot be manually collected",
             });
         }
         const memberResult = await client.query(`
@@ -1474,7 +1591,9 @@ router.patch("/items/:itemId", verifyFirebaseToken, async (req, res) => {
           item.amount::float,
           item.collected_at,
           item.expense_id,
-          room.owner_user_id
+          room.owner_user_id,
+          room.archived_at,
+          room.finalized_at
         FROM split_room_items item
         INNER JOIN split_rooms room
           ON room.id = item.room_id
@@ -1490,6 +1609,12 @@ router.patch("/items/:itemId", verifyFirebaseToken, async (req, res) => {
             await client.query("ROLLBACK");
             return res.status(403).json({
                 message: "Only the room owner can edit this item",
+            });
+        }
+        if (item.archived_at || item.finalized_at) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({
+                message: "Closed rooms cannot be edited",
             });
         }
         if (item.collected_at || item.expense_id) {
@@ -1570,7 +1695,9 @@ router.delete("/items/:itemId", verifyFirebaseToken, async (req, res) => {
           item.room_id,
           item.collected_at,
           item.expense_id,
-          room.owner_user_id
+          room.owner_user_id,
+          room.archived_at,
+          room.finalized_at
         FROM split_room_items item
         INNER JOIN split_rooms room
           ON room.id = item.room_id
@@ -1586,6 +1713,12 @@ router.delete("/items/:itemId", verifyFirebaseToken, async (req, res) => {
             await client.query("ROLLBACK");
             return res.status(403).json({
                 message: "Only the room owner can delete this item",
+            });
+        }
+        if (item.archived_at || item.finalized_at) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({
+                message: "Closed rooms cannot be changed",
             });
         }
         if (item.collected_at || item.expense_id) {
@@ -1845,6 +1978,333 @@ router.patch("/:roomId/payment-status", verifyFirebaseToken, async (req, res) =>
         client.release();
     }
 });
+router.post("/:roomId/reminders", verifyFirebaseToken, async (req, res) => {
+    try {
+        await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
+        const firebaseUser = req.user;
+        if (!firebaseUser) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const dbUser = await getCurrentUser(firebaseUser.uid);
+        if (!dbUser) {
+            return res.status(404).json({ message: "User not found in database" });
+        }
+        const roomId = getRouteParam(req, "roomId");
+        if (!roomId) {
+            return res.status(400).json({ message: "Room id is required" });
+        }
+        const roomResult = await db.query(`
+        SELECT
+          room.id,
+          room.name,
+          room.owner_user_id,
+          COALESCE(room.paid_by_user_id, room.owner_user_id) AS paid_by_user_id,
+          paid_by_user.email AS paid_by_email,
+          room.archived_at,
+          room.finalized_at
+        FROM split_rooms room
+        LEFT JOIN users paid_by_user
+          ON paid_by_user.id = COALESCE(room.paid_by_user_id, room.owner_user_id)
+        WHERE room.id = $1
+        AND room.owner_user_id = $2;
+        `, [roomId, dbUser.id]);
+        const room = roomResult.rows[0];
+        if (!room) {
+            return res.status(404).json({
+                message: "Room not found or you do not own this room",
+            });
+        }
+        if (room.archived_at || room.finalized_at) {
+            return res.status(409).json({
+                message: "Closed rooms do not need reminders",
+            });
+        }
+        const pendingResult = await db.query(`
+        WITH settled AS (
+          SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
+          FROM split_room_item_settlements
+          GROUP BY item_id
+        )
+        SELECT
+          member.user_id,
+          member.email,
+          COALESCE(SUM(GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0)), 0)::float AS amount
+        FROM split_room_items item
+        INNER JOIN split_room_members member
+          ON member.id = item.assigned_member_id
+        LEFT JOIN settled
+          ON settled.item_id = item.id
+        WHERE item.room_id = $1
+        AND item.collected_at IS NULL
+        AND NOT (
+          member.user_id = $2
+          OR LOWER(COALESCE(member.email, '')) = LOWER(COALESCE($3, ''))
+        )
+        GROUP BY member.user_id, member.email
+        HAVING COALESCE(SUM(GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0)), 0) > 0;
+        `, [roomId, room.paid_by_user_id, room.paid_by_email]);
+        const notifiedUserIds = pendingResult.rows
+            .map((row) => row.user_id)
+            .filter((userId) => Boolean(userId));
+        if (notifiedUserIds.length > 0) {
+            sendLiveUpdate(notifiedUserIds, {
+                type: "split-room",
+                reason: "payment-reminder",
+                roomId,
+            });
+        }
+        return res.json({
+            message: "Reminder sent for adjusted pending dues",
+            remindedCount: pendingResult.rows.length,
+        });
+    }
+    catch (error) {
+        console.error("Send split room reminder failed:", error);
+        return res.status(500).json({
+            message: "Failed to send reminder",
+        });
+    }
+});
+router.post("/:roomId/reminders/mute", verifyFirebaseToken, async (req, res) => {
+    try {
+        await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
+        const firebaseUser = req.user;
+        if (!firebaseUser) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const dbUser = await getCurrentUser(firebaseUser.uid);
+        if (!dbUser) {
+            return res.status(404).json({ message: "User not found in database" });
+        }
+        const roomId = getRouteParam(req, "roomId");
+        const { mutedHours = 24 } = parseRequestBody(reminderActionSchema, req.body || {});
+        if (!roomId) {
+            return res.status(400).json({ message: "Room id is required" });
+        }
+        const membershipResult = await db.query(`
+        SELECT room.id
+        FROM split_rooms room
+        INNER JOIN split_room_members member
+          ON member.room_id = room.id
+        WHERE room.id = $1
+        AND (
+          member.user_id = $2
+          OR LOWER(COALESCE(member.email, '')) = LOWER($3)
+          OR room.owner_user_id = $2
+          OR COALESCE(room.paid_by_user_id, room.owner_user_id) = $2
+        )
+        LIMIT 1;
+        `, [roomId, dbUser.id, dbUser.email]);
+        if (membershipResult.rows.length === 0) {
+            return res.status(404).json({ message: "Room not found" });
+        }
+        const prefResult = await db.query(`
+        INSERT INTO split_room_reminder_preferences (
+          user_id,
+          room_id,
+          muted_until,
+          muted_at,
+          updated_at
+        )
+        VALUES ($1, $2, NOW() + ($3::text || ' hours')::interval, NOW(), NOW())
+        ON CONFLICT (user_id, room_id)
+        DO UPDATE SET
+          muted_until = EXCLUDED.muted_until,
+          muted_at = NOW(),
+          updated_at = NOW()
+        RETURNING muted_until;
+        `, [dbUser.id, roomId, mutedHours]);
+        return res.json({
+            message: "Reminder muted",
+            mutedUntil: prefResult.rows[0].muted_until,
+        });
+    }
+    catch (error) {
+        if (sendValidationError(res, error)) {
+            return;
+        }
+        console.error("Mute split room reminder failed:", error);
+        return res.status(500).json({
+            message: "Failed to mute reminder",
+        });
+    }
+});
+router.post("/:roomId/reminders/discussed", verifyFirebaseToken, async (req, res) => {
+    try {
+        await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
+        const firebaseUser = req.user;
+        if (!firebaseUser) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const dbUser = await getCurrentUser(firebaseUser.uid);
+        if (!dbUser) {
+            return res.status(404).json({ message: "User not found in database" });
+        }
+        const roomId = getRouteParam(req, "roomId");
+        if (!roomId) {
+            return res.status(400).json({ message: "Room id is required" });
+        }
+        await db.query(`
+        INSERT INTO split_room_reminder_preferences (
+          user_id,
+          room_id,
+          marked_discussed_at,
+          updated_at
+        )
+        VALUES ($1, $2, NOW(), NOW())
+        ON CONFLICT (user_id, room_id)
+        DO UPDATE SET
+          marked_discussed_at = NOW(),
+          updated_at = NOW();
+        `, [dbUser.id, roomId]);
+        return res.json({ message: "Reminder marked as discussed" });
+    }
+    catch (error) {
+        console.error("Mark split room reminder discussed failed:", error);
+        return res.status(500).json({
+            message: "Failed to update reminder",
+        });
+    }
+});
+router.post("/:roomId/finalize", verifyFirebaseToken, async (req, res) => {
+    const client = await db.connect();
+    try {
+        await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
+        const firebaseUser = req.user;
+        if (!firebaseUser) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const dbUser = await getCurrentUser(firebaseUser.uid);
+        if (!dbUser) {
+            return res.status(404).json({ message: "User not found in database" });
+        }
+        const roomId = getRouteParam(req, "roomId");
+        if (!roomId) {
+            return res.status(400).json({ message: "Room id is required" });
+        }
+        await client.query("BEGIN");
+        const offsetResult = await applyAutomaticNetOffsetsForUser(client, dbUser.id);
+        const dueResult = await client.query(`
+        WITH settled AS (
+          SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
+          FROM split_room_item_settlements
+          GROUP BY item_id
+        )
+        SELECT COALESCE(SUM(GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0)), 0)::float AS pending_amount
+        FROM split_room_items item
+        INNER JOIN split_room_members member
+          ON member.id = item.assigned_member_id
+        INNER JOIN split_rooms room
+          ON room.id = item.room_id
+        LEFT JOIN settled
+          ON settled.item_id = item.id
+        WHERE room.id = $1
+        AND room.owner_user_id = $2
+        AND item.collected_at IS NULL
+        AND NOT (
+          member.user_id = COALESCE(room.paid_by_user_id, room.owner_user_id)
+          OR LOWER(COALESCE(member.email, '')) = LOWER((
+            SELECT email FROM users WHERE id = COALESCE(room.paid_by_user_id, room.owner_user_id)
+          ))
+        );
+        `, [roomId, dbUser.id]);
+        const pendingAmount = Number(dueResult.rows[0]?.pending_amount ?? 0);
+        if (pendingAmount > 0.009) {
+            await client.query("ROLLBACK");
+            return res.status(409).json({
+                message: "This room still has adjusted pending dues",
+                pendingAmount,
+            });
+        }
+        const roomResult = await client.query(`
+        UPDATE split_rooms
+        SET
+          finalized_at = COALESCE(finalized_at, NOW()),
+          finalized_by_user_id = COALESCE(finalized_by_user_id, $2),
+          payment_status = 'complete',
+          updated_at = NOW()
+        WHERE id = $1
+        AND owner_user_id = $2
+        RETURNING id, finalized_at;
+        `, [roomId, dbUser.id]);
+        if (roomResult.rows.length === 0) {
+            await client.query("ROLLBACK");
+            return res.status(404).json({ message: "Room not found or you do not own this room" });
+        }
+        await client.query("COMMIT");
+        const notifiedUserIds = await getRoomUserIds(roomId);
+        sendLiveUpdate([dbUser.id, ...notifiedUserIds, ...offsetResult.affectedUserIds], {
+            type: "split-room",
+            reason: "room-finalized",
+            roomId,
+        });
+        return res.json({
+            message: "Room finalized",
+            finalizedAt: roomResult.rows[0].finalized_at,
+        });
+    }
+    catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        console.error("Finalize split room failed:", error);
+        return res.status(500).json({
+            message: "Failed to finalize room",
+        });
+    }
+    finally {
+        client.release();
+    }
+});
+router.post("/:roomId/archive", verifyFirebaseToken, async (req, res) => {
+    try {
+        await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
+        const firebaseUser = req.user;
+        if (!firebaseUser) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const dbUser = await getCurrentUser(firebaseUser.uid);
+        if (!dbUser) {
+            return res.status(404).json({ message: "User not found in database" });
+        }
+        const roomId = getRouteParam(req, "roomId");
+        if (!roomId) {
+            return res.status(400).json({ message: "Room id is required" });
+        }
+        const archiveResult = await db.query(`
+        UPDATE split_rooms
+        SET
+          archived_at = COALESCE(archived_at, NOW()),
+          archive_reason = COALESCE(archive_reason, 'Archived by room owner'),
+          updated_at = NOW()
+        WHERE id = $1
+        AND owner_user_id = $2
+        RETURNING id, archived_at;
+        `, [roomId, dbUser.id]);
+        if (archiveResult.rows.length === 0) {
+            return res.status(404).json({ message: "Room not found or you do not own this room" });
+        }
+        const notifiedUserIds = await getRoomUserIds(roomId);
+        sendLiveUpdate([dbUser.id, ...notifiedUserIds], {
+            type: "split-room",
+            reason: "room-archived",
+            roomId,
+        });
+        return res.json({
+            message: "Room archived",
+            archivedAt: archiveResult.rows[0].archived_at,
+        });
+    }
+    catch (error) {
+        console.error("Archive split room failed:", error);
+        return res.status(500).json({
+            message: "Failed to archive room",
+        });
+    }
+});
 router.delete("/:roomId", verifyFirebaseToken, async (req, res) => {
     const client = await db.connect();
     try {
@@ -1873,17 +2333,36 @@ router.delete("/:roomId", verifyFirebaseToken, async (req, res) => {
             });
         }
         const dueResult = await client.query(`
-      SELECT COALESCE(SUM(amount), 0)::float AS total_due
-      FROM split_room_items
-      INNER JOIN split_room_members
-        ON split_room_members.id = split_room_items.assigned_member_id
-      WHERE split_room_items.room_id = $1
-      AND split_room_items.collected_at IS NULL
+      WITH room_scope AS (
+        SELECT
+          id,
+          COALESCE(paid_by_user_id, owner_user_id) AS paid_by_user_id
+        FROM split_rooms
+        WHERE id = $1
+      ),
+      settled AS (
+        SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
+        FROM split_room_item_settlements
+        GROUP BY item_id
+      )
+      SELECT COALESCE(SUM(GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0)), 0)::float AS total_due
+      FROM split_room_items item
+      INNER JOIN split_room_members member
+        ON member.id = item.assigned_member_id
+      INNER JOIN room_scope room
+        ON room.id = item.room_id
+      LEFT JOIN users paid_by_user
+        ON paid_by_user.id = room.paid_by_user_id
+      LEFT JOIN settled
+        ON settled.item_id = item.id
+      WHERE item.room_id = $1
+      AND item.collected_at IS NULL
+      AND GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0) > 0
       AND NOT (
-        split_room_members.user_id = $2
-        OR LOWER(COALESCE(split_room_members.email, '')) = LOWER($3)
+        member.user_id = room.paid_by_user_id
+        OR LOWER(COALESCE(member.email, '')) = LOWER(COALESCE(paid_by_user.email, ''))
       );
-      `, [roomId, dbUser.id, dbUser.email]);
+      `, [roomId]);
         const totalDue = Number(dueResult.rows[0]?.total_due ?? 0);
         if (totalDue > 0) {
             return res.status(409).json({
@@ -1977,16 +2456,16 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
           split_room_items.collected_at,
           split_room_members.user_id AS assigned_user_id,
           split_room_members.email AS assigned_email,
-          split_rooms.owner_user_id AS receiver_user_id,
-          owner_user.email AS receiver_email,
+          COALESCE(split_rooms.paid_by_user_id, split_rooms.owner_user_id) AS receiver_user_id,
+          paid_by_user.email AS receiver_email,
           split_rooms.name AS room_name
         FROM split_room_items
         JOIN split_room_members
           ON split_room_members.id = split_room_items.assigned_member_id
         JOIN split_rooms
           ON split_rooms.id = split_room_items.room_id
-        JOIN users AS owner_user
-          ON owner_user.id = split_rooms.owner_user_id
+        JOIN users AS paid_by_user
+          ON paid_by_user.id = COALESCE(split_rooms.paid_by_user_id, split_rooms.owner_user_id)
         LEFT JOIN (
           SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
           FROM split_room_item_settlements
@@ -2186,28 +2665,39 @@ router.get("/pending-dues", verifyFirebaseToken, async (req, res) => {
           split_room_items.created_at,
           split_rooms.id AS room_id,
           split_rooms.name AS room_name,
-          owner_user.name AS receiver_name,
-          owner_user.email AS receiver_email
+          paid_by_user.name AS receiver_name,
+          paid_by_user.email AS receiver_email
         FROM split_room_items
         JOIN split_room_members
           ON split_room_members.id = split_room_items.assigned_member_id
         JOIN split_rooms
           ON split_rooms.id = split_room_items.room_id
-        JOIN users AS owner_user
-          ON owner_user.id = split_rooms.owner_user_id
+        JOIN users AS paid_by_user
+          ON paid_by_user.id = COALESCE(split_rooms.paid_by_user_id, split_rooms.owner_user_id)
         LEFT JOIN (
           SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
           FROM split_room_item_settlements
           GROUP BY item_id
         ) settled
           ON settled.item_id = split_room_items.id
+        LEFT JOIN split_room_reminder_preferences reminder_pref
+          ON reminder_pref.room_id = split_rooms.id
+          AND reminder_pref.user_id = $1
         WHERE (
           split_room_members.user_id = $1
           OR LOWER(COALESCE(split_room_members.email, '')) = LOWER($2)
         )
-        AND split_rooms.owner_user_id <> $1
+        AND COALESCE(split_rooms.paid_by_user_id, split_rooms.owner_user_id) <> $1
         AND split_room_items.collected_at IS NULL
         AND GREATEST(split_room_items.amount - COALESCE(settled.settled_amount, 0), 0) > 0
+        AND (
+          reminder_pref.muted_until IS NULL
+          OR reminder_pref.muted_until < NOW()
+        )
+        AND (
+          reminder_pref.marked_discussed_at IS NULL
+          OR reminder_pref.marked_discussed_at < NOW() - INTERVAL '24 hours'
+        )
         ORDER BY split_room_items.created_at DESC;
         `, [dbUserId, dbUserEmail]);
         return res.json({

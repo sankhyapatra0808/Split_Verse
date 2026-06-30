@@ -81,6 +81,10 @@ export default function TransactionHistory() {
   const [exportYear, setExportYear] = useState(
     String(new Date().getFullYear()),
   );
+  const [exportFormat, setExportFormat] = useState<"csv" | "pdf">("csv");
+  const [advancedFriendFilter, setAdvancedFriendFilter] = useState("");
+  const [advancedRoomFilter, setAdvancedRoomFilter] = useState("");
+  const [advancedMonthFilter, setAdvancedMonthFilter] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const [transactionTotal, setTransactionTotal] = useState(0);
@@ -94,10 +98,15 @@ export default function TransactionHistory() {
     setError("");
 
     try {
+      const combinedSearch = [search, advancedFriendFilter, advancedRoomFilter]
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join(" ");
       const data = await getTransactions({
-        search,
+        search: combinedSearch,
         status,
         limit: visibleTransactionLimit,
+        month: advancedMonthFilter ? Number(advancedMonthFilter) : undefined,
       });
 
       setTransactions(data.transactions);
@@ -121,7 +130,7 @@ export default function TransactionHistory() {
 
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  }, [status, advancedMonthFilter]);
 
   useEffect(() => {
     const handleDataUpdated = () => {
@@ -162,6 +171,56 @@ export default function TransactionHistory() {
     void withTopProgress(() => loadTransactions());
   }
 
+  function openPdfPrintView(rows: TransactionItem[]) {
+    const htmlRows = rows
+      .map(
+        (transaction) => `
+          <tr>
+            <td>${transaction.title}</td>
+            <td>${transaction.room}</td>
+            <td>${transaction.amount}</td>
+            <td>${transaction.displayStatus}</td>
+            <td>${transaction.type}</td>
+            <td>${transaction.displayDate || formatTransactionDate(transaction.createdAt)}</td>
+          </tr>`,
+      )
+      .join("");
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+
+    if (!printWindow) {
+      setExportError("Allow popups to open the PDF print view.");
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>SplitVerse Transactions</title>
+          <style>
+            body { font-family: Inter, Arial, sans-serif; padding: 28px; color: #172033; }
+            h1 { margin: 0 0 8px; }
+            p { color: #667085; }
+            table { width: 100%; border-collapse: collapse; margin-top: 22px; }
+            th, td { border: 1px solid #d0d5dd; padding: 10px; text-align: left; font-size: 12px; }
+            th { background: #f2f4f7; }
+          </style>
+        </head>
+        <body>
+          <h1>SplitVerse transaction export</h1>
+          <p>Use the browser print dialog and choose “Save as PDF”.</p>
+          <table>
+            <thead>
+              <tr><th>Title</th><th>Room</th><th>Amount</th><th>Status</th><th>Type</th><th>Date</th></tr>
+            </thead>
+            <tbody>${htmlRows}</tbody>
+          </table>
+          <script>window.onload = () => window.print();</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  }
+
   async function handleExportCsv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const numericExportCount = Number(exportCount);
@@ -190,17 +249,28 @@ export default function TransactionHistory() {
 
     try {
       await withTopProgress(async () => {
+        const combinedSearch = [search, advancedFriendFilter, advancedRoomFilter]
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .join(" ");
         const data = await getTransactions({
-          search,
+          search: combinedSearch,
           status,
           exportMode,
           limit:
             exportMode === "count" ? Math.floor(numericExportCount) : undefined,
           year: exportMode === "year" ? numericExportYear : undefined,
+          month: advancedMonthFilter ? Number(advancedMonthFilter) : undefined,
         });
 
         if (data.transactions.length === 0) {
           setExportError("No transactions found for that export range.");
+          return;
+        }
+
+        if (exportFormat === "pdf") {
+          openPdfPrintView(data.transactions);
+          setExportDialogOpen(false);
           return;
         }
 
@@ -280,6 +350,32 @@ export default function TransactionHistory() {
               value={status}
               options={statusOptions}
               onChange={setStatus}
+            />
+
+            <input
+              className="transaction-advanced-input"
+              type="search"
+              placeholder="Friend filter"
+              value={advancedFriendFilter}
+              onChange={(event) => setAdvancedFriendFilter(event.target.value)}
+            />
+
+            <input
+              className="transaction-advanced-input"
+              type="search"
+              placeholder="Room filter"
+              value={advancedRoomFilter}
+              onChange={(event) => setAdvancedRoomFilter(event.target.value)}
+            />
+
+            <input
+              className="transaction-advanced-input compact"
+              type="number"
+              min="1"
+              max="12"
+              placeholder="Month"
+              value={advancedMonthFilter}
+              onChange={(event) => setAdvancedMonthFilter(event.target.value)}
             />
 
             <button className="dashboard-secondary-button" type="submit">
@@ -430,6 +526,19 @@ export default function TransactionHistory() {
               />
             </label>
 
+            <label>
+              <span>Export format</span>
+              <Dropdown
+                ariaLabel="Export format"
+                value={exportFormat}
+                options={[
+                  { value: "csv", label: "CSV file" },
+                  { value: "pdf", label: "PDF print view" },
+                ]}
+                onChange={setExportFormat}
+              />
+            </label>
+
             {exportMode === "count" ? (
               <label>
                 <span>Number of past transactions</span>
@@ -474,7 +583,13 @@ export default function TransactionHistory() {
                 type="submit"
                 disabled={exporting}
               >
-                {exporting ? "Preparing CSV" : "Download CSV"}
+                {exporting
+                  ? exportFormat === "pdf"
+                    ? "Preparing PDF"
+                    : "Preparing CSV"
+                  : exportFormat === "pdf"
+                    ? "Open PDF view"
+                    : "Download CSV"}
               </button>
             </div>
           </form>

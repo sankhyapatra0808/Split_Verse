@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import {
+  archiveSplitRoom,
   collectSplitRoomMemberDues,
   createSplitRoom,
   createSplitRoomItem,
@@ -24,9 +25,11 @@ import {
   getNetSettlements,
   getPendingDues,
   getSplitRooms,
+  finalizeSplitRoom,
   payNetSettlement,
   paySplitRoomDue,
   removeSplitRoomMember,
+  sendSplitRoomReminder,
   updateSplitRoomItem,
   type Friend,
   type NetSettlement,
@@ -35,6 +38,7 @@ import {
 } from "../lib/api";
 
 import { useAppSettings } from "../context/useAppSettings";
+import { useAuth } from "../context/useAuth";
 import Dropdown, { type DropdownOption } from "../components/Dropdown";
 import LoadingSkeleton from "../components/LoadingSkeleton";
 import { withTopProgress } from "../utils/topProgress";
@@ -160,6 +164,7 @@ export default function SharedSplitRooms() {
     currencies,
     formatCurrency,
   } = useAppSettings();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const roomIdFromNotification = searchParams.get("roomId") || "";
   const [rooms, setRooms] = useState<SplitRoom[]>([]);
@@ -172,6 +177,7 @@ export default function SharedSplitRooms() {
   const [friendSearch, setFriendSearch] = useState("");
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [roomCategory, setRoomCategory] = useState("restaurant");
+  const [roomPaidByEmail, setRoomPaidByEmail] = useState("");
   const [itemTitle, setItemTitle] = useState("");
   const [itemAmount, setItemAmount] = useState("");
   const [assignedMemberId, setAssignedMemberId] = useState("");
@@ -188,6 +194,9 @@ export default function SharedSplitRooms() {
   const [removingMemberId, setRemovingMemberId] = useState("");
   const [deletingRoomId, setDeletingRoomId] = useState("");
   const [collectingMemberId, setCollectingMemberId] = useState("");
+  const [remindingRoomId, setRemindingRoomId] = useState("");
+  const [finalizingRoomId, setFinalizingRoomId] = useState("");
+  const [archivingRoomId, setArchivingRoomId] = useState("");
   const [pendingDues, setPendingDues] = useState<PendingDue[]>([]);
   const [netSettlements, setNetSettlements] = useState<NetSettlement[]>([]);
   const [netSettlementPinDialogOpen, setNetSettlementPinDialogOpen] = useState(false);
@@ -255,6 +264,32 @@ export default function SharedSplitRooms() {
       })),
     [sortedMembers],
   );
+  const paidByOptions = useMemo<DropdownOption[]>(() => {
+    const selfEmail = user?.email || "";
+    const selectedFriends = friends.filter((friend) =>
+      selectedFriendEmails.includes(friend.email),
+    );
+
+    return [
+      { value: selfEmail, label: selfEmail ? "Me" : "Me (current user)" },
+      ...selectedFriends.map((friend) => ({
+        value: friend.email,
+        label: friend.name || friend.email,
+      })),
+    ].filter((option, index, options) =>
+      option.value && options.findIndex((item) => item.value === option.value) === index,
+    );
+  }, [friends, selectedFriendEmails, user?.email]);
+
+  useEffect(() => {
+    if (paidByOptions.length === 0) {
+      return;
+    }
+
+    if (!roomPaidByEmail || !paidByOptions.some((option) => option.value === roomPaidByEmail)) {
+      setRoomPaidByEmail(String(paidByOptions[0].value));
+    }
+  }, [paidByOptions, roomPaidByEmail]);
   const selectedRoomPendingDues = useMemo(
     () =>
       selectedRoom
@@ -262,6 +297,7 @@ export default function SharedSplitRooms() {
         : [],
     [pendingDues, selectedRoom],
   );
+  const selectedRoomClosed = Boolean(selectedRoom?.isArchived || selectedRoom?.isFinalized);
   const paymentDue = useMemo(
     () => pendingDues.find((due) => due.id === paymentDueId) ?? null,
     [paymentDueId, pendingDues],
@@ -714,10 +750,12 @@ export default function SharedSplitRooms() {
     name,
     category,
     friendEmails,
+    paidByEmail,
   }: {
     name: string;
     category: string;
     friendEmails: string[];
+    paidByEmail: string;
   }): SplitRoom {
     const roomId = getOptimisticId("room");
     const createdAt = new Date().toISOString();
@@ -749,6 +787,7 @@ export default function SharedSplitRooms() {
       };
     });
     const members = [ownerMember, ...friendMembers];
+    const paidByFriend = friends.find((friend) => friend.email === paidByEmail);
 
     return {
       id: roomId,
@@ -756,7 +795,14 @@ export default function SharedSplitRooms() {
       category,
       created_at: createdAt,
       paymentStatus: "no_one_paid",
+      paidByUserId: paidByFriend?.id ?? null,
+      paidByName: paidByFriend?.name || (paidByEmail === user?.email ? "Me" : paidByEmail),
+      paidByEmail,
       isOwner: true,
+      isArchived: false,
+      isFinalized: false,
+      archivedAt: null,
+      finalizedAt: null,
       memberCount: members.length,
       totalAmount: 0,
       outstandingAmount: 0,
@@ -1171,10 +1217,12 @@ export default function SharedSplitRooms() {
     const nextRoomName = roomName.trim();
     const nextRoomCategory = roomCategory;
     const nextFriendEmails = selectedFriendEmails;
+    const nextPaidByEmail = roomPaidByEmail || user?.email || "";
     const optimisticRoom = createOptimisticRoom({
       name: nextRoomName,
       category: nextRoomCategory,
       friendEmails: nextFriendEmails,
+      paidByEmail: nextPaidByEmail,
     });
 
     try {
@@ -1186,6 +1234,7 @@ export default function SharedSplitRooms() {
       setFriendSearch("");
       setFriendPickerOpen(false);
       setRoomCategory("restaurant");
+      setRoomPaidByEmail(user?.email || "");
       setMessage("Room created instantly. Saving...");
 
       await withTopProgress(async () => {
@@ -1193,6 +1242,7 @@ export default function SharedSplitRooms() {
           name: nextRoomName,
           category: nextRoomCategory,
           members: nextFriendEmails,
+          paidByEmail: nextPaidByEmail,
         });
 
         setMessage("Room created and added to your active rooms.");
@@ -1204,6 +1254,7 @@ export default function SharedSplitRooms() {
       setRoomName(nextRoomName);
       setSelectedFriendEmails(nextFriendEmails);
       setRoomCategory(nextRoomCategory);
+      setRoomPaidByEmail(nextPaidByEmail);
       setError(
         createError instanceof Error
           ? createError.message
@@ -1619,6 +1670,87 @@ export default function SharedSplitRooms() {
     }
   }
 
+  async function handleSendRoomReminder(room: SplitRoom) {
+    try {
+      setRemindingRoomId(room.id);
+      setMessage("");
+      setError("");
+
+      const response = await withTopProgress(() => sendSplitRoomReminder(room.id));
+      setMessage(response.message || "Reminder sent for adjusted pending dues.");
+    } catch (reminderError) {
+      setError(
+        reminderError instanceof Error
+          ? reminderError.message
+          : "Failed to send reminder",
+      );
+    } finally {
+      setRemindingRoomId("");
+    }
+  }
+
+  async function handleFinalizeRoom(room: SplitRoom) {
+    if (!window.confirm(`Finalize ${room.name}? This locks the room after adjusted dues are cleared.`)) {
+      return;
+    }
+
+    try {
+      setFinalizingRoomId(room.id);
+      setMessage("");
+      setError("");
+
+      await withTopProgress(() => finalizeSplitRoom(room.id));
+      setRooms((prev) =>
+        prev.map((item) =>
+          item.id === room.id
+            ? { ...item, isFinalized: true, finalizedAt: new Date().toISOString(), paymentStatus: "complete", status: "Complete" }
+            : item,
+        ),
+      );
+      refreshSplitRoomDataInBackground(room.id);
+      setMessage("Room finalized and locked.");
+    } catch (finalizeError) {
+      setError(
+        finalizeError instanceof Error
+          ? finalizeError.message
+          : "Failed to finalize room",
+      );
+    } finally {
+      setFinalizingRoomId("");
+    }
+  }
+
+  async function handleArchiveRoom(room: SplitRoom) {
+    if (!window.confirm(`Archive ${room.name}? It will stay visible as history but cannot be edited.`)) {
+      return;
+    }
+
+    try {
+      setArchivingRoomId(room.id);
+      setMessage("");
+      setError("");
+
+      await withTopProgress(() => archiveSplitRoom(room.id));
+      setRooms((prev) =>
+        prev.map((item) =>
+          item.id === room.id
+            ? { ...item, isArchived: true, archivedAt: new Date().toISOString(), status: "Archived" }
+            : item,
+        ),
+      );
+      refreshSplitRoomDataInBackground(room.id);
+      setMessage("Room archived.");
+    } catch (archiveError) {
+      setError(
+        archiveError instanceof Error
+          ? archiveError.message
+          : "Failed to archive room",
+      );
+    } finally {
+      setArchivingRoomId("");
+    }
+  }
+
   return (
     <DashboardLayout eyebrow="Shared rooms">
       <section className="dashboard-page-grid split-rooms-grid">
@@ -1723,16 +1855,29 @@ export default function SharedSplitRooms() {
                   </div>
                 )}
               </label>
-              <label>
-                <span>Category</span>
-                <Dropdown
-                  ariaLabel="Room category"
-                  value={roomCategory}
-                  options={categoryOptions}
-                  onChange={setRoomCategory}
-                  disabled={savingRoom}
-                />
-              </label>
+
+              <div className="split-room-meta-row">
+                <label>
+                  <span>Paid by</span>
+                  <Dropdown
+                    ariaLabel="Who paid the bill"
+                    value={roomPaidByEmail || paidByOptions[0]?.value || ""}
+                    options={paidByOptions.length > 0 ? paidByOptions : [{ value: "", label: "Choose friends first" }]}
+                    onChange={(value) => setRoomPaidByEmail(String(value))}
+                    disabled={savingRoom || paidByOptions.length === 0}
+                  />
+                </label>
+                <label>
+                  <span>Category</span>
+                  <Dropdown
+                    ariaLabel="Room category"
+                    value={roomCategory}
+                    options={categoryOptions}
+                    onChange={setRoomCategory}
+                    disabled={savingRoom}
+                  />
+                </label>
+              </div>
               <button
                 className="dashboard-primary-button"
                 type="submit"
@@ -1745,11 +1890,13 @@ export default function SharedSplitRooms() {
 
           <article className="bento-card room-list-card">
             <div className="bento-card-head">
-              <div>
+              <div className="room-list-title">
                 <span>Rooms</span>
                 <h2>Active rooms</h2>
               </div>
-              <CalendarDays size={23} />
+              <div className="room-list-icon" aria-hidden="true">
+                <CalendarDays size={18} />
+              </div>
             </div>
 
             <div className="room-card-list compact">
@@ -1777,36 +1924,62 @@ export default function SharedSplitRooms() {
                     type="button"
                     onClick={() => setSelectedRoomId(room.id)}
                   >
-                    <div>
-                      <strong>{room.name}</strong>
-                      <span>
+                    <div className="room-row-main">
+                      <strong className="room-row-name">{room.name}</strong>
+                      <span className="room-row-meta">
                         {room.memberCount} members
                         {room.isOwner ? " - Owner" : ""}
+                        {room.paidByName || room.paidByEmail ? ` - Paid by ${room.paidByName || room.paidByEmail}` : ""}
+                        {room.isFinalized ? " - Finalized" : room.isArchived ? " - Archived" : ""}
                       </span>
                     </div>
-                    <em>{formatCurrency(room.outstandingAmount)}{" "}due</em>
+                    <em className="room-row-due">{formatCurrency(room.outstandingAmount)}{" "}due</em>
                   </button>
-                  <span className="status-pill">{room.status}</span>
-                  <button
-                    className="room-delete-button"
-                    type="button"
-                    aria-label={`Delete ${room.name}`}
-                    title={
-                      !room.isOwner
-                        ? "Only the room owner can delete this room"
-                        : room.outstandingAmount > 0
-                          ? "All member payments must be done before deleting this room"
-                          : "Delete room"
-                    }
-                    onClick={() => handleDeleteRoom(room)}
-                    disabled={
-                      !room.isOwner ||
-                      room.outstandingAmount > 0 ||
-                      deletingRoomId === room.id
-                    }
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {room.isOwner && (
+                    <div className="room-row-actions">
+                      <button
+                        className="room-delete-button"
+                        type="button"
+                        aria-label={`Delete ${room.name}`}
+                        title={
+                          room.outstandingAmount > 0
+                            ? "All member payments must be done before deleting this room"
+                            : "Delete room"
+                        }
+                        onClick={() => handleDeleteRoom(room)}
+                        disabled={
+                          room.outstandingAmount > 0 ||
+                          deletingRoomId === room.id
+                        }
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                      {!room.isFinalized && !room.isArchived && (
+                        <button
+                          className="room-delete-button room-lock-button"
+                          type="button"
+                          aria-label={`Finalize ${room.name}`}
+                          title="Finalize room after adjusted dues are cleared"
+                          onClick={() => handleFinalizeRoom(room)}
+                          disabled={finalizingRoomId === room.id || room.outstandingAmount > 0}
+                        >
+                          <CheckCircle2 size={15} />
+                        </button>
+                      )}
+                      {!room.isArchived && (
+                        <button
+                          className="room-delete-button room-archive-button"
+                          type="button"
+                          aria-label={`Archive ${room.name}`}
+                          title="Archive room"
+                          onClick={() => handleArchiveRoom(room)}
+                          disabled={archivingRoomId === room.id}
+                        >
+                          <CalendarDays size={15} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1904,6 +2077,21 @@ export default function SharedSplitRooms() {
                                     : "Manual collect"}
                                 </button>
                               )}
+                            {!balance.isMe &&
+                              balance.outstandingAmount > 0 &&
+                              selectedRoom.isOwner && (
+                                <button
+                                  className="balance-collect-button compact reminder"
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleSendRoomReminder(selectedRoom);
+                                  }}
+                                  disabled={remindingRoomId === selectedRoom.id}
+                                >
+                                  {remindingRoomId === selectedRoom.id ? "Sending" : "Remind"}
+                                </button>
+                              )}
                           </span>
                           <strong>{balance.detail}</strong>
                           <em>
@@ -1939,7 +2127,9 @@ export default function SharedSplitRooms() {
 
           {selectedRoom && (
             <p className="dashboard-muted-text split-room-owner-only-note">
-              {selectedRoom.isOwner ? (
+              {selectedRoomClosed ? (
+                "This room is finalized or archived, so item edits are locked."
+              ) : selectedRoom.isOwner ? (
                 "Room owner"
               ) : (
                 <>
@@ -1968,7 +2158,7 @@ export default function SharedSplitRooms() {
                 placeholder={itemPlaceholder}
                 value={itemTitle}
                 onChange={(event) => setItemTitle(event.target.value)}
-                disabled={savingItem || !selectedRoom || !selectedRoom.isOwner}
+                disabled={savingItem || !selectedRoom || !selectedRoom.isOwner || selectedRoomClosed}
               />
             </label>
             <label>
@@ -1980,7 +2170,7 @@ export default function SharedSplitRooms() {
                 placeholder={formatCurrency(420)}
                 value={itemAmount}
                 onChange={(event) => setItemAmount(event.target.value)}
-                disabled={savingItem || !selectedRoom || !selectedRoom.isOwner}
+                disabled={savingItem || !selectedRoom || !selectedRoom.isOwner || selectedRoomClosed}
               />
             </label>
             <label className="assign-category">
@@ -1991,11 +2181,11 @@ export default function SharedSplitRooms() {
                 options={memberOptions}
                 onChange={setAssignedMemberId}
                 placeholder="No members yet"
-                disabled={savingItem || sortedMembers.length === 0 || !selectedRoom?.isOwner}
+                disabled={savingItem || sortedMembers.length === 0 || !selectedRoom?.isOwner || selectedRoomClosed}
               />
             </label>
-            <button type="submit" disabled={savingItem || !selectedRoom || !selectedRoom.isOwner}>
-              {savingItem ? "Adding item" : selectedRoom?.isOwner ? "Add item" : "Owner only"}
+            <button type="submit" disabled={savingItem || !selectedRoom || !selectedRoom.isOwner || selectedRoomClosed}>
+              {savingItem ? "Adding item" : selectedRoomClosed ? "Room closed" : selectedRoom?.isOwner ? "Add item" : "Owner only"}
             </button>
           </form>
         </article>

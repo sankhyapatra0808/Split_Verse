@@ -386,7 +386,14 @@ export type SplitRoom = {
   category: string | null;
   created_at: string;
   paymentStatus: RoomPaymentStatus;
+  paidByUserId?: string | null;
+  paidByName?: string | null;
+  paidByEmail?: string | null;
   isOwner: boolean;
+  isArchived?: boolean;
+  isFinalized?: boolean;
+  archivedAt?: string | null;
+  finalizedAt?: string | null;
   memberCount: number;
   totalAmount: number;
   outstandingAmount: number;
@@ -403,6 +410,7 @@ export type CreateSplitRoomPayload = {
   name: string;
   category: string;
   members: string[];
+  paidByEmail?: string;
 };
 
 export type CreateSplitRoomItemPayload = {
@@ -547,6 +555,28 @@ export type FriendsSummary = {
   friends: Friend[];
   receivedRequests: FriendRequest[];
   sentRequests: FriendRequest[];
+};
+
+export type FriendActivitySummary = {
+  roomsTogether: number;
+  totalSettled: number;
+  pendingWithFriend: number;
+  netPosition: number;
+};
+
+export type FriendActivityItem = {
+  id: string;
+  title: string;
+  amount: number;
+  direction: "incoming" | "outgoing" | "neutral";
+  source: string;
+  createdAt: string;
+};
+
+export type FriendActivityResponse = {
+  friend: Friend;
+  summary: FriendActivitySummary;
+  recentActivity: FriendActivityItem[];
 };
 
 
@@ -831,6 +861,52 @@ export async function deleteSplitRoom(roomId: string) {
   });
 }
 
+export async function finalizeSplitRoom(roomId: string) {
+  const response = await apiFetch<{ message: string; finalizedAt: string }>(
+    `/api/split-rooms/${roomId}/finalize`,
+    { method: "POST" },
+  );
+  clearApiCache("dues");
+  return response;
+}
+
+export async function archiveSplitRoom(roomId: string) {
+  const response = await apiFetch<{ message: string; archivedAt: string }>(
+    `/api/split-rooms/${roomId}/archive`,
+    { method: "POST" },
+  );
+  clearApiCache("dues");
+  return response;
+}
+
+export async function sendSplitRoomReminder(roomId: string) {
+  return apiFetch<{ message: string; remindedCount: number }>(
+    `/api/split-rooms/${roomId}/reminders`,
+    { method: "POST" },
+  );
+}
+
+export async function muteSplitRoomReminder(roomId: string, mutedHours = 24) {
+  const response = await apiFetch<{ message: string; mutedUntil: string }>(
+    `/api/split-rooms/${roomId}/reminders/mute`,
+    {
+      method: "POST",
+      body: JSON.stringify({ mutedHours }),
+    },
+  );
+  clearApiCache("dues");
+  return response;
+}
+
+export async function markSplitRoomReminderDiscussed(roomId: string) {
+  const response = await apiFetch<{ message: string }>(
+    `/api/split-rooms/${roomId}/reminders/discussed`,
+    { method: "POST" },
+  );
+  clearApiCache("dues");
+  return response;
+}
+
 export async function collectSplitRoomMemberDues(
   roomId: string,
   memberId: string,
@@ -859,6 +935,12 @@ export async function updateSplitRoomPaymentStatus(
 export async function getFriendsSummary() {
   return cachedApiRequest("friends:summary", 10_000, () =>
     apiFetch<FriendsSummary>("/api/friends"),
+  );
+}
+
+export async function getFriendActivity(friendId: string) {
+  return cachedApiRequest(`friends:activity:${friendId}`, 10_000, () =>
+    apiFetch<FriendActivityResponse>(`/api/friends/${friendId}/activity`),
   );
 }
 
@@ -901,6 +983,9 @@ export async function getTransactions(params?: {
   limit?: number;
   exportMode?: "count" | "year";
   year?: number;
+  month?: number;
+  friendId?: string;
+  roomId?: string;
 }) {
   const searchParams = new URLSearchParams();
 
@@ -922,6 +1007,18 @@ export async function getTransactions(params?: {
 
   if (params?.year) {
     searchParams.set("year", String(params.year));
+  }
+
+  if (params?.month) {
+    searchParams.set("month", String(params.month));
+  }
+
+  if (params?.friendId) {
+    searchParams.set("friendId", params.friendId);
+  }
+
+  if (params?.roomId) {
+    searchParams.set("roomId", params.roomId);
   }
 
   const queryString = searchParams.toString();

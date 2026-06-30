@@ -128,6 +128,76 @@ function isProbablyImageUrl(value: string) {
   }
 }
 
+function loadCropImage(sourceUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load this image for cropping."));
+    image.src = sourceUrl;
+  });
+}
+
+async function createSquareCroppedFile({
+  sourceUrl,
+  zoom,
+  offsetX,
+  offsetY,
+}: {
+  sourceUrl: string;
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+}) {
+  const image = await loadCropImage(sourceUrl);
+  const outputSize = 512;
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Could not prepare image cropper.");
+  }
+
+  canvas.width = outputSize;
+  canvas.height = outputSize;
+
+  const safeZoom = Math.min(Math.max(zoom, 1), 3);
+  const cropSize = Math.min(image.naturalWidth, image.naturalHeight) / safeZoom;
+  const maxX = Math.max(0, image.naturalWidth - cropSize);
+  const maxY = Math.max(0, image.naturalHeight - cropSize);
+  const centerX = maxX / 2;
+  const centerY = maxY / 2;
+  const sourceX = Math.min(maxX, Math.max(0, centerX + (offsetX / 100) * centerX));
+  const sourceY = Math.min(maxY, Math.max(0, centerY + (offsetY / 100) * centerY));
+
+  context.drawImage(
+    image,
+    sourceX,
+    sourceY,
+    cropSize,
+    cropSize,
+    0,
+    0,
+    outputSize,
+    outputSize,
+  );
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((result) => {
+      if (result) {
+        resolve(result);
+        return;
+      }
+
+      reject(new Error("Could not create cropped photo."));
+    }, "image/jpeg", 0.92);
+  });
+
+  return new File([blob], `splitverse-profile-${Date.now()}.jpg`, {
+    type: "image/jpeg",
+  });
+}
+
 
 function normalizePinInput(value: string) {
   return value.replace(/\D/g, "").slice(0, 6);
@@ -281,6 +351,13 @@ export default function AppSettings() {
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [profilePhotoPreviewUrl, setProfilePhotoPreviewUrl] = useState("");
   const profilePhotoObjectUrlRef = useRef("");
+  const [profileCropOpen, setProfileCropOpen] = useState(false);
+  const [profileCropSourceUrl, setProfileCropSourceUrl] = useState("");
+  const [profileCropZoom, setProfileCropZoom] = useState(1);
+  const [profileCropOffsetX, setProfileCropOffsetX] = useState(0);
+  const [profileCropOffsetY, setProfileCropOffsetY] = useState(0);
+  const [profileCropSaving, setProfileCropSaving] = useState(false);
+  const [profileCropError, setProfileCropError] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
   const [walletPinSet, setWalletPinSet] = useState(false);
@@ -371,6 +448,7 @@ export default function AppSettings() {
         savedProfilePhotoUrl ||
         user?.photoURL ||
         "";
+  const profilePhotoReady = Boolean(profilePhotoFile || profilePhotoUrl.trim());
 
   function isKnownCurrency(value: unknown): value is CurrencyCode {
     return currencies.some((currency) => currency.code === value);
@@ -568,41 +646,79 @@ export default function AppSettings() {
     void saveProfileDisplay(nextAvatarId, undefined, { quiet: false });
   }
 
+  function openProfileCropper() {
+    const sourceUrl = profilePhotoPreviewUrl || profilePhotoUrl.trim();
+
+    if (!sourceUrl) {
+      void saveProfileDisplay(avatarId, profilePhotoUrl);
+      return;
+    }
+
+    if (profilePhotoUrl.trim() && !isProbablyImageUrl(profilePhotoUrl)) {
+      setSettingsError("Enter a valid http or https profile photo URL.");
+      return;
+    }
+
+    setProfileCropSourceUrl(sourceUrl);
+    setProfileCropZoom(1);
+    setProfileCropOffsetX(0);
+    setProfileCropOffsetY(0);
+    setProfileCropError("");
+    setProfileCropOpen(true);
+  }
+
+  async function handleConfirmProfileCrop() {
+    if (!profileCropSourceUrl) {
+      return;
+    }
+
+    try {
+      setProfileCropSaving(true);
+      setProfileSaving(true);
+      setSettingsError("");
+      setSettingsMessage("");
+      setProfileCropError("");
+
+      const croppedFile = await createSquareCroppedFile({
+        sourceUrl: profileCropSourceUrl,
+        zoom: profileCropZoom,
+        offsetX: profileCropOffsetX,
+        offsetY: profileCropOffsetY,
+      });
+      const response = await withTopProgress(() => uploadProfilePhoto(croppedFile));
+
+      setSavedProfilePhotoUrl(
+        response.user.profile_photo_url || response.user.photo_url || "",
+      );
+      setProfilePhotoUrl("");
+      setProfilePhotoFile(null);
+      clearProfilePhotoPreview();
+      setAvatarId(
+        response.user.avatar_mode === "initials" ? "initials" : "current",
+      );
+      setProfileCropOpen(false);
+      window.dispatchEvent(new Event("splitverse:profile-updated"));
+      window.dispatchEvent(new Event("splitverse:data-updated"));
+      setSettingsMessage("Profile photo cropped and uploaded securely.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not crop this profile photo.";
+      setProfileCropError(
+        profilePhotoUrl.trim()
+          ? `${message} If the image URL blocks cropping, upload the image file instead.`
+          : message,
+      );
+    } finally {
+      setProfileCropSaving(false);
+      setProfileSaving(false);
+    }
+  }
+
   async function handleSaveProfilePhoto(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (profilePhotoFile) {
-      try {
-        setProfileSaving(true);
-        setSettingsError("");
-        setSettingsMessage("");
-
-        const response = await withTopProgress(() =>
-          uploadProfilePhoto(profilePhotoFile),
-        );
-
-        setSavedProfilePhotoUrl(
-          response.user.profile_photo_url || response.user.photo_url || "",
-        );
-        setProfilePhotoUrl("");
-        setProfilePhotoFile(null);
-        clearProfilePhotoPreview();
-        setAvatarId(
-          response.user.avatar_mode === "initials" ? "initials" : "current",
-        );
-        window.dispatchEvent(new Event("splitverse:profile-updated"));
-        window.dispatchEvent(new Event("splitverse:data-updated"));
-        setSettingsMessage("Profile photo uploaded securely.");
-      } catch (error) {
-        setSettingsError(
-          error instanceof Error
-            ? error.message
-            : "Could not upload profile photo.",
-        );
-      } finally {
-        setProfileSaving(false);
-      }
-
+    if (profilePhotoFile || profilePhotoUrl.trim()) {
+      openProfileCropper();
       return;
     }
 
@@ -958,7 +1074,7 @@ export default function AppSettings() {
             </div>
 
             <button
-              className="dashboard-secondary-button"
+              className={`dashboard-secondary-button profile-photo-save-button ${profilePhotoReady ? "ready" : ""}`}
               type="submit"
               disabled={profileSaving || profileLoading}
             >
@@ -1555,6 +1671,116 @@ export default function AppSettings() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+
+      {profileCropOpen && (
+        <div className="transaction-export-backdrop" role="presentation">
+          <div
+            className="transaction-export-dialog profile-crop-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-crop-title"
+          >
+            <div className="transaction-export-head">
+              <div>
+                <span>Profile photo crop</span>
+                <h2 id="profile-crop-title">Choose the perfect square preview</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close profile cropper"
+                onClick={() => setProfileCropOpen(false)}
+                disabled={profileCropSaving}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="profile-crop-stage">
+              <div className="profile-crop-frame">
+                <img
+                  src={profileCropSourceUrl}
+                  alt="Profile crop preview"
+                  style={{
+                    transform: `translate(${profileCropOffsetX / 3}%, ${profileCropOffsetY / 3}%) scale(${profileCropZoom})`,
+                  }}
+                />
+              </div>
+              <div className="profile-crop-live-preview">
+                <span>Final preview</span>
+                <div>
+                  <img
+                    src={profileCropSourceUrl}
+                    alt="Cropped profile preview"
+                    style={{
+                      transform: `translate(${profileCropOffsetX / 3}%, ${profileCropOffsetY / 3}%) scale(${profileCropZoom})`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="profile-crop-controls">
+              <label>
+                <span>Zoom</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="3"
+                  step="0.05"
+                  value={profileCropZoom}
+                  onChange={(event) => setProfileCropZoom(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>Move left/right</span>
+                <input
+                  type="range"
+                  min="-100"
+                  max="100"
+                  step="1"
+                  value={profileCropOffsetX}
+                  onChange={(event) => setProfileCropOffsetX(Number(event.target.value))}
+                />
+              </label>
+              <label>
+                <span>Move up/down</span>
+                <input
+                  type="range"
+                  min="-100"
+                  max="100"
+                  step="1"
+                  value={profileCropOffsetY}
+                  onChange={(event) => setProfileCropOffsetY(Number(event.target.value))}
+                />
+              </label>
+            </div>
+
+            {profileCropError && (
+              <p className="transaction-export-message error">{profileCropError}</p>
+            )}
+
+            <div className="transaction-export-actions">
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                onClick={() => setProfileCropOpen(false)}
+                disabled={profileCropSaving}
+              >
+                Cancel
+              </button>
+              <button
+                className="dashboard-primary-button"
+                type="button"
+                onClick={handleConfirmProfileCrop}
+                disabled={profileCropSaving}
+              >
+                {profileCropSaving ? "Saving crop" : "Save cropped photo"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

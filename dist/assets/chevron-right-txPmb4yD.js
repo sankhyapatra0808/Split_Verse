@@ -1,0 +1,1 @@
+import{X as e}from"./index-Dx0f2oST.js";var t=e(`chevron-right`,[[`path`,{d:`m9 18 6-6-6-6`,key:`mthhwq`}]]);export{t};

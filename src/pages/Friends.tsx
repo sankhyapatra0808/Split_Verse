@@ -5,8 +5,10 @@ import { Check, Mail, Search, Send, UserPlus, UsersRound } from "lucide-react";
 import DashboardLayout from "./dashboard/DashboardLayout";
 import {
   acceptFriendRequest,
+  getFriendActivity,
   getFriendsSummary,
   sendFriendRequest,
+  type FriendActivityResponse,
   type FriendsSummary,
 } from "../lib/api";
 import LoadingSkeleton from "../components/LoadingSkeleton";
@@ -71,6 +73,8 @@ export default function Friends() {
   const [sending, setSending] = useState(false);
   const [acceptingId, setAcceptingId] = useState("");
   const [friendSearch, setFriendSearch] = useState("");
+  const [selectedFriendActivity, setSelectedFriendActivity] = useState<FriendActivityResponse | null>(null);
+  const [loadingFriendActivityId, setLoadingFriendActivityId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const optimisticIdRef = useRef(0);
@@ -258,6 +262,25 @@ export default function Friends() {
     }
   };
 
+  const handleViewFriendActivity = async (friendId: string) => {
+    setMessage("");
+    setError("");
+
+    try {
+      setLoadingFriendActivityId(friendId);
+      const activity = await getFriendActivity(friendId);
+      setSelectedFriendActivity(activity);
+    } catch (activityError) {
+      setError(
+        activityError instanceof Error
+          ? activityError.message
+          : "Could not load friend activity",
+      );
+    } finally {
+      setLoadingFriendActivityId("");
+    }
+  };
+
   const pendingReceivedRequests = summary.receivedRequests.filter(
     (request) => request.status === "pending",
   );
@@ -381,10 +404,61 @@ export default function Friends() {
                   <strong>{getFriendLabel(friend.name, friend.email)}</strong>
                   <small>{friend.email}</small>
                 </div>
+                <button
+                  className="friend-activity-button"
+                  type="button"
+                  onClick={() => handleViewFriendActivity(friend.id)}
+                  disabled={loadingFriendActivityId === friend.id}
+                >
+                  {loadingFriendActivityId === friend.id ? "Loading" : "Activity"}
+                </button>
               </div>
             ))}
           </div>
         </article>
+
+        {selectedFriendActivity && (
+          <article className="bento-card friend-activity-card">
+            <div className="bento-card-head">
+              <div>
+                <span>Friend activity</span>
+                <h2>{getFriendLabel(selectedFriendActivity.friend.name, selectedFriendActivity.friend.email)}</h2>
+              </div>
+              <UsersRound size={23} />
+            </div>
+
+            <div className="friend-activity-stats">
+              <div>
+                <span>Rooms together</span>
+                <strong>{selectedFriendActivity.summary.roomsTogether}</strong>
+              </div>
+              <div>
+                <span>Total settled</span>
+                <strong>₹{selectedFriendActivity.summary.totalSettled}</strong>
+              </div>
+              <div>
+                <span>Net position</span>
+                <strong>₹{selectedFriendActivity.summary.netPosition}</strong>
+              </div>
+            </div>
+
+            <div className="friend-activity-list">
+              {selectedFriendActivity.recentActivity.length === 0 ? (
+                <p className="dashboard-muted-text">No shared activity yet.</p>
+              ) : (
+                selectedFriendActivity.recentActivity.map((activity) => (
+                  <div className="friend-activity-row" key={activity.id}>
+                    <div>
+                      <strong>{activity.title}</strong>
+                      <span>{activity.source}</span>
+                    </div>
+                    <em>₹{activity.amount}</em>
+                  </div>
+                ))
+              )}
+            </div>
+          </article>
+        )}
 
         <article className="bento-card friend-inbox-card">
           <div className="bento-card-head">

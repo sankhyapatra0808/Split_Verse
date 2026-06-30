@@ -70,6 +70,10 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       : accountCreatedAt.getFullYear();
     const currentYear = new Date().getFullYear();
     const requestedYear = Number(req.query.year);
+    const requestedMonth = Number(req.query.month);
+    const selectedMonth = Number.isInteger(requestedMonth) && requestedMonth >= 1 && requestedMonth <= 12
+      ? requestedMonth
+      : null;
     const selectedYear = isYearExport
       ? Math.min(
           Math.max(
@@ -185,6 +189,10 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
             $4::int IS NULL
             OR EXTRACT(YEAR FROM (created_at + INTERVAL '5 hours 30 minutes'))::int = $4::int
           )
+          AND (
+            $6::int IS NULL
+            OR EXTRACT(MONTH FROM (created_at + INTERVAL '5 hours 30 minutes'))::int = $6::int
+          )
       ),
 
       selected_transactions AS (
@@ -215,7 +223,7 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       LEFT JOIN selected_transactions ON true
       ORDER BY selected_transactions.created_at DESC NULLS LAST;
       `,
-      [dbUserId, search, status, selectedYear, limit],
+      [dbUserId, search, status, selectedYear, limit, selectedMonth],
     );
 
     const transactions = result.rows

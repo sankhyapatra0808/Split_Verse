@@ -537,6 +537,211 @@ router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
   }
 });
 
+
+router.get("/:friendId/activity", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    await ensureFriendTables();
+
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const dbUser = await getCurrentUser(firebaseUser.uid);
+
+    if (!dbUser) {
+      return res.status(404).json({ message: "User not found in database" });
+    }
+
+    const friendId = String(req.params.friendId ?? "");
+
+    if (!friendId) {
+      return res.status(400).json({ message: "Friend id is required" });
+    }
+
+    const [userOneId, userTwoId] = sortFriendPair(dbUser.id, friendId);
+    const friendshipResult = await db.query(
+      `
+      SELECT id
+      FROM friendships
+      WHERE user_one_id = $1
+      AND user_two_id = $2;
+      `,
+      [userOneId, userTwoId],
+    );
+
+    if (friendshipResult.rows.length === 0) {
+      return res.status(404).json({ message: "Friendship not found" });
+    }
+
+    const friendResult = await db.query<FriendRow>(
+      `
+      SELECT
+        users.id,
+        users.name,
+        users.email,
+        users.photo_url,
+        users.profile_photo_url,
+        users.avatar_mode,
+        CASE
+          WHEN users.avatar_mode = 'initials' THEN NULL
+          ELSE COALESCE(users.profile_photo_url, users.photo_url)
+        END AS display_photo_url,
+        friendships.created_at AS friendship_created_at,
+        GREATEST(0, DATE_PART('day', NOW() - friendships.created_at)::int) AS friendship_days
+      FROM users
+      INNER JOIN friendships
+        ON (
+          (friendships.user_one_id = $1 AND friendships.user_two_id = users.id)
+          OR (friendships.user_two_id = $1 AND friendships.user_one_id = users.id)
+        )
+      WHERE users.id = $2;
+      `,
+      [dbUser.id, friendId],
+    );
+
+    const friend = friendResult.rows[0];
+
+    if (!friend) {
+      return res.status(404).json({ message: "Friend not found" });
+    }
+
+    const activityResult = await db.query<{
+      id: string;
+      title: string;
+      amount: number;
+      direction: "incoming" | "outgoing" | "neutral";
+      source: string;
+      created_at: string;
+    }>(
+      `
+      WITH shared_rooms AS (
+        SELECT DISTINCT room.id
+        FROM split_rooms room
+        INNER JOIN split_room_members mine ON mine.room_id = room.id
+        INNER JOIN split_room_members theirs ON theirs.room_id = room.id
+        WHERE (
+          mine.user_id = $1
+          OR LOWER(COALESCE(mine.email, '')) = LOWER($3)
+          OR room.owner_user_id = $1
+          OR COALESCE(room.paid_by_user_id, room.owner_user_id) = $1
+        )
+        AND (
+          theirs.user_id = $2
+          OR LOWER(COALESCE(theirs.email, '')) = LOWER($4)
+          OR room.owner_user_id = $2
+          OR COALESCE(room.paid_by_user_id, room.owner_user_id) = $2
+        )
+      ),
+      room_activity AS (
+        SELECT
+          'room-' || room.id::text AS id,
+          room.name AS title,
+          COALESCE(SUM(item.amount), 0)::float AS amount,
+          'neutral' AS direction,
+          'room' AS source,
+          room.created_at
+        FROM split_rooms room
+        INNER JOIN shared_rooms shared ON shared.id = room.id
+        LEFT JOIN split_room_items item ON item.room_id = room.id
+        GROUP BY room.id, room.name, room.created_at
+      ),
+      wallet_activity AS (
+        SELECT
+          'wallet-' || wallet.id::text AS id,
+          COALESCE(wallet.description, 'Wallet settlement') AS title,
+          wallet.amount::float AS amount,
+          CASE
+            WHEN wallet.user_id = $1 AND wallet.type = 'debit' THEN 'outgoing'
+            WHEN wallet.user_id = $1 AND wallet.type = 'credit' THEN 'incoming'
+            ELSE 'neutral'
+          END AS direction,
+          'wallet' AS source,
+          wallet.created_at
+        FROM wallet_transactions wallet
+        WHERE wallet.user_id = $1
+        AND LOWER(COALESCE(wallet.description, '')) LIKE '%' || LOWER($4) || '%'
+      )
+      SELECT *
+      FROM (
+        SELECT * FROM room_activity
+        UNION ALL
+        SELECT * FROM wallet_activity
+      ) activity
+      ORDER BY created_at DESC
+      LIMIT 8;
+      `,
+      [dbUser.id, friendId, dbUser.email, friend.email],
+    );
+
+    const summaryResult = await db.query<{
+      rooms_together: number;
+      total_settled: number;
+      net_position: number;
+    }>(
+      `
+      WITH shared_rooms AS (
+        SELECT DISTINCT room.id
+        FROM split_rooms room
+        INNER JOIN split_room_members mine ON mine.room_id = room.id
+        INNER JOIN split_room_members theirs ON theirs.room_id = room.id
+        WHERE (
+          mine.user_id = $1
+          OR LOWER(COALESCE(mine.email, '')) = LOWER($3)
+          OR room.owner_user_id = $1
+          OR COALESCE(room.paid_by_user_id, room.owner_user_id) = $1
+        )
+        AND (
+          theirs.user_id = $2
+          OR LOWER(COALESCE(theirs.email, '')) = LOWER($4)
+          OR room.owner_user_id = $2
+          OR COALESCE(room.paid_by_user_id, room.owner_user_id) = $2
+        )
+      ),
+      friend_wallet AS (
+        SELECT
+          COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0)::float AS incoming,
+          COALESCE(SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END), 0)::float AS outgoing
+        FROM wallet_transactions
+        WHERE user_id = $1
+        AND LOWER(COALESCE(description, '')) LIKE '%' || LOWER($4) || '%'
+      )
+      SELECT
+        (SELECT COUNT(*)::int FROM shared_rooms) AS rooms_together,
+        COALESCE(friend_wallet.incoming + friend_wallet.outgoing, 0)::float AS total_settled,
+        COALESCE(friend_wallet.incoming - friend_wallet.outgoing, 0)::float AS net_position
+      FROM friend_wallet;
+      `,
+      [dbUser.id, friendId, dbUser.email, friend.email],
+    );
+
+    return res.json({
+      friend,
+      summary: {
+        roomsTogether: Number(summaryResult.rows[0]?.rooms_together ?? 0),
+        totalSettled: Number(summaryResult.rows[0]?.total_settled ?? 0),
+        pendingWithFriend: 0,
+        netPosition: Number(summaryResult.rows[0]?.net_position ?? 0),
+      },
+      recentActivity: activityResult.rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        amount: Number(row.amount),
+        direction: row.direction,
+        source: row.source,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error("Load friend activity failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to load friend activity",
+    });
+  }
+});
+
 router.delete("/:friendId", verifyFirebaseToken, async (req: AuthRequest, res) => {
   try {
     await ensureFriendTables();

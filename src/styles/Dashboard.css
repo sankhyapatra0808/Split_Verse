@@ -2907,3 +2907,33 @@
   line-height: 1;
   text-align: center;
 }
+
+.profile-notification-action-card {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-notification-mini-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 4px 6px;
+}
+
+.profile-notification-mini-actions button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: #003ecc;
+  background: rgba(0, 62, 204, 0.08);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.profile-notification-mini-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
