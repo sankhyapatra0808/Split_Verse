@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import Cropper, { type Area } from "react-easy-crop";
 import {
   AlertTriangle,
   BellRing,
@@ -138,16 +139,12 @@ function loadCropImage(sourceUrl: string) {
   });
 }
 
-async function createSquareCroppedFile({
+async function createCroppedProfilePhotoFile({
   sourceUrl,
-  zoom,
-  offsetX,
-  offsetY,
+  cropArea,
 }: {
   sourceUrl: string;
-  zoom: number;
-  offsetX: number;
-  offsetY: number;
+  cropArea: Area;
 }) {
   const image = await loadCropImage(sourceUrl);
   const outputSize = 512;
@@ -161,21 +158,14 @@ async function createSquareCroppedFile({
   canvas.width = outputSize;
   canvas.height = outputSize;
 
-  const safeZoom = Math.min(Math.max(zoom, 1), 3);
-  const cropSize = Math.min(image.naturalWidth, image.naturalHeight) / safeZoom;
-  const maxX = Math.max(0, image.naturalWidth - cropSize);
-  const maxY = Math.max(0, image.naturalHeight - cropSize);
-  const centerX = maxX / 2;
-  const centerY = maxY / 2;
-  const sourceX = Math.min(maxX, Math.max(0, centerX + (offsetX / 100) * centerX));
-  const sourceY = Math.min(maxY, Math.max(0, centerY + (offsetY / 100) * centerY));
-
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
   context.drawImage(
     image,
-    sourceX,
-    sourceY,
-    cropSize,
-    cropSize,
+    cropArea.x,
+    cropArea.y,
+    cropArea.width,
+    cropArea.height,
     0,
     0,
     outputSize,
@@ -353,9 +343,9 @@ export default function AppSettings() {
   const profilePhotoObjectUrlRef = useRef("");
   const [profileCropOpen, setProfileCropOpen] = useState(false);
   const [profileCropSourceUrl, setProfileCropSourceUrl] = useState("");
+  const [profileCrop, setProfileCrop] = useState({ x: 0, y: 0 });
   const [profileCropZoom, setProfileCropZoom] = useState(1);
-  const [profileCropOffsetX, setProfileCropOffsetX] = useState(0);
-  const [profileCropOffsetY, setProfileCropOffsetY] = useState(0);
+  const [profileCroppedAreaPixels, setProfileCroppedAreaPixels] = useState<Area | null>(null);
   const [profileCropSaving, setProfileCropSaving] = useState(false);
   const [profileCropError, setProfileCropError] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
@@ -660,9 +650,9 @@ export default function AppSettings() {
     }
 
     setProfileCropSourceUrl(sourceUrl);
+    setProfileCrop({ x: 0, y: 0 });
     setProfileCropZoom(1);
-    setProfileCropOffsetX(0);
-    setProfileCropOffsetY(0);
+    setProfileCroppedAreaPixels(null);
     setProfileCropError("");
     setProfileCropOpen(true);
   }
@@ -679,11 +669,14 @@ export default function AppSettings() {
       setSettingsMessage("");
       setProfileCropError("");
 
-      const croppedFile = await createSquareCroppedFile({
+      if (!profileCroppedAreaPixels) {
+        setProfileCropError("Adjust the crop area before saving.");
+        return;
+      }
+
+      const croppedFile = await createCroppedProfilePhotoFile({
         sourceUrl: profileCropSourceUrl,
-        zoom: profileCropZoom,
-        offsetX: profileCropOffsetX,
-        offsetY: profileCropOffsetY,
+        cropArea: profileCroppedAreaPixels,
       });
       const response = await withTopProgress(() => uploadProfilePhoto(croppedFile));
 
@@ -1066,6 +1059,7 @@ export default function AppSettings() {
                     autoComplete="off"
                     onChange={(event) => {
                       setProfilePhotoFile(null);
+                      clearProfilePhotoPreview();
                       setProfilePhotoUrl(event.target.value);
                     }}
                   />
@@ -1698,28 +1692,29 @@ export default function AppSettings() {
               </button>
             </div>
 
-            <div className="profile-crop-stage">
+            <div className="profile-crop-stage gallery-style-cropper">
               <div className="profile-crop-frame">
-                <img
-                  src={profileCropSourceUrl}
-                  alt="Profile crop preview"
-                  style={{
-                    transform: `translate(${profileCropOffsetX / 3}%, ${profileCropOffsetY / 3}%) scale(${profileCropZoom})`,
-                  }}
+                <Cropper
+                  image={profileCropSourceUrl}
+                  crop={profileCrop}
+                  zoom={profileCropZoom}
+                  aspect={1}
+                  minZoom={1}
+                  maxZoom={4}
+                  objectFit="contain"
+                  showGrid
+                  restrictPosition={false}
+                  onCropChange={setProfileCrop}
+                  onZoomChange={setProfileCropZoom}
+                  onCropComplete={(_, croppedAreaPixels) =>
+                    setProfileCroppedAreaPixels(croppedAreaPixels)
+                  }
                 />
               </div>
-              <div className="profile-crop-live-preview">
-                <span>Final preview</span>
-                <div>
-                  <img
-                    src={profileCropSourceUrl}
-                    alt="Cropped profile preview"
-                    style={{
-                      transform: `translate(${profileCropOffsetX / 3}%, ${profileCropOffsetY / 3}%) scale(${profileCropZoom})`,
-                    }}
-                  />
-                </div>
-              </div>
+              <p>
+                Drag the photo to reposition it, pinch or use the slider to zoom,
+                then save the exact square area you want as your profile photo.
+              </p>
             </div>
 
             <div className="profile-crop-controls">
@@ -1728,32 +1723,10 @@ export default function AppSettings() {
                 <input
                   type="range"
                   min="1"
-                  max="3"
-                  step="0.05"
+                  max="4"
+                  step="0.01"
                   value={profileCropZoom}
                   onChange={(event) => setProfileCropZoom(Number(event.target.value))}
-                />
-              </label>
-              <label>
-                <span>Move left/right</span>
-                <input
-                  type="range"
-                  min="-100"
-                  max="100"
-                  step="1"
-                  value={profileCropOffsetX}
-                  onChange={(event) => setProfileCropOffsetX(Number(event.target.value))}
-                />
-              </label>
-              <label>
-                <span>Move up/down</span>
-                <input
-                  type="range"
-                  min="-100"
-                  max="100"
-                  step="1"
-                  value={profileCropOffsetY}
-                  onChange={(event) => setProfileCropOffsetY(Number(event.target.value))}
                 />
               </label>
             </div>

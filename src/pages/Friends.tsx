@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, Mail, Search, Send, UserPlus, UsersRound } from "lucide-react";
+import { Check, Mail, Search, Send, UserPlus, UsersRound, X } from "lucide-react";
 
 import DashboardLayout from "./dashboard/DashboardLayout";
 import {
@@ -281,6 +281,10 @@ export default function Friends() {
     }
   };
 
+  const closeFriendActivityDialog = () => {
+    setSelectedFriendActivity(null);
+  };
+
   const pendingReceivedRequests = summary.receivedRequests.filter(
     (request) => request.status === "pending",
   );
@@ -315,6 +319,7 @@ export default function Friends() {
 
   return (
     <DashboardLayout eyebrow="Friends">
+      <>
       <section className="dashboard-page-grid friends-grid">
         <article className="bento-card page-hero-card dark">
           <div className="bento-card-head">
@@ -417,49 +422,6 @@ export default function Friends() {
           </div>
         </article>
 
-        {selectedFriendActivity && (
-          <article className="bento-card friend-activity-card">
-            <div className="bento-card-head">
-              <div>
-                <span>Friend activity</span>
-                <h2>{getFriendLabel(selectedFriendActivity.friend.name, selectedFriendActivity.friend.email)}</h2>
-              </div>
-              <UsersRound size={23} />
-            </div>
-
-            <div className="friend-activity-stats">
-              <div>
-                <span>Rooms together</span>
-                <strong>{selectedFriendActivity.summary.roomsTogether}</strong>
-              </div>
-              <div>
-                <span>Total settled</span>
-                <strong>₹{selectedFriendActivity.summary.totalSettled}</strong>
-              </div>
-              <div>
-                <span>Net position</span>
-                <strong>₹{selectedFriendActivity.summary.netPosition}</strong>
-              </div>
-            </div>
-
-            <div className="friend-activity-list">
-              {selectedFriendActivity.recentActivity.length === 0 ? (
-                <p className="dashboard-muted-text">No shared activity yet.</p>
-              ) : (
-                selectedFriendActivity.recentActivity.map((activity) => (
-                  <div className="friend-activity-row" key={activity.id}>
-                    <div>
-                      <strong>{activity.title}</strong>
-                      <span>{activity.source}</span>
-                    </div>
-                    <em>₹{activity.amount}</em>
-                  </div>
-                ))
-              )}
-            </div>
-          </article>
-        )}
-
         <article className="bento-card friend-inbox-card">
           <div className="bento-card-head">
             <div>
@@ -539,6 +501,77 @@ export default function Friends() {
           </article>
         )}
       </section>
+
+      {selectedFriendActivity && (
+        <div
+          className="friend-activity-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeFriendActivityDialog();
+            }
+          }}
+        >
+          <section
+            className="friend-activity-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="friend-activity-dialog-title"
+          >
+            <div className="friend-activity-dialog-head">
+              <div>
+                <span>Friend activity</span>
+                <h2 id="friend-activity-dialog-title">
+                  {getFriendLabel(
+                    selectedFriendActivity.friend.name,
+                    selectedFriendActivity.friend.email,
+                  )}
+                </h2>
+              </div>
+              <button
+                className="friend-activity-dialog-close"
+                type="button"
+                aria-label="Close friend activity"
+                onClick={closeFriendActivityDialog}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="friend-activity-stats">
+              <div>
+                <span>Rooms together</span>
+                <strong>{selectedFriendActivity.summary.roomsTogether}</strong>
+              </div>
+              <div>
+                <span>Total settled</span>
+                <strong>₹{selectedFriendActivity.summary.totalSettled}</strong>
+              </div>
+              <div>
+                <span>Net position</span>
+                <strong>₹{selectedFriendActivity.summary.netPosition}</strong>
+              </div>
+            </div>
+
+            <div className="friend-activity-list">
+              {selectedFriendActivity.recentActivity.length === 0 ? (
+                <p className="dashboard-muted-text">No shared activity yet.</p>
+              ) : (
+                selectedFriendActivity.recentActivity.map((activity) => (
+                  <div className="friend-activity-row" key={activity.id}>
+                    <div>
+                      <strong>{activity.title}</strong>
+                      <span>{activity.source}</span>
+                    </div>
+                    <em>₹{activity.amount}</em>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+      </>
     </DashboardLayout>
   );
 }

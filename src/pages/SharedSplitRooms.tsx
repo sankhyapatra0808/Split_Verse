@@ -194,6 +194,7 @@ export default function SharedSplitRooms() {
   const [removingMemberId, setRemovingMemberId] = useState("");
   const [deletingRoomId, setDeletingRoomId] = useState("");
   const [collectingMemberId, setCollectingMemberId] = useState("");
+  const [expandedMemberActionId, setExpandedMemberActionId] = useState("");
   const [remindingRoomId, setRemindingRoomId] = useState("");
   const [finalizingRoomId, setFinalizingRoomId] = useState("");
   const [archivingRoomId, setArchivingRoomId] = useState("");
@@ -551,6 +552,10 @@ export default function SharedSplitRooms() {
       active = false;
     };
   }, [roomIdFromNotification]);
+
+  useEffect(() => {
+    setExpandedMemberActionId("");
+  }, [selectedRoomId]);
 
   useEffect(() => {
     if (
@@ -2000,48 +2005,79 @@ export default function SharedSplitRooms() {
                 ? selectedRoom.balances.map((balance) => {
                     const hasWalletDues =
                       balance.isMe && selectedRoomPendingDues.length > 0;
+                    const canExpandOwnerActions = Boolean(
+                      !balance.isMe &&
+                        balance.outstandingAmount > 0 &&
+                        selectedRoom.isOwner &&
+                        !selectedRoomClosed,
+                    );
+                    const isOwnerActionsExpanded =
+                      canExpandOwnerActions &&
+                      expandedMemberActionId === balance.memberId;
                     const hasUnpaidDue =
-                      hasWalletDues ||
-                      (!balance.isMe && balance.outstandingAmount > 0);
+                      hasWalletDues || canExpandOwnerActions;
                     const rowClassName = [
                       "member-balance-row",
                       balance.isCollected ? "collected" : "",
                       hasUnpaidDue ? "unpaid" : "",
-                      hasWalletDues ? "expandable" : "",
+                      hasWalletDues || canExpandOwnerActions ? "expandable" : "",
+                      isOwnerActionsExpanded ? "expanded" : "",
                     ]
                       .filter(Boolean)
                       .join(" ");
                     const balanceMember = selectedRoom.members.find(
                       (member) => member.id === balance.memberId,
                     );
+                    const handleMemberRowAction = () => {
+                      if (canExpandOwnerActions) {
+                        setExpandedMemberActionId((prev) =>
+                          prev === balance.memberId ? "" : balance.memberId,
+                        );
+                        return;
+                      }
+
+                      if (hasWalletDues) {
+                        openMemberPaymentDialog(balance.memberId);
+                      }
+                    };
 
                     return (
                       <div
-                        className="member-balance-entry"
+                        className={[
+                          "member-balance-entry",
+                          isOwnerActionsExpanded ? "expanded" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                         key={balance.memberId}
                       >
                         <div
                           className={rowClassName}
-                          role={hasWalletDues ? "button" : undefined}
-                          tabIndex={hasWalletDues ? 0 : undefined}
-                          onClick={() => {
-                            if (!hasWalletDues) {
-                              return;
-                            }
-
-                            openMemberPaymentDialog(balance.memberId);
-                          }}
+                          role={
+                            hasWalletDues || canExpandOwnerActions
+                              ? "button"
+                              : undefined
+                          }
+                          tabIndex={
+                            hasWalletDues || canExpandOwnerActions ? 0 : undefined
+                          }
+                          onClick={handleMemberRowAction}
                           onKeyDown={(event) => {
                             if (
-                              !hasWalletDues ||
+                              !(hasWalletDues || canExpandOwnerActions) ||
                               (event.key !== "Enter" && event.key !== " ")
                             ) {
                               return;
                             }
 
                             event.preventDefault();
-                            openMemberPaymentDialog(balance.memberId);
+                            handleMemberRowAction();
                           }}
+                          aria-expanded={
+                            canExpandOwnerActions
+                              ? isOwnerActionsExpanded
+                              : undefined
+                          }
                         >
                           {renderMemberMiniAvatar(balanceMember)}
                           <span className="member-balance-name">
@@ -2054,44 +2090,6 @@ export default function SharedSplitRooms() {
                             <span className="member-balance-name-text">
                               {balance.name}
                             </span>
-                            {!balance.isMe &&
-                              balance.outstandingAmount > 0 &&
-                              selectedRoom.isOwner && (
-                                <button
-                                  className="balance-collect-button compact"
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleCollectMemberDues(
-                                      selectedRoom.id,
-                                      balance.memberId,
-                                    );
-                                  }}
-                                  disabled={
-                                    collectingMemberId === balance.memberId
-                                  }
-                                >
-                                  <CheckCircle2 size={12} />
-                                  {collectingMemberId === balance.memberId
-                                    ? "Collecting"
-                                    : "Manual collect"}
-                                </button>
-                              )}
-                            {!balance.isMe &&
-                              balance.outstandingAmount > 0 &&
-                              selectedRoom.isOwner && (
-                                <button
-                                  className="balance-collect-button compact reminder"
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleSendRoomReminder(selectedRoom);
-                                  }}
-                                  disabled={remindingRoomId === selectedRoom.id}
-                                >
-                                  {remindingRoomId === selectedRoom.id ? "Sending" : "Remind"}
-                                </button>
-                              )}
                           </span>
                           <strong>{balance.detail}</strong>
                           <em>
@@ -2099,15 +2097,51 @@ export default function SharedSplitRooms() {
                               ? formatCurrency(balance.amount)
                               : formatCurrency(balance.outstandingAmount)}
                           </em>
-                          {hasWalletDues && (
+                          {hasWalletDues ? (
                             <WalletCards
                               className="member-due-chevron"
                               size={16}
                               aria-hidden="true"
                             />
-                          )}
+                          ) : canExpandOwnerActions ? (
+                            <ChevronDown
+                              className="member-due-chevron"
+                              size={16}
+                              aria-hidden="true"
+                            />
+                          ) : null}
                         </div>
 
+                        {isOwnerActionsExpanded && (
+                          <div className="member-balance-actions-panel">
+                            <button
+                              className="balance-collect-button compact"
+                              type="button"
+                              onClick={() =>
+                                handleCollectMemberDues(
+                                  selectedRoom.id,
+                                  balance.memberId,
+                                )
+                              }
+                              disabled={collectingMemberId === balance.memberId}
+                            >
+                              <CheckCircle2 size={12} />
+                              {collectingMemberId === balance.memberId
+                                ? "Collecting"
+                                : "Manual collect"}
+                            </button>
+                            <button
+                              className="balance-collect-button compact reminder"
+                              type="button"
+                              onClick={() => handleSendRoomReminder(selectedRoom)}
+                              disabled={remindingRoomId === selectedRoom.id}
+                            >
+                              {remindingRoomId === selectedRoom.id
+                                ? "Sending"
+                                : "Remind"}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })

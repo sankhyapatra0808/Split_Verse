@@ -3886,3 +3886,56 @@ img.room-member-avatar {
     padding: 13px;
   }
 }
+
+.member-balance-entry.expanded {
+  border: 1px solid rgba(0, 82, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(0, 82, 255, 0.035);
+  padding: 4px;
+}
+
+.member-balance-row.expanded {
+  border-color: rgba(0, 82, 255, 0.24);
+  background: #ffffff;
+}
+
+.member-balance-row.expanded .member-due-chevron {
+  transform: rotate(180deg);
+  color: var(--dash-primary);
+}
+
+.member-balance-actions-panel {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 6px 8px 8px 46px;
+  animation: memberActionsReveal 180ms ease;
+}
+
+.member-balance-actions-panel .balance-collect-button {
+  min-height: 30px;
+}
+
+@keyframes memberActionsReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 560px) {
+  .member-balance-actions-panel {
+    justify-content: stretch;
+    padding-left: 8px;
+  }
+
+  .member-balance-actions-panel .balance-collect-button {
+    flex: 1 1 100%;
+  }
+}

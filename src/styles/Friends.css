@@ -598,3 +598,84 @@
     width: 100%;
   }
 }
+
+.friend-activity-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 11, 13, 0.44);
+  backdrop-filter: blur(8px);
+}
+
+.friend-activity-dialog {
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow-y: auto;
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 24px;
+  background: var(--dash-canvas);
+  box-shadow: 0 28px 80px rgba(10, 11, 13, 0.24);
+}
+
+.friend-activity-dialog-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+
+.friend-activity-dialog-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.friend-activity-dialog-head span {
+  color: var(--dash-body);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.friend-activity-dialog-head h2 {
+  margin: 0;
+  color: var(--dash-ink);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.friend-activity-dialog-close {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 999px;
+  color: var(--dash-ink);
+  background: var(--dash-surface-soft);
+  cursor: pointer;
+}
+
+.friend-activity-dialog-close:hover {
+  background: var(--dash-surface-strong);
+}
+
+@media (max-width: 560px) {
+  .friend-activity-dialog-backdrop {
+    padding: 14px;
+  }
+
+  .friend-activity-dialog {
+    max-height: calc(100vh - 28px);
+    padding: 18px;
+    border-radius: 20px;
+  }
+}

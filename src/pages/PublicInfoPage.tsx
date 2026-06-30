@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import {
   createSupportTicket,
   getPublicPage,
@@ -204,6 +205,16 @@ const publicPageFallbacks: Record<Props["slug"], PublicPage> = {
   },
 };
 
+
+const publicNavLinks: { label: string; href: string; slug: Props["slug"] }[] = [
+  { label: "About", href: "/about", slug: "about" },
+  { label: "Contact", href: "/contact", slug: "contact" },
+  { label: "Support", href: "/support", slug: "support" },
+  { label: "Privacy", href: "/privacy", slug: "privacy" },
+  { label: "Terms", href: "/terms", slug: "terms" },
+  { label: "Security", href: "/security", slug: "security" },
+];
+
 const initialFormState: FormState = {
   name: "",
   email: "",
@@ -314,6 +325,28 @@ export default function PublicInfoPage({ slug }: Props) {
 
   return (
     <main className="public-info-page">
+      <nav className="public-info-nav" aria-label="Public page navigation">
+        <Link to="/" className="public-info-brand" aria-label="Back to SplitVerse home">
+          SplitVerse
+        </Link>
+
+        <div className="public-info-nav-links">
+          {publicNavLinks.map((link) => (
+            <Link
+              className={link.slug === slug ? "active" : undefined}
+              to={link.href}
+              key={link.slug}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </div>
+
+        <Link to="/" className="public-info-back-link">
+          Back to home
+        </Link>
+      </nav>
+
       <section className="public-info-hero">
         <div>
           <span>{activePage.eyebrow || "SplitVerse"}</span>

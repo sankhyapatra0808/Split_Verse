@@ -562,26 +562,29 @@
 }
 
 .profile-photo-preview {
-  width: 92px;
-  height: 92px;
-  min-width: 92px;
+  width: 112px;
+  height: 132px;
+  min-width: 112px;
   overflow: hidden;
   display: grid;
   place-items: center;
   border: 2px solid var(--dash-primary);
-  border-radius: 50%;
+  border-radius: 22px;
   color: #ffffff;
-  background: linear-gradient(135deg, #0a0b0d, #6b7280);
+  background:
+    linear-gradient(135deg, rgba(10, 11, 13, 0.92), rgba(107, 114, 128, 0.84)),
+    #ffffff;
   font-size: 24px;
   font-weight: 800;
   line-height: 1;
 }
 
 .profile-photo-preview img {
-  width: 124%;
+  width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  object-fit: contain;
+  background: #ffffff;
 }
 
 .profile-photo-copy {
@@ -821,53 +824,50 @@
   box-shadow: 0 12px 28px rgba(0, 62, 204, 0.22);
 }
 
-.profile-crop-dialog {
-  max-width: 620px;
+ .profile-crop-dialog {
+  max-width: 760px;
 }
 
 .profile-crop-stage {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px;
-  gap: 18px;
-  align-items: center;
-}
-
-.profile-crop-frame,
-.profile-crop-live-preview div {
-  overflow: hidden;
-  border-radius: 28px;
-  background: rgba(15, 23, 42, 0.08);
-  border: 1px solid var(--dash-hairline-soft);
+  gap: 12px;
 }
 
 .profile-crop-frame {
-  aspect-ratio: 1;
-  display: grid;
-  place-items: center;
-}
-
-.profile-crop-frame img,
-.profile-crop-live-preview img {
+  position: relative;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform-origin: center;
+  height: min(62vh, 520px);
+  min-height: 340px;
+  overflow: hidden;
+  border: 1px solid var(--dash-hairline-soft);
+  border-radius: 28px;
+  background:
+    linear-gradient(45deg, rgba(15, 23, 42, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(15, 23, 42, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(15, 23, 42, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(15, 23, 42, 0.08) 75%),
+    #f8fafc;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-size: 24px 24px;
 }
 
-.profile-crop-live-preview {
-  display: grid;
-  gap: 10px;
+.profile-crop-frame .reactEasyCrop_Container {
+  border-radius: inherit;
+}
+
+.profile-crop-frame .reactEasyCrop_CropArea {
+  border: 2px solid #ffffff;
+  box-shadow:
+    0 0 0 9999em rgba(10, 11, 13, 0.52),
+    0 14px 34px rgba(10, 11, 13, 0.28);
+}
+
+.gallery-style-cropper p {
+  margin: 0;
   color: var(--dash-body);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.profile-crop-live-preview div {
-  width: 132px;
-  height: 132px;
-  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
 }
 
 .profile-crop-controls {
@@ -885,6 +885,7 @@
 
 .profile-crop-controls input[type="range"] {
   width: 100%;
+  accent-color: var(--dash-primary);
 }
 
 .transaction-export-message.error {
@@ -893,12 +894,13 @@
 }
 
 @media (max-width: 640px) {
-  .profile-crop-stage {
-    grid-template-columns: 1fr;
+  .profile-crop-dialog {
+    max-width: min(100%, 560px);
   }
 
-  .profile-crop-live-preview div {
-    width: 112px;
-    height: 112px;
+  .profile-crop-frame {
+    height: min(58vh, 430px);
+    min-height: 300px;
+    border-radius: 22px;
   }
 }
