@@ -451,6 +451,132 @@ async function applyOffsetSettlements(client, forwardLines, reverseLines, amount
     }
     return touchedItemIds;
 }
+async function applyAutomaticNetOffsetsForUser(client, currentUserId) {
+    const visibleDebtLines = await loadNetDebtLines(client, currentUserId);
+    const pairKeys = new Set();
+    for (const line of visibleDebtLines) {
+        if (!line.debtor_user_id || !line.creditor_user_id) {
+            continue;
+        }
+        if (line.debtor_user_id === line.creditor_user_id) {
+            continue;
+        }
+        const [userA, userB] = [line.debtor_user_id, line.creditor_user_id].sort();
+        pairKeys.add(`${userA}:${userB}`);
+    }
+    const touchedItemIds = [];
+    const affectedUserIds = new Set();
+    for (const pairKey of pairKeys) {
+        const [userA, userB] = pairKey.split(":");
+        if (!userA || !userB) {
+            continue;
+        }
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1::text));", [
+            pairKey,
+        ]);
+        const pairDebtLines = await loadPairDebtLines(client, userA, userB, {
+            forUpdate: true,
+        });
+        const userAOwesUserB = pairDebtLines.filter((line) => line.debtor_user_id === userA && line.creditor_user_id === userB);
+        const userBOwesUserA = pairDebtLines.filter((line) => line.debtor_user_id === userB && line.creditor_user_id === userA);
+        const userAOwesTotal = roundMoneyValue(userAOwesUserB.reduce((sum, line) => sum + line.pending_amount, 0));
+        const userBOwesTotal = roundMoneyValue(userBOwesUserA.reduce((sum, line) => sum + line.pending_amount, 0));
+        const offsetAmount = roundMoneyValue(Math.min(userAOwesTotal, userBOwesTotal));
+        if (offsetAmount <= 0.009) {
+            continue;
+        }
+        touchedItemIds.push(...(await applyOffsetSettlements(client, userAOwesUserB, userBOwesUserA, offsetAmount, currentUserId)));
+        affectedUserIds.add(userA);
+        affectedUserIds.add(userB);
+    }
+    const collectedItems = await markFullySettledItemsCollected(client, touchedItemIds);
+    const touchedRoomIds = collectedItems.map((item) => item.room_id);
+    await refreshRoomPaymentStatuses(client, touchedRoomIds);
+    return {
+        affectedUserIds: Array.from(affectedUserIds),
+        touchedItemIds: [...new Set(touchedItemIds)],
+        touchedRoomIds: [...new Set(touchedRoomIds)],
+    };
+}
+async function applyAutomaticNetOffsetsForUserInTransaction(currentUserId) {
+    const client = await db.connect();
+    try {
+        await client.query("BEGIN");
+        const result = await applyAutomaticNetOffsetsForUser(client, currentUserId);
+        await client.query("COMMIT");
+        return result;
+    }
+    catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+}
+async function getVisibleSettlementUserIds(client, currentUserId, currentUserEmail) {
+    const result = await client.query(`
+    WITH visible_rooms AS (
+      SELECT DISTINCT room.id
+      FROM split_rooms room
+      INNER JOIN split_room_members current_member
+        ON current_member.room_id = room.id
+      WHERE room.owner_user_id = $1
+      OR current_member.user_id = $1
+      OR LOWER(COALESCE(current_member.email, '')) = LOWER($2)
+    ),
+    room_people AS (
+      SELECT room.owner_user_id AS user_id
+      FROM split_rooms room
+      INNER JOIN visible_rooms visible
+        ON visible.id = room.id
+
+      UNION
+
+      SELECT COALESCE(member.user_id, email_user.id) AS user_id
+      FROM split_room_members member
+      INNER JOIN visible_rooms visible
+        ON visible.id = member.room_id
+      LEFT JOIN users email_user
+        ON member.user_id IS NULL
+        AND member.email IS NOT NULL
+        AND LOWER(email_user.email) = LOWER(member.email)
+    )
+    SELECT DISTINCT user_id AS id
+    FROM room_people
+    WHERE user_id IS NOT NULL;
+    `, [currentUserId, currentUserEmail]);
+    return result.rows.map((row) => row.id);
+}
+async function applyAutomaticNetOffsetsForVisibleRoomsInTransaction(currentUserId, currentUserEmail) {
+    const client = await db.connect();
+    try {
+        await client.query("BEGIN");
+        const scopeUserIds = await getVisibleSettlementUserIds(client, currentUserId, currentUserEmail);
+        const affectedUserIds = new Set();
+        const touchedItemIds = new Set();
+        const touchedRoomIds = new Set();
+        for (const userId of scopeUserIds) {
+            const result = await applyAutomaticNetOffsetsForUser(client, userId);
+            result.affectedUserIds.forEach((id) => affectedUserIds.add(id));
+            result.touchedItemIds.forEach((id) => touchedItemIds.add(id));
+            result.touchedRoomIds.forEach((id) => touchedRoomIds.add(id));
+        }
+        await client.query("COMMIT");
+        return {
+            affectedUserIds: Array.from(affectedUserIds),
+            touchedItemIds: Array.from(touchedItemIds),
+            touchedRoomIds: Array.from(touchedRoomIds),
+        };
+    }
+    catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+}
 async function applyWalletSettlement(client, lines, amountToSettle, createdByUserId, walletTransactionId) {
     let remaining = roundMoneyValue(amountToSettle);
     const touchedItemIds = [];
@@ -660,6 +786,13 @@ router.get("/", verifyFirebaseToken, async (req, res) => {
         if (!dbUser) {
             return res.status(404).json({ message: "User not found in database" });
         }
+        const offsetResult = await applyAutomaticNetOffsetsForVisibleRoomsInTransaction(dbUser.id, dbUser.email);
+        if (offsetResult.affectedUserIds.length > 0) {
+            sendLiveUpdate(offsetResult.affectedUserIds, {
+                type: "split-room",
+                reason: "net-settlement-adjusted",
+            });
+        }
         const roomResult = await db.query(`
       SELECT DISTINCT
         room.id,
@@ -748,6 +881,13 @@ router.get("/net-settlements", verifyFirebaseToken, async (req, res) => {
         const dbUser = await getCurrentUser(firebaseUser.uid);
         if (!dbUser) {
             return res.status(404).json({ message: "User not found in database" });
+        }
+        const offsetResult = await applyAutomaticNetOffsetsForUserInTransaction(dbUser.id);
+        if (offsetResult.affectedUserIds.length > 0) {
+            sendLiveUpdate(offsetResult.affectedUserIds, {
+                type: "split-room",
+                reason: "net-settlement-adjusted",
+            });
         }
         const debtLines = await loadNetDebtLines(db, dbUser.id);
         const settlements = serializeNetSettlements(debtLines, dbUser.id);
@@ -1162,6 +1302,7 @@ router.post("/:roomId/members/:memberId/collect", verifyFirebaseToken, async (re
     const client = await db.connect();
     try {
         await ensureSplitRoomTablesOnce();
+        await ensureNetSettlementTablesOnce();
         const firebaseUser = req.user;
         if (!firebaseUser) {
             return res.status(401).json({ message: "Unauthorized" });
@@ -1218,69 +1359,75 @@ router.post("/:roomId/members/:memberId/collect", verifyFirebaseToken, async (re
                 message: "This member has not created a SplitVerse account yet, so their dashboard expense cannot be updated.",
             });
         }
+        const offsetResult = await applyAutomaticNetOffsetsForUser(client, dbUser.id);
         const itemResult = await client.query(`
-        UPDATE split_room_items
-        SET collected_at = NOW()
-        WHERE room_id = $1
-        AND assigned_member_id = $2
-        AND collected_at IS NULL
-        RETURNING
-          id,
-          title,
-          amount::float,
-          expense_id;
+        WITH settled AS (
+          SELECT item_id, COALESCE(SUM(amount), 0) AS settled_amount
+          FROM split_room_item_settlements
+          GROUP BY item_id
+        )
+        SELECT
+          item.id,
+          item.title,
+          item.amount::float,
+          GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0)::float AS pending_amount,
+          item.expense_id
+        FROM split_room_items item
+        LEFT JOIN settled
+          ON settled.item_id = item.id
+        WHERE item.room_id = $1
+        AND item.assigned_member_id = $2
+        AND item.collected_at IS NULL
+        AND GREATEST(item.amount - COALESCE(settled.settled_amount, 0), 0) > 0
+        ORDER BY item.created_at ASC
+        FOR UPDATE OF item;
         `, [roomId, memberId]);
+        const touchedItemIds = itemResult.rows.map((item) => item.id);
         for (const item of itemResult.rows) {
-            if (item.expense_id) {
+            const pendingAmount = roundMoneyValue(Number(item.pending_amount));
+            if (pendingAmount <= 0.009) {
                 continue;
             }
-            const expenseResult = await client.query(`
-          INSERT INTO expenses (
-            user_id,
-            title,
-            category,
-            amount,
-            expense_date
-          )
-          VALUES (
-            $1,
-            $2,
-            'Shared room',
-            $3,
-            (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
-          )
-          RETURNING id;
-          `, [member.user_id, `${room.name}: ${item.title}`, Number(item.amount)]);
+            let expenseId = item.expense_id;
+            if (!expenseId) {
+                const expenseResult = await client.query(`
+            INSERT INTO expenses (
+              user_id,
+              title,
+              category,
+              amount,
+              expense_date
+            )
+            VALUES (
+              $1,
+              $2,
+              'Shared room',
+              $3,
+              (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+            )
+            RETURNING id;
+            `, [member.user_id, `${room.name}: ${item.title}`, pendingAmount]);
+                expenseId = expenseResult.rows[0].id;
+            }
+            await insertItemSettlement(client, {
+                itemId: item.id,
+                amount: pendingAmount,
+                method: "manual",
+                createdByUserId: dbUser.id,
+            });
             await client.query(`
           UPDATE split_room_items
-          SET expense_id = $1
+          SET expense_id = COALESCE(expense_id, $1)
           WHERE id = $2;
-          `, [expenseResult.rows[0].id, item.id]);
+          `, [expenseId, item.id]);
         }
-        await client.query(`
-        UPDATE split_rooms
-        SET
-          payment_status = CASE
-            WHEN NOT EXISTS (
-              SELECT 1
-              FROM split_room_items item
-              INNER JOIN split_room_members member
-                ON member.id = item.assigned_member_id
-              WHERE item.room_id = $1
-              AND item.collected_at IS NULL
-              AND NOT (
-                member.user_id = $2
-                OR LOWER(COALESCE(member.email, '')) = LOWER($3)
-              )
-            )
-              THEN 'all_paid'
-            ELSE payment_status
-          END,
-          updated_at = NOW()
-        WHERE id = $1;
-        `, [roomId, dbUser.id, dbUser.email]);
+        const collectedItems = await markFullySettledItemsCollected(client, touchedItemIds);
+        await refreshRoomPaymentStatuses(client, [
+            roomId,
+            ...collectedItems.map((item) => item.room_id),
+        ]);
         await client.query("COMMIT");
-        sendLiveUpdate([dbUser.id, member.user_id], {
+        sendLiveUpdate([dbUser.id, member.user_id, ...offsetResult.affectedUserIds], {
             type: "split-room",
             reason: "dues-collected",
             roomId,
@@ -1810,6 +1957,7 @@ router.post("/items/:itemId/pay", verifyFirebaseToken, async (req, res) => {
             }
             throw pinError;
         }
+        await applyAutomaticNetOffsetsForUser(client, payerUserId);
         const itemId = getRouteParam(req, "itemId");
         if (!itemId) {
             await client.query("ROLLBACK");
@@ -2023,6 +2171,13 @@ router.get("/pending-dues", verifyFirebaseToken, async (req, res) => {
         }
         const dbUserId = userResult.rows[0].id;
         const dbUserEmail = userResult.rows[0].email;
+        const offsetResult = await applyAutomaticNetOffsetsForUserInTransaction(dbUserId);
+        if (offsetResult.affectedUserIds.length > 0) {
+            sendLiveUpdate(offsetResult.affectedUserIds, {
+                type: "split-room",
+                reason: "net-settlement-adjusted",
+            });
+        }
         const duesResult = await db.query(`
         SELECT
           split_room_items.id,
