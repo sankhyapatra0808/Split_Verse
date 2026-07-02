@@ -24,6 +24,7 @@ const Support = lazy(() => import("./pages/Support"));
 const Privacy = lazy(() => import("./pages/Privacy"));
 const Terms = lazy(() => import("./pages/Terms"));
 const Security = lazy(() => import("./pages/Security"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 function publicPage(page: ReactNode) {
   return <Suspense fallback={null}>{page}</Suspense>;
@@ -85,6 +86,7 @@ function App() {
         <Route path="/transactions" element={dashboardPage(<TransactionHistory />, "transactions")} />
         <Route path="/friends" element={dashboardPage(<Friends />, "friends")} />
         <Route path="/settings" element={dashboardPage(<AppSettings />, "settings")} />
+        <Route path="*" element={publicPage(<NotFound />)} />
       </Routes>
     </>
   );

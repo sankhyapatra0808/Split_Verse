@@ -751,20 +751,6 @@ router.post("/password-reset/request", async (req, res) => {
     const otp = createPasswordResetOtp();
     const otpHash = hashPasswordResetOtp(otp, firebaseUser.uid, email);
     const expiresAt = new Date(Date.now() + passwordResetOtpExpiryMs);
-
-    await db.query(
-      `
-      INSERT INTO password_reset_otps (
-        email,
-        firebase_uid,
-        otp_hash,
-        expires_at
-      )
-      VALUES ($1, $2, $3, $4);
-      `,
-      [email, firebaseUser.uid, otpHash, expiresAt],
-    );
-
     const emailStatus = await sendPasswordResetOtpEmail({ email, otp });
 
     if (emailStatus !== "sent") {
@@ -775,6 +761,26 @@ router.post("/password-reset/request", async (req, res) => {
             : "Could not send the password reset email. Please try again.",
       });
     }
+
+    await db.query(
+      `
+      WITH consume_previous_codes AS (
+        UPDATE password_reset_otps
+        SET consumed_at = NOW()
+        WHERE LOWER(email) = LOWER($1)
+        AND consumed_at IS NULL
+        RETURNING id
+      )
+      INSERT INTO password_reset_otps (
+        email,
+        firebase_uid,
+        otp_hash,
+        expires_at
+      )
+      VALUES ($1, $2, $3, $4);
+      `,
+      [email, firebaseUser.uid, otpHash, expiresAt],
+    );
 
     return res.status(201).json({
       message: "Password reset code sent. Check your email inbox or spam folder.",

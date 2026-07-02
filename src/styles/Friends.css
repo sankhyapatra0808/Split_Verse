@@ -679,3 +679,387 @@
     border-radius: 20px;
   }
 }
+
+/* Friends list redesign - Coinbase-inspired polish
+   Visual-only update: keeps existing Activity handler and data flow intact. */
+.friends-grid .friends-list-card {
+  overflow: hidden;
+  border-color: #dee1e6;
+  background: #ffffff;
+}
+
+.friends-grid .friends-list-card .bento-card-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.friends-grid .friends-list-card .bento-card-head span {
+  color: #5b616e;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-transform: none;
+}
+
+.friends-grid .friends-list-card .bento-card-head h2 {
+  color: #0a0b0d;
+  font-weight: 400;
+  letter-spacing: -0.4px;
+}
+
+.friends-grid .friend-list {
+  grid-template-columns: 1fr;
+  gap: 12px;
+  max-height: 430px;
+  padding: 2px 6px 2px 2px;
+}
+
+.friends-grid .friend-row {
+  min-width: 0;
+  min-height: 78px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid #dee1e6;
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: none;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.friends-grid .friend-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 82, 255, 0.22);
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(10, 11, 13, 0.04);
+}
+
+.friends-grid .friend-avatar,
+.friends-grid .friend-row > .friend-avatar,
+.friends-grid .friend-row > span.friend-avatar,
+.friends-grid .friend-row > img.friend-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 9999px;
+  border: 1px solid #eef0f3;
+  background: #eef0f3;
+  object-fit: cover;
+}
+
+.friends-grid .friend-avatar.initials,
+.friends-grid .friend-row > span.friend-avatar.initials {
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: #0a0b0d;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.friends-grid .friend-row-info {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  align-content: center;
+}
+
+.friends-grid .friend-row-info strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #0a0b0d;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friends-grid .friend-row-info small {
+  min-width: 0;
+  overflow: hidden;
+  color: #5b616e;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friends-grid .friend-activity-button {
+  justify-self: end;
+  min-width: 104px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 100px;
+  padding: 0 20px;
+  color: #ffffff;
+  background: #0052ff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  transition:
+    background-color 180ms ease,
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.friends-grid .friend-activity-button:hover:not(:disabled) {
+  background: #003ecc;
+  transform: translateY(-1px);
+}
+
+.friends-grid .friend-activity-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.friends-grid .friend-activity-button:disabled {
+  color: #ffffff;
+  background: #a8b8cc;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+@media (max-width: 860px) {
+  .friends-grid .friend-list {
+    grid-template-columns: 1fr;
+    max-height: 462px;
+  }
+
+  .friends-grid .friend-row {
+    grid-template-columns: 44px minmax(0, 1fr) max-content;
+    min-height: 76px;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .friends-grid .friend-avatar,
+  .friends-grid .friend-row > .friend-avatar,
+  .friends-grid .friend-row > span.friend-avatar,
+  .friends-grid .friend-row > img.friend-avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  .friends-grid .friend-activity-button {
+    grid-column: auto;
+    width: auto;
+    min-width: 96px;
+    min-height: 40px;
+    padding: 0 16px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 560px) {
+  .friends-grid .friend-list {
+    max-height: 432px;
+    padding-right: 0;
+  }
+
+  .friends-grid .friend-row {
+    grid-template-columns: 42px minmax(0, 1fr);
+    min-height: 0;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .friends-grid .friend-avatar,
+  .friends-grid .friend-row > .friend-avatar,
+  .friends-grid .friend-row > span.friend-avatar,
+  .friends-grid .friend-row > img.friend-avatar {
+    width: 42px;
+    height: 42px;
+  }
+
+  .friends-grid .friend-activity-button {
+    grid-column: 2;
+    justify-self: start;
+    width: auto;
+    min-width: 116px;
+    margin-top: 4px;
+  }
+}
+
+/* Friends page height/search correction - visual-only
+   Fixes the fixed-height CSS grid stretching the search bar when filtered.
+   Keeps the list scrollable after 4 friend rows and keeps the right stacked
+   request cards equal to the friends list card height on desktop. */
+@media (min-width: 861px) {
+  .friends-grid {
+    --friends-visible-row-height: 78px;
+    --friends-visible-row-gap: 12px;
+    --friends-visible-list-height: calc(
+      (var(--friends-visible-row-height) * 4) +
+      (var(--friends-visible-row-gap) * 3)
+    );
+    --friends-list-card-padding-y: 36px;
+    --friends-list-head-height: 56px;
+    --friends-search-height: 46px;
+    --friends-list-card-gap-total: 32px;
+    --friends-card-visible-height: calc(
+      var(--friends-list-card-padding-y) +
+      var(--friends-list-head-height) +
+      var(--friends-search-height) +
+      var(--friends-list-card-gap-total) +
+      var(--friends-visible-list-height)
+    );
+    --friends-side-card-height: calc((var(--friends-card-visible-height) - 12px) / 2);
+  }
+
+  .friends-grid .friends-list-card {
+    grid-column: span 8;
+    grid-row: span 2;
+    height: var(--friends-card-visible-height) !important;
+    min-height: var(--friends-card-visible-height) !important;
+    max-height: var(--friends-card-visible-height) !important;
+    grid-template-rows: auto var(--friends-search-height) minmax(0, var(--friends-visible-list-height));
+    align-content: start;
+    align-self: start;
+    overflow: hidden;
+  }
+
+  .friends-grid .friends-list-card .bento-card-head {
+    min-height: var(--friends-list-head-height);
+    align-self: start;
+  }
+
+  .friends-grid .friend-search-field {
+    height: var(--friends-search-height) !important;
+    min-height: var(--friends-search-height) !important;
+    max-height: var(--friends-search-height) !important;
+    align-self: start;
+    box-sizing: border-box;
+  }
+
+  .friends-grid .friend-search-field:focus-within {
+    height: var(--friends-search-height) !important;
+    min-height: var(--friends-search-height) !important;
+    max-height: var(--friends-search-height) !important;
+  }
+
+  .friends-grid .friend-search-field input {
+    height: calc(var(--friends-search-height) - 2px) !important;
+    min-height: 0;
+  }
+
+  .friends-grid .friend-list {
+    height: var(--friends-visible-list-height) !important;
+    min-height: 0;
+    max-height: var(--friends-visible-list-height) !important;
+    align-self: start;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .friends-grid .friend-row {
+    height: var(--friends-visible-row-height) !important;
+    min-height: var(--friends-visible-row-height) !important;
+  }
+
+  .friends-grid .friend-inbox-card,
+  .friends-grid .friend-sent-card {
+    grid-column: 9 / span 4;
+    height: var(--friends-side-card-height) !important;
+    min-height: var(--friends-side-card-height) !important;
+    max-height: var(--friends-side-card-height) !important;
+    align-self: start;
+    overflow: hidden;
+  }
+
+  .friends-grid .friend-inbox-card .friend-request-list,
+  .friends-grid .friend-sent-card .friend-request-list {
+    min-height: 0;
+    max-height: none !important;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (max-width: 860px) {
+  .friends-grid .friends-list-card,
+  .friends-grid .friend-inbox-card,
+  .friends-grid .friend-sent-card {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  .friends-grid .friend-search-field,
+  .friends-grid .friend-search-field:focus-within {
+    height: 46px !important;
+    min-height: 46px !important;
+    max-height: 46px !important;
+  }
+
+  .friends-grid .friend-list {
+    height: auto !important;
+    max-height: 340px !important;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .friends-grid .friend-list {
+    max-height: 420px !important;
+  }
+}
+
+/* Friends page compact height adjustment - visual-only
+   Reduces the desktop height of the Friend list, Friend inbox, and Sent requests
+   cards by 30px while keeping the friend list scrollable after 4 friends. */
+@media (min-width: 861px) {
+  .friends-grid {
+    --friends-visible-row-height: 72px;
+    --friends-visible-row-gap: 10px;
+    --friends-visible-list-height: calc(
+      (var(--friends-visible-row-height) * 4) +
+      (var(--friends-visible-row-gap) * 3)
+    );
+  }
+
+  .friends-grid .friend-row {
+    height: var(--friends-visible-row-height) !important;
+    min-height: var(--friends-visible-row-height) !important;
+    gap: 14px;
+    padding: 12px 16px;
+  }
+
+  .friends-grid .friend-avatar,
+  .friends-grid .friend-row > .friend-avatar,
+  .friends-grid .friend-row > span.friend-avatar,
+  .friends-grid .friend-row > img.friend-avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  .friends-grid .friend-activity-button {
+    min-height: 40px;
+  }
+}
+
+/* Friends side cards extra compact adjustment - visual-only
+   Reduces only the Friend inbox and Sent requests cards by another 27px on desktop. */
+@media (min-width: 861px) {
+  .friends-grid .friend-inbox-card,
+  .friends-grid .friend-sent-card {
+    height: calc(var(--friends-side-card-height) - 27px) !important;
+    min-height: calc(var(--friends-side-card-height) - 27px) !important;
+    max-height: calc(var(--friends-side-card-height) - 27px) !important;
+  }
+}

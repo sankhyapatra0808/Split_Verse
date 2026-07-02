@@ -405,7 +405,7 @@ export default function Friends() {
             {visibleFriends.map((friend) => (
               <div className="friend-row" key={friend.id}>
                 {renderFriendAvatar(friend)}
-                <div>
+                <div className="friend-row-info">
                   <strong>{getFriendLabel(friend.name, friend.email)}</strong>
                   <small>{friend.email}</small>
                 </div>

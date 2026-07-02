@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import authRoutes from "./routes/auth.routes.js";
 import express, { type NextFunction, type Request, type Response } from "express";
 import path from "node:path";
@@ -31,24 +32,41 @@ import {
 const app = express();
 
 const PORT = Number(process.env.PORT) || 5000;
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+const isProduction = process.env.NODE_ENV === "production";
+const configuredClientUrl = process.env.CLIENT_URL?.trim() || "";
+const CLIENT_URL = configuredClientUrl || (isProduction ? "" : "http://localhost:5173");
 
-const CLIENT_URLS = (
-  process.env.CLIENT_URLS ||
-  [
-    CLIENT_URL,
-    "http://localhost:5173",
-    "https://split-verse.vercel.app",
-    "https://split-verse-ww7n.vercel.app",
-  ].join(",")
-)
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+function parseOriginList(value: string | undefined) {
+  return (value || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+const developmentOrigins = isProduction
+  ? []
+  : [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+    ];
+
+const CLIENT_URLS = Array.from(
+  new Set([
+    ...parseOriginList(process.env.CLIENT_URLS),
+    ...parseOriginList(CLIENT_URL),
+    ...developmentOrigins,
+  ]),
+);
 
 const allowedOrigins = new Set(CLIENT_URLS);
+const allowVercelPreviewOrigins =
+  process.env.ALLOW_VERCEL_PREVIEW_ORIGINS === "true" || !isProduction;
 
 function isAllowedVercelPreview(origin: string) {
+  if (!allowVercelPreviewOrigins) {
+    return false;
+  }
+
   try {
     const url = new URL(origin);
 
@@ -76,6 +94,48 @@ app.use(
   }),
 );
 
+app.use((req, res, next) => {
+  const requestId = req.header("x-request-id") || crypto.randomUUID();
+  const startedAt = process.hrtime.bigint();
+
+  res.setHeader("x-request-id", requestId);
+
+  res.on("finish", () => {
+    if (process.env.LOG_REQUESTS === "false") {
+      return;
+    }
+
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    const statusCode = res.statusCode;
+    const level = statusCode >= 500 ? "error" : statusCode >= 400 ? "warn" : "info";
+    const logEntry = {
+      time: new Date().toISOString(),
+      level,
+      requestId,
+      method: req.method,
+      path: req.path,
+      statusCode,
+      durationMs: Math.round(durationMs),
+      ip: req.ip,
+    };
+    const serializedLog = JSON.stringify(logEntry);
+
+    if (level === "error") {
+      console.error(serializedLog);
+      return;
+    }
+
+    if (level === "warn") {
+      console.warn(serializedLog);
+      return;
+    }
+
+    console.log(serializedLog);
+  });
+
+  next();
+});
+
 const corsOptions: cors.CorsOptions = {
   origin(origin, callback) {
     if (!origin) {
@@ -89,7 +149,11 @@ const corsOptions: cors.CorsOptions = {
     }
 
     console.warn(`CORS blocked origin: ${origin}`);
-    callback(new Error(`Not allowed by CORS: ${origin}`));
+    callback(
+      Object.assign(new Error("Origin is not allowed by CORS"), {
+        status: 403,
+      }),
+    );
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
@@ -116,6 +180,38 @@ const authLimiter = rateLimit({
   message: { message: "Too many auth attempts. Please try again later." },
 });
 
+const sensitiveAuthLimiter = rateLimit({
+  windowMs: Number(process.env.SENSITIVE_AUTH_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  limit: Number(process.env.SENSITIVE_AUTH_RATE_LIMIT_MAX || 10),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many security requests. Please try again later." },
+});
+
+const publicFormLimiter = rateLimit({
+  windowMs: Number(process.env.PUBLIC_FORM_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  limit: Number(process.env.PUBLIC_FORM_RATE_LIMIT_MAX || 8),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many form submissions. Please try again later." },
+});
+
+const paymentLimiter = rateLimit({
+  windowMs: Number(process.env.PAYMENT_RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000),
+  limit: Number(process.env.PAYMENT_RATE_LIMIT_MAX || 30),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many payment requests. Please try again later." },
+});
+
+const razorpayWebhookLimiter = rateLimit({
+  windowMs: Number(process.env.RAZORPAY_WEBHOOK_RATE_LIMIT_WINDOW_MS || 60 * 1000),
+  limit: Number(process.env.RAZORPAY_WEBHOOK_RATE_LIMIT_MAX || 120),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many webhook requests. Please slow down." },
+});
+
 function protectSetupRoutes(req: Request, res: Response, next: NextFunction) {
   if (!setupRoutesEnabled) {
     return res.status(404).json({ message: "Not found" });
@@ -130,6 +226,31 @@ function protectSetupRoutes(req: Request, res: Response, next: NextFunction) {
 
 app.use("/api", apiLimiter);
 app.use("/api/auth", authLimiter);
+app.use(
+  [
+    "/api/auth/password-reset/request",
+    "/api/auth/password-reset/confirm",
+    "/api/auth/wallet-pin/reset-otp/request",
+    "/api/auth/wallet-pin/reset",
+  ],
+  sensitiveAuthLimiter,
+);
+app.use(
+  [
+    "/api/public-pages/contact/messages",
+    "/api/public-pages/support/tickets",
+  ],
+  publicFormLimiter,
+);
+app.use(
+  [
+    "/api/payments/razorpay/wallet-order",
+    "/api/payments/razorpay/verify-wallet-payment",
+    "/api/payments/dev/approve-wallet-order",
+  ],
+  paymentLimiter,
+);
+app.use("/api/payments/razorpay/webhook", razorpayWebhookLimiter);
 app.use(compressResponses());
 // Keep this only as a fallback for old local profile-photo URLs. New uploads go to Cloudinary.
 app.use(
@@ -409,6 +530,53 @@ app.use("/api/transactions", transactionRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/payments", paymentRoutes);
 
+app.use((req, res) => {
+  res.status(404).json({
+    message: req.path.startsWith("/api") ? "API route not found" : "Not found",
+  });
+});
+
+app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+
+  const statusCode =
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    Number.isInteger(Number((error as { status?: unknown }).status))
+      ? Number((error as { status?: unknown }).status)
+      : typeof error === "object" &&
+          error !== null &&
+          "statusCode" in error &&
+          Number.isInteger(Number((error as { statusCode?: unknown }).statusCode))
+        ? Number((error as { statusCode?: unknown }).statusCode)
+        : 500;
+  const safeStatusCode = statusCode >= 400 && statusCode < 600 ? statusCode : 500;
+  const errorMessage = error instanceof Error ? error.message : "Unknown server error";
+
+  console.error(
+    JSON.stringify({
+      time: new Date().toISOString(),
+      level: "error",
+      event: "unhandled_request_error",
+      method: req.method,
+      path: req.path,
+      statusCode: safeStatusCode,
+      message: errorMessage,
+      stack: isProduction ? undefined : error instanceof Error ? error.stack : undefined,
+    }),
+  );
+
+  res.status(safeStatusCode).json({
+    message:
+      safeStatusCode >= 500
+        ? "Something went wrong. Please try again later."
+        : errorMessage || "Request failed",
+  });
+});
 
 void warmDatabaseConnection();
 

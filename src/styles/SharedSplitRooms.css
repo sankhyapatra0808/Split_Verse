@@ -3939,3 +3939,399 @@ img.room-member-avatar {
     flex: 1 1 100%;
   }
 }
+
+/* Shared Split Rooms full responsive hardening
+   Visual-only overrides: preserves all existing React handlers and data flow. */
+.split-rooms-grid,
+.split-rooms-grid *,
+.split-room-history-dialog,
+.split-room-history-dialog *,
+.split-room-payment-dialog,
+.split-room-payment-dialog *,
+.split-room-payment-pin-dialog,
+.split-room-payment-pin-dialog * {
+  box-sizing: border-box;
+}
+
+.split-rooms-grid .bento-card,
+.split-rooms-grid .dashboard-form,
+.split-rooms-grid .assignment-grid,
+.split-rooms-grid .room-row,
+.split-rooms-grid .room-select-button,
+.split-rooms-grid .member-balance-row,
+.split-rooms-grid .split-room-item-list > div,
+.split-rooms-grid .net-settlement-card,
+.split-rooms-grid .net-settlement-panel,
+.net-settlement-row,
+.net-settlement-row-main,
+.net-settlement-amount-panel,
+.split-room-payment-dialog,
+.split-room-payment-summary,
+.split-room-payment-method,
+.split-room-payment-actions {
+  min-width: 0;
+}
+
+.split-rooms-grid h2,
+.split-rooms-grid strong,
+.split-rooms-grid span,
+.split-rooms-grid small,
+.split-rooms-grid em,
+.split-rooms-grid p,
+.net-settlement-row strong,
+.net-settlement-row span,
+.net-settlement-row em,
+.split-room-payment-dialog strong,
+.split-room-payment-dialog span,
+.split-room-payment-dialog small,
+.split-room-payment-dialog p {
+  overflow-wrap: anywhere;
+}
+
+.split-rooms-grid input,
+.split-rooms-grid select,
+.split-rooms-grid button,
+.split-room-payment-dialog input,
+.split-room-payment-dialog button,
+.split-room-payment-pin-dialog input,
+.split-room-payment-pin-dialog button {
+  max-width: 100%;
+}
+
+.split-rooms-grid .room-form-card,
+.split-rooms-grid .room-list-card,
+.split-rooms-grid .member-balance-card,
+.split-rooms-grid .assignment-card,
+.split-rooms-grid .room-overview-card,
+.split-rooms-grid .room-items-card,
+.split-rooms-grid .net-settlement-card {
+  align-self: stretch;
+}
+
+/* Adjusted settlements card: remove fragile fixed-height behavior and let content breathe. */
+.net-settlement-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.net-settlement-panel {
+  height: auto;
+  min-height: 400px;
+  align-content: start;
+}
+
+.net-settlement-panel .bento-card-head {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.net-settlement-panel .bento-card-head h2 {
+  max-width: 100%;
+  overflow: visible;
+  white-space: normal;
+}
+
+.net-settlement-note {
+  max-width: 100%;
+}
+
+.net-settlement-summary {
+  min-width: 0;
+  align-items: stretch;
+}
+
+.net-settlement-metric {
+  min-width: 0;
+  width: 100%;
+}
+
+.net-settlement-summary strong,
+.net-settlement-amount-panel > strong {
+  word-break: break-word;
+}
+
+.net-settlement-list,
+.net-settlement-detail-list {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.net-settlement-row {
+  min-width: 0;
+  align-items: start;
+}
+
+.net-settlement-row-main > strong,
+.net-settlement-row-main > span {
+  min-width: 0;
+  white-space: normal;
+}
+
+.net-settlement-row ul {
+  min-width: 0;
+}
+
+.net-settlement-row li {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.net-settlement-row li em {
+  min-width: 0;
+  display: block;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.net-settlement-amount-panel {
+  min-width: 0;
+}
+
+.net-settlement-amount-panel .dashboard-primary-button,
+.net-settlement-amount-panel .status-pill {
+  justify-self: end;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+/* Dialogs: keep modals usable on every viewport. */
+.split-room-payment-backdrop,
+.split-room-payment-pin-backdrop,
+.split-room-history-backdrop {
+  overflow-y: auto;
+}
+
+.split-room-payment-dialog,
+.split-room-payment-pin-dialog,
+.split-room-history-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-width: 100%;
+}
+
+.net-settlement-info-dialog {
+  width: min(820px, calc(100vw - 32px));
+}
+
+.split-room-payment-summary,
+.net-settlement-info-summary {
+  min-width: 0;
+}
+
+.split-room-payment-method {
+  min-width: 0;
+}
+
+.split-room-payment-method > div {
+  min-width: 0;
+}
+
+/* Tablet layout: stack narrow columns earlier and avoid compressed cards. */
+@media (max-width: 1180px) {
+  .split-rooms-grid .net-settlement-card,
+  .split-rooms-grid .room-items-card {
+    grid-column: span 12;
+  }
+
+  .split-rooms-grid .room-form-card,
+  .split-rooms-grid .room-list-card,
+  .split-rooms-grid .member-balance-card,
+  .split-rooms-grid .assignment-card,
+  .split-rooms-grid .room-overview-card {
+    grid-column: span 6;
+  }
+}
+
+@media (max-width: 900px) {
+  .split-rooms-grid .room-form-card,
+  .split-rooms-grid .room-list-card,
+  .split-rooms-grid .member-balance-card,
+  .split-rooms-grid .assignment-card,
+  .split-rooms-grid .room-overview-card,
+  .split-rooms-grid .room-items-card,
+  .split-rooms-grid .net-settlement-card {
+    grid-column: span 12;
+  }
+
+  .net-settlement-panel {
+    min-height: auto;
+  }
+
+  .split-room-hero-stats,
+  .room-overview-metrics,
+  .split-room-history-preview,
+  .split-room-history-stats,
+  .split-room-payment-summary,
+  .net-settlement-info-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .net-settlement-summary,
+  .net-settlement-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .net-settlement-amount-panel {
+    justify-items: start;
+    padding: 14px 0 0;
+    border-top: 1px solid var(--dash-hairline-soft);
+    border-left: 0;
+  }
+
+  .net-settlement-amount-panel .dashboard-primary-button,
+  .net-settlement-amount-panel .status-pill {
+    justify-self: start;
+  }
+
+  .net-settlement-detail-list {
+    max-height: min(420px, 52svh);
+  }
+}
+
+@media (max-width: 680px) {
+  .split-rooms-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .split-rooms-grid .bento-card {
+    width: 100%;
+  }
+
+  .split-room-hero-stats,
+  .room-overview-metrics,
+  .split-room-history-preview,
+  .split-room-history-stats,
+  .split-room-payment-summary,
+  .net-settlement-info-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .split-room-meta-row,
+  .split-rooms-grid .assignment-grid,
+  .split-rooms-grid .dashboard-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .net-settlement-panel {
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .net-settlement-metric {
+    min-height: 104px;
+    padding: 16px;
+  }
+
+  .net-settlement-row {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .net-settlement-row-main > strong {
+    font-size: 16px;
+  }
+
+  .net-settlement-amount-panel > strong {
+    font-size: 20px;
+  }
+
+  .split-room-payment-dialog,
+  .split-room-payment-pin-dialog,
+  .split-room-history-dialog,
+  .net-settlement-info-dialog {
+    width: min(100%, calc(100vw - 24px));
+  }
+
+  .split-room-payment-actions,
+  .split-room-history-edit-actions,
+  .split-room-history-footer,
+  .split-room-history-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .split-room-payment-actions button,
+  .split-room-history-edit-actions button,
+  .split-room-history-footer button,
+  .split-room-history-actions button,
+  .net-settlement-amount-panel .dashboard-primary-button {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 520px) {
+  .split-rooms-grid .bento-card {
+    padding: 14px;
+  }
+
+  .net-settlement-panel,
+  .net-settlement-list {
+    padding: 14px;
+  }
+
+  .net-settlement-panel .bento-card-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .net-settlement-panel .bento-card-head svg {
+    justify-self: start;
+  }
+
+  .net-settlement-summary strong {
+    font-size: clamp(20px, 8vw, 26px);
+  }
+
+  .net-settlement-row li {
+    padding: 10px;
+  }
+
+  .net-settlement-direction-pill {
+    max-width: 100%;
+  }
+
+  .split-room-payment-method {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .split-room-payment-method svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .split-rooms-grid .room-row-actions {
+    flex-wrap: wrap;
+  }
+
+  .split-rooms-grid .room-delete-button,
+  .room-lock-button,
+  .room-archive-button {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 380px) {
+  .split-rooms-grid .bento-card,
+  .net-settlement-panel,
+  .net-settlement-list,
+  .split-room-payment-dialog,
+  .split-room-payment-pin-dialog,
+  .split-room-history-dialog {
+    padding: 12px;
+  }
+
+  .net-settlement-metric,
+  .net-settlement-row {
+    border-radius: 16px;
+  }
+
+  .net-settlement-summary,
+  .net-settlement-list,
+  .net-settlement-row-main {
+    gap: 10px;
+  }
+}

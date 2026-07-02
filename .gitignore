@@ -1,32 +1,53 @@
-# Logs
-logs
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Build outputs
+dist/
+build/
+server/dist/
+.vite/
+
+# Local environment files - never commit real secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production
+.env.production.local
+.env*.local
+server/.env
+server/.env.local
+server/.env.development.local
+server/.env.test.local
+server/.env.production
+server/.env.production.local
+server/.env*.local
+
+# Keep safe templates tracked
+!.env.example
+!server/.env.example
+
+# Secret/key material
+*.pem
+*.key
+*.p8
+*.p12
+*.cert
+*.crt
+*service-account*.json
+*firebase-admin*.json
+
+# Logs and reports
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
-
-dist-ssr
-*.local
-
-node_modules
-.env
-.env.example
-server/node_modules
-server/.env
-server/.env.example
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# OS/editor files
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-.codex
-.agents
+Thumbs.db
+.vscode/
+.idea/
