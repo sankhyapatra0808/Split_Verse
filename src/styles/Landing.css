@@ -1172,3 +1172,53 @@ button {
   height: 35px;
   width: 35px;
 }
+
+.footer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 28px;
+}
+
+.footer-app-download {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 22px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: #1d252e;
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 220ms ease,
+    background-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.footer-app-download:hover {
+  background: #116466;
+  color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(17, 100, 102, 0.25);
+}
+
+.footer-app-download:active {
+  transform: translateY(0);
+}
+
+.footer-app-download svg {
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .footer-app-download {
+    width: 100%;
+    max-width: 320px;
+  }
+}

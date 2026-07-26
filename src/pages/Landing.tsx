@@ -99,6 +99,12 @@ const steps = [
   "Record settlement",
 ];
 
+const mobileAppReleaseUrl =
+  "https://github.com/sankhyapatra0808/SplitVerse_Mobile/releases/tag/v1.0.0-preview";
+
+const mobileAppApkUrl =
+  "https://github.com/sankhyapatra0808/SplitVerse_Mobile/releases/download/v1.0.0-preview/SplitVerse-Mobile-v1.0.0-preview.apk";
+
 const footerColumns = [
   {
     heading: "Product",
@@ -138,6 +144,13 @@ const footerColumns = [
 
 export default function Landing() {
   const { formatCurrency } = useAppSettings();
+
+  const isAndroidDevice =
+    typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+
+  const mobileAppUrl = isAndroidDevice
+    ? mobileAppApkUrl
+    : mobileAppReleaseUrl;
 
   const serviceCards = services.map((service) => {
     const metric =
@@ -441,7 +454,16 @@ export default function Landing() {
         </div>
 
         <div className="footer-bottom">
-          <span>Mobile App Coming Soon...</span>
+          <a
+            href={mobileAppUrl}
+            className="footer-app-download"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Download the SplitVerse Android app"
+          >
+            Download SplitVerse for Android
+            <ArrowRight size={18} />
+          </a>
         </div>
       </footer>
     </main>
