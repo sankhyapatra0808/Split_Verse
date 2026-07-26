@@ -1,5 +1,6 @@
 import express from "express";
 import { db } from "../config/db.js";
+import { parseTransactionMonth } from "../utils/transactionMonth.js";
 import {
   type AuthRequest,
   verifyFirebaseToken,
@@ -70,10 +71,14 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       : accountCreatedAt.getFullYear();
     const currentYear = new Date().getFullYear();
     const requestedYear = Number(req.query.year);
-    const requestedMonth = Number(req.query.month);
-    const selectedMonth = Number.isInteger(requestedMonth) && requestedMonth >= 1 && requestedMonth <= 12
-      ? requestedMonth
-      : null;
+    const rawMonth = String(req.query.month ?? "").trim();
+    const selectedMonth = parseTransactionMonth(rawMonth);
+
+    if (rawMonth && selectedMonth === null) {
+      return res.status(400).json({
+        message: "Month must be a number from 1 to 12 or a month name such as Jan or January",
+      });
+    }
     const selectedYear = isYearExport
       ? Math.min(
           Math.max(

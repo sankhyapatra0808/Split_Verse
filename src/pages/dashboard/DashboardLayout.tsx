@@ -565,7 +565,7 @@ export default function DashboardLayout({
             }}
           >
             <Settings size={18} />
-            <span>App settings</span>
+            <span>Settings</span>
             <ChevronRight size={18} />
           </button>
           <button className="profile-logout-button" type="button" onClick={handleLogout}>

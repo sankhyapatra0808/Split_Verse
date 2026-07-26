@@ -9,33 +9,30 @@ export type AuthContextValue = {
   user: User | null;
   dbUser: DbUser | null;
   loading: boolean;
-  loginWithEmail: (
-    email: string,
-    password: string,
-    remember?: boolean
-  ) => Promise<void>;
   startEmailLoginOtp: (
     email: string,
     password: string,
-    remember?: boolean
+    remember?: boolean,
+  ) => Promise<EmailLoginOtpSession>;
+  resendEmailLoginOtp: (
+    sessionId: string,
   ) => Promise<EmailLoginOtpSession>;
   completeEmailLoginWithOtp: (
-    email: string,
-    password: string,
     remember: boolean,
     sessionId: string,
-    otp: string
+    otp: string,
   ) => Promise<void>;
   signupWithEmail: (
     name: string,
     email: string,
-    password: string
-  ) => Promise<void>;
+    password: string,
+    username: string,
+  ) => Promise<EmailLoginOtpSession>;
   loginWithProvider: (
     provider: SocialProvider,
-    remember?: boolean
+    remember?: boolean,
+    signupUsername?: string,
   ) => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
   refreshDbUser: () => Promise<DbUser | null>;
   logout: () => Promise<void>;
 };

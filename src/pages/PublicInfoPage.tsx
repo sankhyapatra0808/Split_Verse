@@ -153,6 +153,11 @@ const publicPageFallbacks: Record<Props["slug"], PublicPage> = {
             "Users should add accurate expenses, room members, item assignments, and settlement information. SplitVerse helps calculate dues, but users are responsible for checking shared expense details.",
         },
         {
+          heading: "Permanent username and account identity",
+          body:
+            "You choose a unique SplitVerse username during signup. Usernames are case-insensitive, cannot be transferred, and cannot be changed after the account is created. Changes to your account name or registered email require a one-time verification code sent to your current registered email address.",
+        },
+        {
           heading: "Payments and wallet",
           body:
             "Wallet top-ups and payments must be completed through verified payment flows. Wallet credits are finalized only after backend verification.",

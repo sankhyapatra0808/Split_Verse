@@ -42,7 +42,9 @@ function getStaleFallbackHours() {
     return getNumberEnv("EXCHANGE_RATE_STALE_FALLBACK_HOURS", 168);
 }
 function normalizeCurrency(value, fallback) {
-    const normalized = String(value || fallback).trim().toUpperCase();
+    const normalized = String(value || fallback)
+        .trim()
+        .toUpperCase();
     return supportedCurrencySet.has(normalized)
         ? normalized
         : fallback;
@@ -104,7 +106,9 @@ async function getCachedRows(baseCurrency, targetCurrencies, stale = false) {
     AND target_currency = ANY($2::text[])
     ${stale ? "AND fetched_at >= NOW() - $3::interval" : "AND expires_at > NOW()"}
     ORDER BY fetched_at DESC;
-    `, stale ? [baseCurrency, targetCurrencies, staleWindow] : [baseCurrency, targetCurrencies]);
+    `, stale
+        ? [baseCurrency, targetCurrencies, staleWindow]
+        : [baseCurrency, targetCurrencies]);
     return result.rows;
 }
 function rowsCoverAllTargets(rows, targetCurrencies) {
@@ -112,8 +116,10 @@ function rowsCoverAllTargets(rows, targetCurrencies) {
     return targetCurrencies.every((currency) => cachedTargets.has(currency));
 }
 function getRowsMetadata(rows) {
-    const sortedByFetched = [...rows].sort((left, right) => new Date(right.fetched_at).getTime() - new Date(left.fetched_at).getTime());
-    const sortedByExpiry = [...rows].sort((left, right) => new Date(left.expires_at).getTime() - new Date(right.expires_at).getTime());
+    const sortedByFetched = [...rows].sort((left, right) => new Date(right.fetched_at).getTime() -
+        new Date(left.fetched_at).getTime());
+    const sortedByExpiry = [...rows].sort((left, right) => new Date(left.expires_at).getTime() -
+        new Date(right.expires_at).getTime());
     return {
         provider: sortedByFetched[0]?.provider || getProvider(),
         fetchedAt: sortedByFetched[0]

@@ -46,10 +46,12 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       });
     }
 
-    const { title, category, amount: numericAmount, expenseDate } = parseRequestBody(
-      createExpenseSchema,
-      req.body,
-    );
+    const {
+      title,
+      category,
+      amount: numericAmount,
+      expenseDate,
+    } = parseRequestBody(createExpenseSchema, req.body);
 
     const userResult = await db.query(
       `
@@ -57,7 +59,7 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       FROM users
       WHERE firebase_uid = $1;
       `,
-      [firebaseUser.uid]
+      [firebaseUser.uid],
     );
 
     if (userResult.rows.length === 0) {
@@ -117,7 +119,7 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
         category ? String(category).trim() : "Other",
         numericAmount,
         expenseDate || null,
-      ]
+      ],
     );
 
     sendLiveUpdate([dbUserId], {

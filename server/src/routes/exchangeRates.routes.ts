@@ -61,7 +61,9 @@ function getStaleFallbackHours() {
 }
 
 function normalizeCurrency(value: unknown, fallback: SupportedCurrency) {
-  const normalized = String(value || fallback).trim().toUpperCase();
+  const normalized = String(value || fallback)
+    .trim()
+    .toUpperCase();
 
   return supportedCurrencySet.has(normalized)
     ? (normalized as SupportedCurrency)
@@ -85,7 +87,10 @@ function normalizeSymbols(value: unknown, baseCurrency: SupportedCurrency) {
   );
 }
 
-function getFallbackRate(baseCurrency: SupportedCurrency, targetCurrency: SupportedCurrency) {
+function getFallbackRate(
+  baseCurrency: SupportedCurrency,
+  targetCurrency: SupportedCurrency,
+) {
   const baseRate = fallbackRatesFromInr[baseCurrency] || 1;
   const targetRate = fallbackRatesFromInr[targetCurrency] || 1;
 
@@ -157,7 +162,9 @@ async function getCachedRows(
     ${stale ? "AND fetched_at >= NOW() - $3::interval" : "AND expires_at > NOW()"}
     ORDER BY fetched_at DESC;
     `,
-    stale ? [baseCurrency, targetCurrencies, staleWindow] : [baseCurrency, targetCurrencies],
+    stale
+      ? [baseCurrency, targetCurrencies, staleWindow]
+      : [baseCurrency, targetCurrencies],
   );
 
   return result.rows;
@@ -174,11 +181,13 @@ function rowsCoverAllTargets(
 function getRowsMetadata(rows: CachedRateRow[]) {
   const sortedByFetched = [...rows].sort(
     (left, right) =>
-      new Date(right.fetched_at).getTime() - new Date(left.fetched_at).getTime(),
+      new Date(right.fetched_at).getTime() -
+      new Date(left.fetched_at).getTime(),
   );
   const sortedByExpiry = [...rows].sort(
     (left, right) =>
-      new Date(left.expires_at).getTime() - new Date(right.expires_at).getTime(),
+      new Date(left.expires_at).getTime() -
+      new Date(right.expires_at).getTime(),
   );
 
   return {
@@ -270,7 +279,9 @@ async function fetchProviderRates(
   };
 
   if (data.result && data.result !== "success") {
-    throw new Error(`Exchange-rate provider ${provider} returned ${data.result}`);
+    throw new Error(
+      `Exchange-rate provider ${provider} returned ${data.result}`,
+    );
   }
 
   const rates: Record<string, number> = {
@@ -302,7 +313,8 @@ async function fetchFreshRates(
   targetCurrencies: SupportedCurrency[],
 ) {
   const provider = getProvider();
-  const endpoint = process.env.EXCHANGE_RATE_API_URL || "https://api.frankfurter.app/latest";
+  const endpoint =
+    process.env.EXCHANGE_RATE_API_URL || "https://api.frankfurter.app/latest";
   const apiKey = process.env.EXCHANGE_RATE_API_KEY || "";
   const fallbackProvider = "open-er-api";
   const fallbackEndpoint = "https://open.er-api.com/v6/latest";
@@ -331,7 +343,10 @@ async function fetchFreshRates(
     primaryError = error;
   }
 
-  const missingAfterPrimary = getMissingCurrencies(mergedRates, targetCurrencies);
+  const missingAfterPrimary = getMissingCurrencies(
+    mergedRates,
+    targetCurrencies,
+  );
 
   if (missingAfterPrimary.length > 0) {
     try {
@@ -357,7 +372,10 @@ async function fetchFreshRates(
     }
   }
 
-  const missingCurrency = getMissingCurrencies(mergedRates, targetCurrencies)[0];
+  const missingCurrency = getMissingCurrencies(
+    mergedRates,
+    targetCurrencies,
+  )[0];
 
   if (missingCurrency) {
     throw new Error(
@@ -436,7 +454,9 @@ router.get("/", async (req, res) => {
       source: "cache" satisfies RateSource,
       provider: getProvider(),
       fetchedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + getCacheTtlMinutes() * 60_000).toISOString(),
+      expiresAt: new Date(
+        Date.now() + getCacheTtlMinutes() * 60_000,
+      ).toISOString(),
     });
   }
 
@@ -474,7 +494,11 @@ router.get("/", async (req, res) => {
     console.error("Exchange-rate lookup failed:", error);
 
     try {
-      const staleRows = await getCachedRows(baseCurrency, targetCurrencies, true);
+      const staleRows = await getCachedRows(
+        baseCurrency,
+        targetCurrencies,
+        true,
+      );
 
       if (rowsCoverAllTargets(staleRows, targetCurrencies)) {
         const metadata = getRowsMetadata(staleRows);

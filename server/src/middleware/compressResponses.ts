@@ -108,7 +108,9 @@ function isCompressibleContentType(contentType: string) {
     return false;
   }
 
-  return COMPRESSIBLE_CONTENT_TYPES.some((pattern) => pattern.test(contentType));
+  return COMPRESSIBLE_CONTENT_TYPES.some((pattern) =>
+    pattern.test(contentType),
+  );
 }
 
 function canCompressByHeaders(req: Request, res: Response) {
@@ -146,10 +148,7 @@ function toBuffer(
   }
 
   if (typeof chunk === "string") {
-    return Buffer.from(
-      chunk,
-      typeof encoding === "string" ? encoding : "utf8",
-    );
+    return Buffer.from(chunk, typeof encoding === "string" ? encoding : "utf8");
   }
 
   return Buffer.from(chunk as ArrayBuffer);

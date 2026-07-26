@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { Download, Filter, Search, X } from "lucide-react";
+import { Download, Search, X } from "lucide-react";
 
 import DashboardLayout from "./dashboard/DashboardLayout";
 import {
@@ -51,7 +51,63 @@ function formatSignedCurrency(
   return `${prefix}${formatCurrency(Math.abs(amount))}`;
 }
 
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "").replace(/\r?\n/g, " ");
+  const formulaSafeText = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${formulaSafeText.replace(/"/g, '""')}"`;
+}
+
 const visibleTransactionLimit = 10;
+
+const monthAliases: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
+
+function parseMonthInput(value: string) {
+  const normalized = value.trim().toLowerCase();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (/^0?[1-9]$|^1[0-2]$/.test(normalized)) {
+    return Number(normalized);
+  }
+
+  return monthAliases[normalized];
+}
 
 const statusOptions: DropdownOption<TransactionStatus>[] = [
   { value: "all", label: "All activity" },
@@ -82,15 +138,25 @@ export default function TransactionHistory() {
     String(new Date().getFullYear()),
   );
   const [exportFormat, setExportFormat] = useState<"csv" | "pdf">("csv");
-  const [advancedFriendFilter, setAdvancedFriendFilter] = useState("");
-  const [advancedRoomFilter, setAdvancedRoomFilter] = useState("");
   const [advancedMonthFilter, setAdvancedMonthFilter] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const [transactionTotal, setTransactionTotal] = useState(0);
   const [accountCreatedAt, setAccountCreatedAt] = useState("");
+  const parsedMonthFilter = useMemo(
+    () => parseMonthInput(advancedMonthFilter),
+    [advancedMonthFilter],
+  );
+  const monthFilterError =
+    advancedMonthFilter.trim() && parsedMonthFilter === undefined
+      ? "Enter a month from 1 to 12, or a name such as Jan or January."
+      : "";
 
   async function loadTransactions({ silent = false } = {}) {
+    if (monthFilterError) {
+      return;
+    }
+
     if (!silent) {
       setLoading(true);
     }
@@ -98,15 +164,11 @@ export default function TransactionHistory() {
     setError("");
 
     try {
-      const combinedSearch = [search, advancedFriendFilter, advancedRoomFilter]
-        .map((value) => value.trim())
-        .filter(Boolean)
-        .join(" ");
       const data = await getTransactions({
-        search: combinedSearch,
+        search: search.trim(),
         status,
         limit: visibleTransactionLimit,
-        month: advancedMonthFilter ? Number(advancedMonthFilter) : undefined,
+        month: parsedMonthFilter,
       });
 
       setTransactions(data.transactions);
@@ -124,13 +186,17 @@ export default function TransactionHistory() {
   }
 
   useEffect(() => {
+    if (monthFilterError) {
+      return;
+    }
+
     const timer = window.setTimeout(() => {
       void loadTransactions();
-    }, 0);
+    }, 320);
 
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, advancedMonthFilter]);
+  }, [search, status, parsedMonthFilter, monthFilterError]);
 
   useEffect(() => {
     const handleDataUpdated = () => {
@@ -143,7 +209,7 @@ export default function TransactionHistory() {
       window.removeEventListener("splitverse:data-updated", handleDataUpdated);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status]);
+  }, [search, status, advancedMonthFilter]);
 
   const visibleTransactions = useMemo(
     () => transactions.slice(0, visibleTransactionLimit),
@@ -176,12 +242,12 @@ export default function TransactionHistory() {
       .map(
         (transaction) => `
           <tr>
-            <td>${transaction.title}</td>
-            <td>${transaction.room}</td>
-            <td>${transaction.amount}</td>
-            <td>${transaction.displayStatus}</td>
-            <td>${transaction.type}</td>
-            <td>${transaction.displayDate || formatTransactionDate(transaction.createdAt)}</td>
+            <td>${escapeHtml(transaction.title)}</td>
+            <td>${escapeHtml(transaction.room)}</td>
+            <td>${escapeHtml(transaction.amount)}</td>
+            <td>${escapeHtml(transaction.displayStatus)}</td>
+            <td>${escapeHtml(transaction.type)}</td>
+            <td>${escapeHtml(transaction.displayDate || formatTransactionDate(transaction.createdAt))}</td>
           </tr>`,
       )
       .join("");
@@ -249,18 +315,23 @@ export default function TransactionHistory() {
 
     try {
       await withTopProgress(async () => {
-        const combinedSearch = [search, advancedFriendFilter, advancedRoomFilter]
-          .map((value) => value.trim())
-          .filter(Boolean)
-          .join(" ");
+        const parsedMonth = parseMonthInput(advancedMonthFilter);
+
+        if (advancedMonthFilter.trim() && parsedMonth === undefined) {
+          setExportError(
+            "Enter a valid month before exporting, such as Jan, January, or 1.",
+          );
+          return;
+        }
+
         const data = await getTransactions({
-          search: combinedSearch,
+          search: search.trim(),
           status,
           exportMode,
           limit:
             exportMode === "count" ? Math.floor(numericExportCount) : undefined,
           year: exportMode === "year" ? numericExportYear : undefined,
-          month: advancedMonthFilter ? Number(advancedMonthFilter) : undefined,
+          month: parsedMonth,
         });
 
         if (data.transactions.length === 0) {
@@ -289,7 +360,7 @@ export default function TransactionHistory() {
         const csvContent = [header, ...rows]
           .map((row) =>
             row
-              .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+              .map(csvCell)
               .join(","),
           )
           .join("\n");
@@ -352,36 +423,19 @@ export default function TransactionHistory() {
               onChange={setStatus}
             />
 
-            <input
-              className="transaction-advanced-input"
-              type="search"
-              placeholder="Friend filter"
-              value={advancedFriendFilter}
-              onChange={(event) => setAdvancedFriendFilter(event.target.value)}
-            />
-
-            <input
-              className="transaction-advanced-input"
-              type="search"
-              placeholder="Room filter"
-              value={advancedRoomFilter}
-              onChange={(event) => setAdvancedRoomFilter(event.target.value)}
-            />
-
-            <input
-              className="transaction-advanced-input compact"
-              type="number"
-              min="1"
-              max="12"
-              placeholder="Month"
-              value={advancedMonthFilter}
-              onChange={(event) => setAdvancedMonthFilter(event.target.value)}
-            />
-
-            <button className="dashboard-secondary-button" type="submit">
-              <Filter size={18} />
-              Filter
-            </button>
+            <label className="transaction-month-field">
+              <input
+                className="transaction-advanced-input compact"
+                type="text"
+                inputMode="text"
+                autoComplete="off"
+                maxLength={9}
+                placeholder="Month (Jan or 1)"
+                value={advancedMonthFilter}
+                aria-invalid={Boolean(monthFilterError)}
+                onChange={(event) => setAdvancedMonthFilter(event.target.value)}
+              />
+            </label>
 
             <button
               className="dashboard-primary-button"
@@ -396,6 +450,11 @@ export default function TransactionHistory() {
               Export
             </button>
           </form>
+          {monthFilterError && (
+            <p className="transaction-filter-message" role="alert">
+              {monthFilterError}
+            </p>
+          )}
         </article>
 
         <article className="bento-card transaction-table-card transaction-ledger-card">

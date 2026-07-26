@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import Cropper, { type Area } from "react-easy-crop";
+import { reload } from "firebase/auth";
 import {
   AlertTriangle,
+  AtSign,
   BellRing,
   Coins,
   CreditCard,
@@ -17,6 +19,7 @@ import {
   Trash2,
   UserRound,
   ImagePlus,
+  LockKeyhole,
   UsersRound,
   WalletCards,
   X,
@@ -30,18 +33,22 @@ import {
   type WalletTopUpMethod,
 } from "../context/useAppSettings";
 import { useAuth } from "../context/useAuth";
+import { auth } from "../config/firebase";
 import {
+  confirmProfileIdentityChange,
   deleteAccount,
   deleteFriend,
   downloadMyData,
   getCurrentDbUser,
   getFriendsSummary,
+  requestProfileIdentityChange,
   requestWalletPinResetOtp,
   resetWalletPinWithOtp,
   saveWalletPin,
   updateProfileSettings,
   uploadProfilePhoto,
   type Friend,
+  type ProfileIdentityField,
 } from "../lib/api";
 import { withTopProgress } from "../utils/topProgress";
 import DashboardLayout from "./dashboard/DashboardLayout";
@@ -337,6 +344,22 @@ export default function AppSettings() {
   const [settingsError, setSettingsError] = useState("");
   const [downloadingData, setDownloadingData] = useState(false);
   const [profilePhotoUrl, setProfilePhotoUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [identityName, setIdentityName] = useState("");
+  const [identityEmail, setIdentityEmail] = useState("");
+  const [savedIdentityName, setSavedIdentityName] = useState("");
+  const [savedIdentityEmail, setSavedIdentityEmail] = useState("");
+  const [identitySendingField, setIdentitySendingField] =
+    useState<ProfileIdentityField | null>(null);
+  const [identityChangeRequest, setIdentityChangeRequest] = useState<{
+    requestId: string;
+    field: ProfileIdentityField;
+    value: string;
+    currentEmailHint: string;
+  } | null>(null);
+  const [identityOtp, setIdentityOtp] = useState("");
+  const [identityConfirming, setIdentityConfirming] = useState(false);
+  const [identityError, setIdentityError] = useState("");
   const [savedProfilePhotoUrl, setSavedProfilePhotoUrl] = useState("");
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [profilePhotoPreviewUrl, setProfilePhotoPreviewUrl] = useState("");
@@ -415,6 +438,14 @@ export default function AppSettings() {
     { value: "Net banking", label: "Net banking" },
   ];
   const canDeleteAccount = deleteConfirmation === deleteAccountConfirmationText;
+  const normalizedIdentityName = identityName.trim();
+  const normalizedSavedIdentityName = savedIdentityName.trim();
+  const normalizedIdentityEmail = identityEmail.trim().toLowerCase();
+  const normalizedSavedIdentityEmail = savedIdentityEmail.trim().toLowerCase();
+  const identityNameChanged =
+    normalizedIdentityName !== normalizedSavedIdentityName;
+  const identityEmailChanged =
+    normalizedIdentityEmail !== normalizedSavedIdentityEmail;
   const trimmedFriendSearch = friendSearch.trim();
   const visibleFriends = useMemo(() => {
     const normalizedSearch = trimmedFriendSearch.toLowerCase();
@@ -492,6 +523,16 @@ export default function AppSettings() {
           return;
         }
 
+        const loadedIdentityName =
+          response.user.name || user?.displayName || "";
+        const loadedIdentityEmail =
+          response.user.email || user?.email || "";
+
+        setUsername(response.user.username || "");
+        setIdentityName(loadedIdentityName);
+        setIdentityEmail(loadedIdentityEmail);
+        setSavedIdentityName(loadedIdentityName);
+        setSavedIdentityEmail(loadedIdentityEmail);
         setSavedProfilePhotoUrl(
           response.user.profile_photo_url ||
             response.user.photo_url ||
@@ -528,7 +569,7 @@ export default function AppSettings() {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.photoURL]);
+  }, [user?.displayName, user?.email, user?.photoURL]);
 
   useEffect(
     () => () => {
@@ -716,6 +757,126 @@ export default function AppSettings() {
     }
 
     await saveProfileDisplay(avatarId, profilePhotoUrl);
+  }
+
+  async function handleRequestIdentityChange(
+    field: ProfileIdentityField,
+  ) {
+    setIdentityError("");
+    setSettingsMessage("");
+    const value = field === "name" ? identityName.trim() : identityEmail.trim();
+    const fieldChanged =
+      field === "name" ? identityNameChanged : identityEmailChanged;
+
+    if (!fieldChanged) {
+      return;
+    }
+
+    if (field === "name" && (value.length < 2 || value.length > 80)) {
+      setIdentityError("Name must be between 2 and 80 characters.");
+      return;
+    }
+
+    if (field === "email" && !/^\S+@\S+\.\S+$/.test(value)) {
+      setIdentityError("Enter a valid email address.");
+      return;
+    }
+
+    try {
+      setIdentitySendingField(field);
+      const response = await withTopProgress(() =>
+        requestProfileIdentityChange(field, value),
+      );
+      setIdentityOtp("");
+      setIdentityChangeRequest({
+        requestId: response.requestId,
+        field,
+        value,
+        currentEmailHint: response.currentEmailHint,
+      });
+      setSettingsMessage(response.message);
+    } catch (error) {
+      setIdentityError(
+        error instanceof Error
+          ? error.message
+          : "Could not send the verification code.",
+      );
+    } finally {
+      setIdentitySendingField(null);
+    }
+  }
+
+  async function handleConfirmIdentityChange(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    setIdentityError("");
+
+    if (!identityChangeRequest) {
+      return;
+    }
+
+    const otp = identityOtp.replace(/\D/g, "");
+
+    if (otp.length !== 6) {
+      setIdentityError("Enter the 6-digit verification code.");
+      return;
+    }
+
+    try {
+      setIdentityConfirming(true);
+      const response = await withTopProgress(() =>
+        confirmProfileIdentityChange(identityChangeRequest.requestId, otp),
+      );
+
+      let firebaseRefreshWarning = "";
+
+      if (auth.currentUser) {
+        try {
+          await reload(auth.currentUser);
+          await auth.currentUser.getIdToken(true);
+        } catch (firebaseRefreshError) {
+          console.warn(
+            "Account identity changed, but the Firebase client session could not be refreshed immediately:",
+            firebaseRefreshError,
+          );
+          firebaseRefreshWarning =
+            " Sign in again if the updated email is not shown everywhere immediately.";
+        }
+      }
+
+      const updatedIdentityName = response.user.name || "";
+      const updatedIdentityEmail = response.user.email || "";
+
+      setUsername(response.user.username || username);
+      setIdentityName(updatedIdentityName);
+      setIdentityEmail(updatedIdentityEmail);
+      setSavedIdentityName(updatedIdentityName);
+      setSavedIdentityEmail(updatedIdentityEmail);
+
+      try {
+        await refreshDbUser();
+      } catch (profileRefreshError) {
+        console.warn(
+          "Account identity changed, but the profile could not be refreshed immediately:",
+          profileRefreshError,
+        );
+      }
+
+      window.dispatchEvent(new Event("splitverse:profile-updated"));
+      window.dispatchEvent(new Event("splitverse:data-updated"));
+      setIdentityChangeRequest(null);
+      setIdentityOtp("");
+      setSettingsMessage(`${response.message}${firebaseRefreshWarning}`);
+    } catch (error) {
+      setIdentityError(
+        error instanceof Error
+          ? error.message
+          : "Could not confirm the account identity change.",
+      );
+    } finally {
+      setIdentityConfirming(false);
+    }
   }
 
   async function saveApplicationDisplay(
@@ -1076,6 +1237,114 @@ export default function AppSettings() {
               {profileSaving ? "Saving profile" : "Save profile photo"}
             </button>
           </form>
+        </article>
+
+        <article className="bento-card settings-card username-settings-card">
+          <div className="bento-card-head">
+            <div>
+              <span>Public identity</span>
+              <h2>Unique username</h2>
+            </div>
+            <AtSign size={22} />
+          </div>
+          <p>
+            Your username is permanent. Name and email changes require a
+            one-time code sent to your current registered email.
+          </p>
+
+          <div className="identity-settings-form">
+            <label className="settings-field identity-locked-field">
+              <span>Permanent SplitVerse username</span>
+              <div className="username-input-wrap identity-readonly-input">
+                <span aria-hidden="true">@</span>
+                <input
+                  type="text"
+                  value={username}
+                  readOnly
+                  disabled={profileLoading}
+                  aria-describedby="permanent-username-note"
+                />
+                <LockKeyhole size={17} aria-hidden="true" />
+              </div>
+              <small id="permanent-username-note">
+                Chosen during signup and protected from future changes.
+              </small>
+            </label>
+
+            <div className="identity-edit-row">
+              <label className="settings-field">
+                <span>Account name</span>
+                <input
+                  type="text"
+                  value={identityName}
+                  maxLength={80}
+                  autoComplete="name"
+                  disabled={profileLoading || Boolean(identitySendingField)}
+                  onChange={(event) => {
+                    setIdentityName(event.target.value);
+                    setIdentityError("");
+                  }}
+                />
+              </label>
+              <button
+                className={`dashboard-secondary-button identity-verify-button ${
+                  identityNameChanged ? "identity-verify-button-ready" : ""
+                }`}
+                type="button"
+                disabled={
+                  profileLoading ||
+                  Boolean(identitySendingField) ||
+                  !identityNameChanged
+                }
+                onClick={() => void handleRequestIdentityChange("name")}
+              >
+                <Mail size={16} />
+                {identitySendingField === "name"
+                  ? "Sending code"
+                  : "Verify name change"}
+              </button>
+            </div>
+
+            <div className="identity-edit-row">
+              <label className="settings-field">
+                <span>Registered email</span>
+                <input
+                  type="email"
+                  value={identityEmail}
+                  maxLength={254}
+                  autoComplete="email"
+                  disabled={profileLoading || Boolean(identitySendingField)}
+                  onChange={(event) => {
+                    setIdentityEmail(event.target.value);
+                    setIdentityError("");
+                  }}
+                />
+              </label>
+              <button
+                className={`dashboard-secondary-button identity-verify-button ${
+                  identityEmailChanged ? "identity-verify-button-ready" : ""
+                }`}
+                type="button"
+                disabled={
+                  profileLoading ||
+                  Boolean(identitySendingField) ||
+                  !identityEmailChanged
+                }
+                onClick={() => void handleRequestIdentityChange("email")}
+              >
+                <Mail size={16} />
+                {identitySendingField === "email"
+                  ? "Sending code"
+                  : "Verify email change"}
+              </button>
+            </div>
+
+            {identityError && !identityChangeRequest && (
+              <p className="settings-inline-message error" role="alert">
+                {identityError}
+              </p>
+            )}
+          </div>
         </article>
 
         <article className="bento-card settings-card currency-language-card">
@@ -1546,6 +1815,96 @@ export default function AppSettings() {
       {settingsMessage && (
         <div className="settings-bottom-toast" role="status" aria-live="polite">
           {settingsMessage}
+        </div>
+      )}
+
+      {identityChangeRequest && (
+        <div className="transaction-export-backdrop" role="presentation">
+          <form
+            className="transaction-export-dialog identity-change-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="identity-change-title"
+            onSubmit={handleConfirmIdentityChange}
+          >
+            <div className="transaction-export-head">
+              <div>
+                <span>Verify account change</span>
+                <h2 id="identity-change-title">
+                  Confirm {identityChangeRequest.field === "name" ? "name" : "email"} change
+                </h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Close account change verification dialog"
+                disabled={identityConfirming}
+                onClick={() => {
+                  setIdentityChangeRequest(null);
+                  setIdentityOtp("");
+                  setIdentityError("");
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="account-delete-warning identity-change-warning">
+              <ShieldCheck size={18} />
+              <p>
+                A 6-digit code was sent to {identityChangeRequest.currentEmailHint}.
+                Enter it to change your {identityChangeRequest.field} to
+                <strong> {identityChangeRequest.value}</strong>.
+              </p>
+            </div>
+
+            <label className="settings-field">
+              <span>Email verification code</span>
+              <input
+                className="identity-otp-input"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                autoComplete="one-time-code"
+                value={identityOtp}
+                disabled={identityConfirming}
+                onChange={(event) => {
+                  setIdentityOtp(
+                    event.target.value.replace(/\D/g, "").slice(0, 6),
+                  );
+                  setIdentityError("");
+                }}
+              />
+            </label>
+
+            {identityError && (
+              <p className="transaction-export-message error" role="alert">
+                {identityError}
+              </p>
+            )}
+
+            <div className="transaction-export-actions">
+              <button
+                className="dashboard-secondary-button"
+                type="button"
+                disabled={identityConfirming}
+                onClick={() => {
+                  setIdentityChangeRequest(null);
+                  setIdentityOtp("");
+                  setIdentityError("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="dashboard-primary-button"
+                type="submit"
+                disabled={identityConfirming || identityOtp.length !== 6}
+              >
+                {identityConfirming ? "Verifying code" : "Confirm change"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

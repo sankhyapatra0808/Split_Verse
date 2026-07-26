@@ -904,3 +904,195 @@
     border-radius: 22px;
   }
 }
+
+/* Unique username and account-management polish. */
+.username-settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.username-input-wrap {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 1px solid var(--dash-hairline);
+  border-radius: 12px;
+  background: var(--dash-canvas);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.username-input-wrap:focus-within {
+  border-color: var(--dash-primary);
+  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+}
+
+.username-input-wrap > span {
+  color: var(--dash-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.username-input-wrap input {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--dash-ink);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.username-settings-form .dashboard-primary-button {
+  justify-self: start;
+  min-height: 44px;
+}
+
+.settings-friend-delete-list {
+  max-height: 224px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.settings-delete-account-button {
+  min-width: 176px;
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 0 22px;
+  background: var(--dash-danger, #cf202f);
+  box-shadow: none;
+}
+
+.settings-delete-account-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #a71926;
+  box-shadow: 0 8px 20px rgba(207, 32, 47, 0.18);
+}
+
+@media (max-width: 560px) {
+  .username-settings-form .dashboard-primary-button,
+  .settings-delete-account-button {
+    width: 100%;
+  }
+}
+
+/* Immutable username with OTP-protected account identity changes. */
+.identity-settings-form {
+  display: grid;
+  gap: 16px;
+}
+
+.identity-locked-field small {
+  color: var(--dash-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.identity-readonly-input {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  background: var(--dash-surface-soft);
+}
+
+.identity-readonly-input:focus-within {
+  border-color: var(--dash-hairline);
+  box-shadow: none;
+}
+
+.identity-readonly-input input {
+  cursor: default;
+}
+
+.identity-readonly-input svg {
+  color: var(--dash-muted);
+}
+
+.identity-edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.identity-verify-button {
+  min-width: 176px;
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+.identity-verify-button.identity-verify-button-ready:not(:disabled) {
+  border-color: var(--dash-primary);
+  color: #ffffff;
+  background: var(--dash-primary);
+}
+
+.identity-verify-button.identity-verify-button-ready:hover:not(:disabled) {
+  border-color: var(--dash-primary-active);
+  background: var(--dash-primary-active);
+}
+
+.identity-change-dialog {
+  max-width: 520px;
+}
+
+.identity-change-warning {
+  color: var(--dash-primary);
+  border-color: rgba(0, 82, 255, 0.16);
+  background: rgba(0, 82, 255, 0.07);
+}
+
+.identity-change-warning p {
+  overflow-wrap: anywhere;
+}
+
+.identity-otp-input {
+  letter-spacing: 0.18em;
+  font-weight: 800;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .identity-edit-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .identity-verify-button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+
+/* Keep the friend search control at its intended compact height even when the
+   settings grid stretches the surrounding card. */
+.friend-delete-card {
+  align-content: start;
+}
+
+.friend-delete-card .friend-search-field {
+  width: 100%;
+  height: 46px !important;
+  min-height: 46px !important;
+  max-height: 46px !important;
+  box-sizing: border-box;
+  align-self: start;
+  flex: 0 0 46px;
+}
+
+.friend-delete-card .friend-search-field input {
+  height: 44px !important;
+  min-height: 0 !important;
+  max-height: 44px !important;
+}

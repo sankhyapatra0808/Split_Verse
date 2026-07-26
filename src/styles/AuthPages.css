@@ -920,3 +920,22 @@ input {
   font-size: 13px;
   line-height: 1.5;
 }
+
+.auth-field-note {
+  color: var(--auth-body);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.auth-field-note.username-checking {
+  color: var(--auth-primary);
+}
+
+.auth-field-note.username-available {
+  color: #04784a;
+}
+
+.auth-field-note.username-taken {
+  color: var(--auth-danger);
+}

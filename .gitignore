@@ -1,53 +1,40 @@
 # Dependencies
 node_modules/
-server/node_modules/
+**/node_modules/
 
-# Build outputs
+# Local environment files and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Expo / React Native generated output
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/android/
+mobile/ios/
+mobile/*.jks
+mobile/*.keystore
+mobile/*.p8
+mobile/*.p12
+mobile/*.mobileprovision
+
+# Server build/runtime output
+server/dist/
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Web build output
 dist/
 build/
-server/dist/
-.vite/
 
-# Local environment files - never commit real secrets
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production
-.env.production.local
-.env*.local
-server/.env
-server/.env.local
-server/.env.development.local
-server/.env.test.local
-server/.env.production
-server/.env.production.local
-server/.env*.local
-
-# Keep safe templates tracked
-!.env.example
-!server/.env.example
-
-# Secret/key material
-*.pem
-*.key
-*.p8
-*.p12
-*.cert
-*.crt
-*service-account*.json
-*firebase-admin*.json
-
-# Logs and reports
-logs/
+# Logs, caches, and editor files
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# OS/editor files
+*.tsbuildinfo
 .DS_Store
-Thumbs.db
 .vscode/
 .idea/
+coverage/

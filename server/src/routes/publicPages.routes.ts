@@ -23,7 +23,9 @@ const contactMessageSchema = z
   .object({
     name: safeTextSchema("Name", 80),
     email: z.string().trim().email("Enter a valid email").max(254),
-    subject: safeTextSchema("Subject", 140).optional().default("SplitVerse contact message"),
+    subject: safeTextSchema("Subject", 140)
+      .optional()
+      .default("SplitVerse contact message"),
     message: safeTextSchema("Message", 3000),
   })
   .strict();
@@ -33,7 +35,12 @@ const supportTicketSchema = z
     name: safeTextSchema("Name", 80),
     email: z.string().trim().email("Enter a valid email").max(254),
     subject: safeTextSchema("Subject", 140),
-    category: z.string().trim().max(80, "Category is too long").optional().default("general"),
+    category: z
+      .string()
+      .trim()
+      .max(80, "Category is too long")
+      .optional()
+      .default("general"),
     message: safeTextSchema("Message", 4000),
   })
   .strict();
@@ -136,7 +143,9 @@ router.get("/:slug", async (req, res) => {
     const page = pageResult.rows[0];
 
     if (!page) {
-      return res.status(404).json({ message: "Page content is not published yet" });
+      return res
+        .status(404)
+        .json({ message: "Page content is not published yet" });
     }
 
     return res.json({

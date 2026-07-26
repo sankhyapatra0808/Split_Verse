@@ -3,10 +3,10 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
+  AtSign,
   Eye,
   EyeOff,
   LockKeyhole,
-  Mail,
   ReceiptText,
   ShieldCheck,
   UsersRound,
@@ -17,7 +17,7 @@ import logo from "../../assets/Logo-v2.png";
 import "../../styles/AuthPages.css";
 import { GoogleIcon } from "./SocialIcons";
 import { useAuth } from "../../context/useAuth";
-import type { EmailLoginOtpSession } from "../../lib/api";
+import { ApiError, type EmailLoginOtpSession } from "../../lib/api";
 import { getFirebaseErrorMessage } from "../../utils/firebaseError";
 import { withTopProgress } from "../../utils/topProgress";
 
@@ -25,6 +25,10 @@ type LocationState = {
   from?: {
     pathname?: string;
   };
+  otpSession?: EmailLoginOtpSession;
+  email?: string;
+  remember?: boolean;
+  status?: string;
 };
 
 const maxDailyLoginAttempts = 5;
@@ -53,14 +57,13 @@ function clearLoginAttempts(email: string) {
   window.localStorage.removeItem(getLoginAttemptKey(email));
 }
 
-function isFirebaseAuthError(error: unknown) {
+function isInvalidCredentialError(error: unknown) {
   return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    String((error as { code?: unknown }).code).startsWith("auth/")
+    error instanceof ApiError &&
+    (error.status === 401 || error.code === "INVALID_LOGIN_CREDENTIALS")
   );
 }
+
 
 export default function Login() {
   const navigate = useNavigate();
@@ -68,23 +71,27 @@ export default function Login() {
   const {
     completeEmailLoginWithOtp,
     loginWithProvider,
+    resendEmailLoginOtp,
     startEmailLoginOtp,
   } = useAuth();
 
-  const [email, setEmail] = useState("");
+  const locationState = (location.state as LocationState | null) ?? null;
+  const [email, setEmail] = useState(() => locationState?.email || "");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSession, setOtpSession] = useState<EmailLoginOtpSession | null>(
-    null,
+    () => locationState?.otpSession ?? null,
   );
   const [showPass, setShowPass] = useState(false);
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(
+    () => locationState?.remember ?? true,
+  );
   const [error, setError] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(() => locationState?.status || "");
   const [loading, setLoading] = useState(false);
 
   const from =
-    (location.state as LocationState | null)?.from?.pathname || "/dashboard";
+    locationState?.from?.pathname || "/dashboard";
   const otpActive = Boolean(otpSession);
 
   const resetOtpStep = () => {
@@ -113,7 +120,7 @@ export default function Login() {
     setError("");
     setStatus("");
 
-    const trimmedEmail = email.trim();
+    const trimmedIdentifier = email.trim();
 
     if (otpSession) {
       const sanitizedOtp = otp.replace(/\D/g, "");
@@ -127,14 +134,12 @@ export default function Login() {
         setLoading(true);
         await withTopProgress(() =>
           completeEmailLoginWithOtp(
-            trimmedEmail,
-            password,
             remember,
             otpSession.sessionId,
             sanitizedOtp,
           ),
         );
-        clearLoginAttempts(trimmedEmail);
+        clearLoginAttempts(trimmedIdentifier);
         navigate(from, { replace: true });
       } catch (loginError) {
         setError(getFirebaseErrorMessage(loginError));
@@ -145,12 +150,12 @@ export default function Login() {
       return;
     }
 
-    if (!trimmedEmail || !password) {
-      setError("Please enter email and password.");
+    if (!trimmedIdentifier || !password) {
+      setError("Please enter your username or email and password.");
       return;
     }
 
-    if (getLoginAttemptCount(trimmedEmail) >= maxDailyLoginAttempts) {
+    if (getLoginAttemptCount(trimmedIdentifier) >= maxDailyLoginAttempts) {
       setError("Too many login attempts today. Please try again tomorrow.");
       return;
     }
@@ -158,20 +163,21 @@ export default function Login() {
     try {
       setLoading(true);
       const session = await withTopProgress(() =>
-        startEmailLoginOtp(trimmedEmail, password, remember),
+        startEmailLoginOtp(trimmedIdentifier, password, remember),
       );
       setOtpSession(session);
+      setPassword("");
       setOtp("");
       setStatus(
         `We sent a 6-digit login code to ${session.email}. It expires in 10 minutes.`,
       );
     } catch (loginError) {
-      if (!isFirebaseAuthError(loginError)) {
+      if (!isInvalidCredentialError(loginError)) {
         setError(getFirebaseErrorMessage(loginError));
         return;
       }
 
-      const attempts = recordFailedLoginAttempt(trimmedEmail);
+      const attempts = recordFailedLoginAttempt(trimmedIdentifier);
       const attemptsLeft = Math.max(0, maxDailyLoginAttempts - attempts);
 
       setError(
@@ -192,8 +198,10 @@ export default function Login() {
 
     try {
       setLoading(true);
+      if (!otpSession) return;
+
       const session = await withTopProgress(() =>
-        startEmailLoginOtp(email.trim(), password, remember),
+        resendEmailLoginOtp(otpSession.sessionId),
       );
       setOtpSession(session);
       setOtp("");
@@ -241,18 +249,18 @@ export default function Login() {
 
           <form onSubmit={handleLogin} className="auth-form">
             <label className="auth-field">
-              <span>Email address</span>
+              <span>Username or email</span>
               <div className="auth-input-shell">
-                <Mail size={18} />
+                <AtSign size={18} />
                 <input
-                  type="email"
-                  placeholder="you@example.com"
+                  type="text"
+                  placeholder="@username or you@example.com"
                   value={email}
                   onChange={(event) => {
                     setEmail(event.target.value);
                     resetOtpStep();
                   }}
-                  autoComplete="email"
+                  autoComplete="username"
                   disabled={loading || otpActive}
                 />
               </div>
@@ -340,7 +348,7 @@ export default function Login() {
                   onClick={resetOtpStep}
                   disabled={loading}
                 >
-                  Change email
+                  Change username or email
                 </button>
               </div>
             )}

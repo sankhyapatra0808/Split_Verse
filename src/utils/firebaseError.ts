@@ -11,7 +11,7 @@ const firebaseErrorMessages: Record<string, string> = {
   "auth/popup-closed-by-user": "Login popup was closed before completion.",
   "auth/too-many-requests": "Too many attempts. Please try again later.",
   "auth/user-not-found": "No account found with this email.",
-  "auth/weak-password": "Password should be at least 6 characters.",
+  "auth/weak-password": "Password should be at least 10 characters.",
   "auth/wrong-password": "Invalid email or password.",
 };
 

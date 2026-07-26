@@ -80,10 +80,7 @@ function hasControlCharacter(value: string) {
   });
 }
 
-export const uuidParamSchema = z
-  .string()
-  .trim()
-  .uuid("Invalid id format");
+export const uuidParamSchema = z.string().trim().uuid("Invalid id format");
 
 export const safeTextSchema = (label: string, max = 120) =>
   z

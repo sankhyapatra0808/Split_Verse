@@ -2853,6 +2853,30 @@
   box-shadow: 0 0 0 4px rgba(0, 82, 255, 0.1);
 }
 
+.mandatory-wallet-pin-card input.mandatory-wallet-pin-username {
+  font-size: 15px;
+  letter-spacing: normal;
+  text-transform: lowercase;
+}
+
+.mandatory-wallet-pin-username-note {
+  color: var(--dash-muted) !important;
+  font-size: 12px !important;
+  font-weight: 700;
+}
+
+.mandatory-wallet-pin-username-note.username-checking {
+  color: var(--dash-primary) !important;
+}
+
+.mandatory-wallet-pin-username-note.username-available {
+  color: var(--dash-success) !important;
+}
+
+.mandatory-wallet-pin-username-note.username-taken {
+  color: var(--dash-danger) !important;
+}
+
 .mandatory-wallet-pin-card button {
   min-height: 48px;
   border: 0;

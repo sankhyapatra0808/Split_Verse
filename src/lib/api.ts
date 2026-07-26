@@ -1,6 +1,105 @@
 import { auth } from "../config/firebase";
 
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+function resolveApiUrl() {
+  const configuredUrl = String(import.meta.env.VITE_API_URL || "").trim();
+  const fallbackUrl = import.meta.env.DEV
+    ? "http://localhost:5000"
+    : typeof window !== "undefined"
+      ? window.location.origin
+      : "";
+  const rawUrl = configuredUrl || fallbackUrl;
+
+  if (!rawUrl) {
+    throw new Error("VITE_API_URL is required for production builds.");
+  }
+
+  if (rawUrl.startsWith("/")) {
+    return rawUrl.replace(/\/$/, "");
+  }
+
+  const parsedUrl = new URL(rawUrl);
+  const localDevelopmentHost =
+    import.meta.env.DEV &&
+    ["localhost", "127.0.0.1", "10.0.2.2"].includes(parsedUrl.hostname);
+
+  if (parsedUrl.protocol !== "https:" && !localDevelopmentHost) {
+    throw new Error(
+      "VITE_API_URL must use HTTPS. Local HTTP is allowed only during development.",
+    );
+  }
+
+  return parsedUrl.toString().replace(/\/$/, "");
+}
+
+export const API_URL = resolveApiUrl();
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly retryAfterSeconds?: number;
+
+  constructor(options: {
+    message: string;
+    status: number;
+    code?: string;
+    retryAfterSeconds?: number;
+  }) {
+    super(options.message);
+    this.name = "ApiError";
+    this.status = options.status;
+    this.code = options.code || "API_ERROR";
+    this.retryAfterSeconds = options.retryAfterSeconds;
+  }
+}
+
+type ApiErrorPayload = {
+  message?: unknown;
+  code?: unknown;
+  retryAfterSeconds?: unknown;
+};
+
+async function readJsonResponse(response: Response) {
+  const rawText = await response.text();
+
+  if (!rawText) return null;
+
+  try {
+    return JSON.parse(rawText) as unknown;
+  } catch {
+    if (response.ok) {
+      throw new ApiError({
+        message: "The server returned an unreadable response.",
+        status: response.status,
+        code: "INVALID_RESPONSE",
+      });
+    }
+
+    return null;
+  }
+}
+
+function throwApiResponseError(response: Response, data: unknown): never {
+  const payload =
+    typeof data === "object" && data !== null
+      ? (data as ApiErrorPayload)
+      : {};
+
+  throw new ApiError({
+    message:
+      typeof payload.message === "string" && payload.message.trim()
+        ? payload.message
+        : "API request failed",
+    status: response.status,
+    code:
+      typeof payload.code === "string" && payload.code.trim()
+        ? payload.code
+        : "API_ERROR",
+    retryAfterSeconds:
+      Number.isFinite(Number(payload.retryAfterSeconds))
+        ? Number(payload.retryAfterSeconds)
+        : undefined,
+  });
+}
 
 type CachedAuthToken = {
   uid: string;
@@ -9,6 +108,11 @@ type CachedAuthToken = {
 };
 
 let cachedAuthToken: CachedAuthToken | null = null;
+
+export function clearCachedAuthToken() {
+  cachedAuthToken = null;
+}
+
 const authTokenExpiryBufferMs = 60 * 1000;
 const smallApiCache = new Map<
   string,
@@ -94,6 +198,7 @@ export type DbUser = {
   id: string;
   firebase_uid: string;
   name: string | null;
+  username?: string | null;
   email: string;
   photo_url: string | null;
   profile_photo_url?: string | null;
@@ -528,6 +633,7 @@ export async function paySplitRoomDue(
 export type Friend = {
   id: string;
   name: string | null;
+  username?: string | null;
   email: string;
   photo_url: string | null;
   profile_photo_url?: string | null;
@@ -541,7 +647,9 @@ export type FriendRequest = {
   id: string;
   requester_user_id: string;
   requester_name: string | null;
+  requester_username?: string | null;
   requester_email: string;
+  recipient_user_id?: string | null;
   recipient_email: string;
   status: string;
   token?: string;
@@ -555,6 +663,18 @@ export type FriendsSummary = {
   friends: Friend[];
   receivedRequests: FriendRequest[];
   sentRequests: FriendRequest[];
+};
+
+export type GlobalPerson = {
+  id: string;
+  name: string | null;
+  username: string;
+  emailHint: string;
+  photo_url: string | null;
+  profile_photo_url?: string | null;
+  avatar_mode?: AvatarMode | null;
+  display_photo_url?: string | null;
+  relationshipStatus: "friends" | "request_sent" | "request_received" | "none";
 };
 
 export type FriendActivitySummary = {
@@ -632,13 +752,13 @@ async function publicApiFetch<T>(
     },
   });
 
-  const data = await response.json();
+  const data = await readJsonResponse(response);
 
   if (!response.ok) {
-    throw new Error(data.message || "API request failed");
+    throwApiResponseError(response, data);
   }
 
-  return data;
+  return data as T;
 }
 
 export async function requestPasswordResetOtp(email: string) {
@@ -685,13 +805,13 @@ export async function apiFetch<T>(
     },
   });
 
-  const data = await response.json();
+  const data = await readJsonResponse(response);
 
   if (!response.ok) {
-    throw new Error(data.message || "API request failed");
+    throwApiResponseError(response, data);
   }
 
-  return data;
+  return data as T;
 }
 
 export type PublicPageContent = {
@@ -753,10 +873,31 @@ export async function getDashboardSummary() {
   return apiFetch<DashboardSummary>("/api/dashboard/summary");
 }
 
-export async function syncCurrentUser() {
+export async function syncCurrentUser(
+  payload: {
+    username?: string;
+    requireUsername?: boolean;
+    deferUsernameSetup?: boolean;
+  } = {},
+) {
   return apiFetch<{ message: string; user: DbUser }>("/api/auth/sync-user", {
     method: "POST",
+    body: JSON.stringify({
+      requireUsername: payload.requireUsername ?? true,
+      deferUsernameSetup: payload.deferUsernameSetup ?? false,
+      ...(payload.username ? { username: payload.username } : {}),
+    }),
   });
+}
+
+export async function checkUsernameAvailability(username: string) {
+  return publicApiFetch<{ username: string; available: boolean }>(
+    "/api/auth/username/availability",
+    {
+      method: "POST",
+      body: JSON.stringify({ username }),
+    },
+  );
 }
 
 export type EmailLoginOtpSession = {
@@ -765,28 +906,38 @@ export type EmailLoginOtpSession = {
   expiresAt: string;
 };
 
-export async function requestEmailLoginOtp() {
-  return apiFetch<EmailLoginOtpSession>("/api/auth/email-login-otp/request", {
-    method: "POST",
-  });
+export async function requestEmailLoginOtp(
+  identifier: string,
+  password: string,
+) {
+  return publicApiFetch<EmailLoginOtpSession>(
+    "/api/auth/email-login-otp/request",
+    {
+      method: "POST",
+      body: JSON.stringify({ identifier, password }),
+    },
+  );
+}
+
+export async function resendEmailLoginOtp(sessionId: string) {
+  return publicApiFetch<EmailLoginOtpSession>(
+    "/api/auth/email-login-otp/resend",
+    {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    },
+  );
 }
 
 export async function verifyEmailLoginOtp(sessionId: string, otp: string) {
-  const response = await fetch(`${API_URL}/api/auth/email-login-otp/verify`, {
+  return publicApiFetch<{
+    verified: boolean;
+    customToken: string;
+    email: string;
+  }>("/api/auth/email-login-otp/verify", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ sessionId, otp }),
   });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.message || "Failed to verify login code");
-  }
-
-  return data as { verified: boolean };
 }
 
 export async function deleteAccount(confirmationText: string) {
@@ -944,13 +1095,46 @@ export async function getFriendActivity(friendId: string) {
   );
 }
 
-export async function sendFriendRequest(email: string) {
-  const response = await apiFetch<{ message: string; request: FriendRequest }>(
-    "/api/friends/requests",
+export async function searchGlobalPeople(query: string) {
+  const searchParams = new URLSearchParams({ query });
+
+  return apiFetch<{ people: GlobalPerson[] }>(
+    `/api/friends/people?${searchParams.toString()}`,
+  );
+}
+
+export async function sendSplitVerseInvite(email: string) {
+  return apiFetch<{ message: string; emailStatus: string }>(
+    "/api/friends/invites",
     {
       method: "POST",
       body: JSON.stringify({ email }),
     },
+  );
+}
+
+export async function sendFriendRequest(
+  identifier: string,
+  recipientUserId?: string,
+) {
+  const response = await apiFetch<{ message: string; request: FriendRequest }>(
+    "/api/friends/requests",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        identifier,
+        recipientUserId,
+      }),
+    },
+  );
+  clearApiCache("friends");
+  return response;
+}
+
+export async function deleteFriendRequest(requestId: string) {
+  const response = await apiFetch<{ message: string }>(
+    `/api/friends/requests/${requestId}`,
+    { method: "DELETE" },
   );
   clearApiCache("friends");
   return response;
@@ -975,6 +1159,30 @@ export async function deleteFriend(friendId: string) {
   return response;
 }
 
+export type BlockedUser = Friend & { blocked_at?: string };
+
+export async function getBlockedUsers() {
+  return apiFetch<{ blockedUsers: BlockedUser[] }>("/api/friends/blocked");
+}
+
+export async function blockFriend(friendId: string) {
+  const response = await apiFetch<{ message: string; blockedUser: BlockedUser }>(
+    `/api/friends/${friendId}/block`,
+    { method: "POST" },
+  );
+  clearApiCache("friends");
+  return response;
+}
+
+export async function unblockUser(userId: string) {
+  const response = await apiFetch<{ message: string }>(
+    `/api/friends/blocked/${userId}`,
+    { method: "DELETE" },
+  );
+  clearApiCache("friends");
+  return response;
+}
+
 // Transaction History Export function
 
 export async function getTransactions(params?: {
@@ -983,7 +1191,7 @@ export async function getTransactions(params?: {
   limit?: number;
   exportMode?: "count" | "year";
   year?: number;
-  month?: number;
+  month?: number | string;
   friendId?: string;
   roomId?: string;
 }) {
@@ -1055,6 +1263,48 @@ export async function updateProfileSettings(
   return response;
 }
 
+export type ProfileIdentityField = "name" | "email";
+
+export type ProfileIdentityChangeRequest = {
+  requestId: string;
+  field: ProfileIdentityField;
+  currentEmailHint: string;
+  expiresAt: string;
+  message: string;
+};
+
+export async function requestProfileIdentityChange(
+  field: ProfileIdentityField,
+  value: string,
+) {
+  return apiFetch<ProfileIdentityChangeRequest>(
+    "/api/auth/profile/identity-change/request",
+    {
+      method: "POST",
+      body: JSON.stringify({ field, value }),
+    },
+  );
+}
+
+export async function confirmProfileIdentityChange(
+  requestId: string,
+  otp: string,
+) {
+  const response = await apiFetch<{
+    message: string;
+    field: ProfileIdentityField;
+    user: DbUser;
+  }>("/api/auth/profile/identity-change/confirm", {
+    method: "POST",
+    body: JSON.stringify({ requestId, otp }),
+  });
+
+  clearApiCache("profile");
+  cacheProfileDisplay(response.user);
+  clearCachedAuthToken();
+  return response;
+}
+
 export async function uploadProfilePhoto(file: File) {
   const token = await getCachedAuthToken();
   const formData = new FormData();
@@ -1082,6 +1332,7 @@ export async function uploadProfilePhoto(file: File) {
 export type SaveWalletPinPayload = {
   pin: string;
   currentPin?: string;
+  username?: string;
 };
 
 export async function saveWalletPin(payload: SaveWalletPinPayload) {

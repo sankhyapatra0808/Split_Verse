@@ -12,9 +12,23 @@ const maxSplitRoomItemAmount = Number(process.env.MAX_SPLIT_ROOM_ITEM_AMOUNT || 
 const createSplitRoomSchema = z
     .object({
     name: safeTextSchema("Room name", 100),
-    category: z.string().trim().max(60, "Category is too long").optional().default("general"),
-    members: z.array(z.string().trim().max(120, "Member value is too long")).max(20, "You can add up to 20 members").optional().default([]),
-    paidByEmail: z.string().trim().email("Choose a valid payer").max(254).optional(),
+    category: z
+        .string()
+        .trim()
+        .max(60, "Category is too long")
+        .optional()
+        .default("general"),
+    members: z
+        .array(z.string().trim().max(120, "Member value is too long"))
+        .max(20, "You can add up to 20 members")
+        .optional()
+        .default([]),
+    paidByEmail: z
+        .string()
+        .trim()
+        .email("Choose a valid payer")
+        .max(254)
+        .optional(),
 })
     .strict();
 const createSplitRoomItemSchema = z
@@ -378,7 +392,8 @@ function serializeNetSettlements(debtLines, currentUserId) {
             currency: "INR",
             isOutgoing: fromUserId === currentUserId,
             isIncoming: toUserId === currentUserId,
-            breakdown: pair.breakdown.sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()),
+            breakdown: pair.breakdown.sort((left, right) => new Date(left.createdAt).getTime() -
+                new Date(right.createdAt).getTime()),
         };
     })
         .filter((settlement) => Boolean(settlement))
@@ -400,7 +415,14 @@ async function insertItemSettlement(client, { itemId, amount, method, createdByU
       created_by_user_id
     )
     VALUES ($1, $2, $3, $4, $5, $6);
-    `, [itemId, amount, method, counterItemId, walletTransactionId, createdByUserId]);
+    `, [
+        itemId,
+        amount,
+        method,
+        counterItemId,
+        walletTransactionId,
+        createdByUserId,
+    ]);
 }
 async function markFullySettledItemsCollected(client, itemIds) {
     const uniqueItemIds = [...new Set(itemIds)].filter(Boolean);
@@ -470,7 +492,9 @@ async function applyOffsetSettlements(client, forwardLines, reverseLines, amount
     let forwardRemaining = forwardLines[0]?.pending_amount ?? 0;
     let reverseRemaining = reverseLines[0]?.pending_amount ?? 0;
     const touchedItemIds = [];
-    while (remainingOffset > 0.009 && forwardLines[forwardIndex] && reverseLines[reverseIndex]) {
+    while (remainingOffset > 0.009 &&
+        forwardLines[forwardIndex] &&
+        reverseLines[reverseIndex]) {
         const amount = roundMoneyValue(Math.min(remainingOffset, forwardRemaining, reverseRemaining));
         const forwardLine = forwardLines[forwardIndex];
         const reverseLine = reverseLines[reverseIndex];
@@ -760,7 +784,8 @@ function serializeRoom(room, members, items, currentUser) {
                 collectedByMember.set(item.assigned_member_id, (collectedByMember.get(item.assigned_member_id) ?? 0) + settledAmount);
             }
             if (pendingAmount > 0) {
-                outstandingByMember.set(item.assigned_member_id, (outstandingByMember.get(item.assigned_member_id) ?? 0) + pendingAmount);
+                outstandingByMember.set(item.assigned_member_id, (outstandingByMember.get(item.assigned_member_id) ?? 0) +
+                    pendingAmount);
             }
         }
     });
@@ -1025,7 +1050,9 @@ router.post("/net-settlements/pay", verifyFirebaseToken, async (req, res) => {
         const receiver = receiverResult.rows[0];
         if (!receiver) {
             await client.query("ROLLBACK");
-            return res.status(404).json({ message: "Settlement receiver not found" });
+            return res
+                .status(404)
+                .json({ message: "Settlement receiver not found" });
         }
         const [leftLockId, rightLockId] = [payer.id, receiver.id].sort();
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1::text));", [
@@ -1044,8 +1071,10 @@ router.post("/net-settlements/pay", verifyFirebaseToken, async (req, res) => {
         const pairDebtLines = await loadPairDebtLines(client, payer.id, receiver.id, {
             forUpdate: true,
         });
-        const payerOwesReceiver = pairDebtLines.filter((line) => line.debtor_user_id === payer.id && line.creditor_user_id === receiver.id);
-        const receiverOwesPayer = pairDebtLines.filter((line) => line.debtor_user_id === receiver.id && line.creditor_user_id === payer.id);
+        const payerOwesReceiver = pairDebtLines.filter((line) => line.debtor_user_id === payer.id &&
+            line.creditor_user_id === receiver.id);
+        const receiverOwesPayer = pairDebtLines.filter((line) => line.debtor_user_id === receiver.id &&
+            line.creditor_user_id === payer.id);
         const payerOwesTotal = roundMoneyValue(payerOwesReceiver.reduce((sum, line) => sum + line.pending_amount, 0));
         const receiverOwesTotal = roundMoneyValue(receiverOwesPayer.reduce((sum, line) => sum + line.pending_amount, 0));
         const netAmount = roundMoneyValue(payerOwesTotal - receiverOwesTotal);
@@ -1169,7 +1198,7 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
         if (!dbUser) {
             return res.status(404).json({ message: "User not found in database" });
         }
-        const { name, category, members: suppliedMembers, paidByEmail } = parseRequestBody(createSplitRoomSchema, req.body);
+        const { name, category, members: suppliedMembers, paidByEmail, } = parseRequestBody(createSplitRoomSchema, req.body);
         const members = parseMembers(suppliedMembers);
         const roomsCreatedTodayResult = await client.query(`
       SELECT COUNT(*)::int AS room_count
@@ -1326,7 +1355,8 @@ router.post("/:roomId/items", verifyFirebaseToken, async (req, res) => {
         const isAssignedToCurrentUser = assignedMember.user_id === dbUser.id ||
             assignedMember.email?.toLowerCase() === dbUser.email.toLowerCase();
         const isAssignedToPayer = assignedMember.user_id === accessRoom.paid_by_user_id ||
-            assignedMember.email?.toLowerCase() === accessRoom.paid_by_email.toLowerCase();
+            assignedMember.email?.toLowerCase() ===
+                accessRoom.paid_by_email.toLowerCase();
         const itemResult = await db.query(`
       INSERT INTO split_room_items (
         room_id,
@@ -2233,7 +2263,9 @@ router.post("/:roomId/finalize", verifyFirebaseToken, async (req, res) => {
         `, [roomId, dbUser.id]);
         if (roomResult.rows.length === 0) {
             await client.query("ROLLBACK");
-            return res.status(404).json({ message: "Room not found or you do not own this room" });
+            return res
+                .status(404)
+                .json({ message: "Room not found or you do not own this room" });
         }
         await client.query("COMMIT");
         const notifiedUserIds = await getRoomUserIds(roomId);
@@ -2285,7 +2317,9 @@ router.post("/:roomId/archive", verifyFirebaseToken, async (req, res) => {
         RETURNING id, archived_at;
         `, [roomId, dbUser.id]);
         if (archiveResult.rows.length === 0) {
-            return res.status(404).json({ message: "Room not found or you do not own this room" });
+            return res
+                .status(404)
+                .json({ message: "Room not found or you do not own this room" });
         }
         const notifiedUserIds = await getRoomUserIds(roomId);
         sendLiveUpdate([dbUser.id, ...notifiedUserIds], {

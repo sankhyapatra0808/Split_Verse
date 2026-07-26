@@ -51,7 +51,9 @@ function isTransientDbError(error: unknown) {
     message.includes("timeout") ||
     message.includes("terminated") ||
     message.includes("connection") ||
-    ["57P01", "57P02", "57P03", "08000", "08003", "08006", "53300"].includes(code)
+    ["57P01", "57P02", "57P03", "08000", "08003", "08006", "53300"].includes(
+      code,
+    )
   );
 }
 

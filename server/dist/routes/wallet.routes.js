@@ -9,8 +9,8 @@ const topUpMethodValues = ["UPI", "Card", "Net banking"];
 const topUpDescriptionPrefix = "Wallet top-up via ";
 const maxTopUpPerTransaction = Number(process.env.MAX_TOP_UP_PER_TRANSACTION || 10000);
 const maxTopUpPerDay = Number(process.env.MAX_TOP_UP_PER_DAY || 100000);
-const devWalletTopUpEnabled = process.env.NODE_ENV !== "production" ||
-    process.env.ENABLE_DEV_WALLET_TOP_UP === "true";
+const devWalletTopUpEnabled = process.env.NODE_ENV !== "production" &&
+    process.env.ENABLE_DEV_WALLET_TOP_UP !== "false";
 const topUpSchema = z
     .object({
     amount: moneyAmountSchema(maxTopUpPerTransaction),
@@ -101,9 +101,7 @@ router.post("/top-up", verifyFirebaseToken, async (req, res) => {
             });
         }
         if (!devWalletTopUpEnabled) {
-            return res.status(403).json({
-                message: "Direct wallet top-up is disabled in production. Use the verified payment flow.",
-            });
+            return res.status(404).json({ message: "Not found" });
         }
         const { amount: numericAmount, method } = parseRequestBody(topUpSchema, req.body);
         const paymentMethod = method ?? null;
@@ -387,7 +385,9 @@ router.get("/summary", verifyFirebaseToken, async (req, res) => {
                 createdAt: toIsoString(row.created_at),
                 displayDate: row.display_date,
             })),
-            pendingSettlements: adjustedSettlementResult.rows.slice(0, 8).map((row) => ({
+            pendingSettlements: adjustedSettlementResult.rows
+                .slice(0, 8)
+                .map((row) => ({
                 id: row.id,
                 amount: Number(row.amount),
                 status: "pending",

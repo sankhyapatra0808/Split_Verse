@@ -15,7 +15,7 @@ import splitRoomRoutes from "./routes/splitRooms.routes.js";
 import friendRoutes, { getAcceptPageCacheStats, } from "./routes/friends.routes.js";
 import transactionRoutes from "./routes/transactions.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
-import paymentRoutes, { razorpayWebhookHandler } from "./routes/payments.routes.js";
+import paymentRoutes, { razorpayWebhookHandler, } from "./routes/payments.routes.js";
 import { registerLiveClient } from "./liveEvents.js";
 import { compressResponses } from "./middleware/compressResponses.js";
 import { getFirebaseAuthDependencyHealth, verifyFirebaseToken, } from "./middleware/verifyFirebaseToken.js";
@@ -32,10 +32,7 @@ function parseOriginList(value) {
 }
 const developmentOrigins = isProduction
     ? []
-    : [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ];
+    : ["http://localhost:5173", "http://127.0.0.1:5173"];
 const CLIENT_URLS = Array.from(new Set([
     ...parseOriginList(process.env.CLIENT_URLS),
     ...parseOriginList(CLIENT_URL),
@@ -58,7 +55,8 @@ function isAllowedVercelPreview(origin) {
     }
 }
 const jsonBodyLimit = process.env.JSON_BODY_LIMIT || "100kb";
-const setupRoutesEnabled = process.env.ENABLE_SETUP_ROUTES === "true";
+const setupRoutesEnabled = process.env.ENABLE_SETUP_ROUTES === "true" &&
+    (!isProduction || process.env.ALLOW_PRODUCTION_SETUP_ROUTES === "true");
 const setupRouteSecret = process.env.SETUP_ROUTE_SECRET || "";
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -67,7 +65,10 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 app.use((req, res, next) => {
-    const requestId = req.header("x-request-id") || crypto.randomUUID();
+    const suppliedRequestId = req.header("x-request-id")?.trim() || "";
+    const requestId = /^[A-Za-z0-9._:-]{1,80}$/.test(suppliedRequestId)
+        ? suppliedRequestId
+        : crypto.randomUUID();
     const startedAt = process.hrtime.bigint();
     res.setHeader("x-request-id", requestId);
     res.on("finish", () => {
@@ -164,11 +165,19 @@ const razorpayWebhookLimiter = rateLimit({
     legacyHeaders: false,
     message: { message: "Too many webhook requests. Please slow down." },
 });
+function safeSecretMatches(expected, supplied) {
+    const expectedBuffer = Buffer.from(expected);
+    const suppliedBuffer = Buffer.from(supplied);
+    return (expectedBuffer.length > 0 &&
+        expectedBuffer.length === suppliedBuffer.length &&
+        crypto.timingSafeEqual(expectedBuffer, suppliedBuffer));
+}
 function protectSetupRoutes(req, res, next) {
     if (!setupRoutesEnabled) {
         return res.status(404).json({ message: "Not found" });
     }
-    if (!setupRouteSecret || req.header("x-setup-secret") !== setupRouteSecret) {
+    const suppliedSecret = req.header("x-setup-secret") || "";
+    if (!safeSecretMatches(setupRouteSecret, suppliedSecret)) {
         return res.status(403).json({ message: "Setup route is protected" });
     }
     next();
@@ -176,15 +185,15 @@ function protectSetupRoutes(req, res, next) {
 app.use("/api", apiLimiter);
 app.use("/api/auth", authLimiter);
 app.use([
+    "/api/auth/email-login-otp/request",
+    "/api/auth/email-login-otp/resend",
+    "/api/auth/email-login-otp/verify",
     "/api/auth/password-reset/request",
     "/api/auth/password-reset/confirm",
     "/api/auth/wallet-pin/reset-otp/request",
     "/api/auth/wallet-pin/reset",
 ], sensitiveAuthLimiter);
-app.use([
-    "/api/public-pages/contact/messages",
-    "/api/public-pages/support/tickets",
-], publicFormLimiter);
+app.use(["/api/public-pages/contact/messages", "/api/public-pages/support/tickets"], publicFormLimiter);
 app.use([
     "/api/payments/razorpay/wallet-order",
     "/api/payments/razorpay/verify-wallet-payment",
@@ -196,8 +205,17 @@ app.use(compressResponses());
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), {
     immutable: true,
     maxAge: "7d",
+    dotfiles: "deny",
+    index: false,
+    setHeaders(res) {
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+    },
 }));
-app.post("/api/payments/razorpay/webhook", express.raw({ type: "application/json", limit: process.env.RAZORPAY_WEBHOOK_BODY_LIMIT || "1mb" }), razorpayWebhookHandler);
+app.post("/api/payments/razorpay/webhook", express.raw({
+    type: "application/json",
+    limit: process.env.RAZORPAY_WEBHOOK_BODY_LIMIT || "1mb",
+}), razorpayWebhookHandler);
 app.use(express.json({ limit: jsonBodyLimit }));
 app.get("/", (_req, res) => {
     res.json({
@@ -205,19 +223,22 @@ app.get("/", (_req, res) => {
     });
 });
 app.get("/api/health", (_req, res) => {
-    res.json({
+    const response = {
         status: "ok",
         service: "splitverse-api",
         timestamp: new Date().toISOString(),
-        dependencies: {
+    };
+    if (!isProduction || process.env.HEALTH_INCLUDE_DIAGNOSTICS === "true") {
+        response.dependencies = {
             firebaseAuth: getFirebaseAuthDependencyHealth(),
-        },
-        renderCaches: {
+        };
+        response.renderCaches = {
             friendAcceptPage: getAcceptPageCacheStats(),
-        },
-    });
+        };
+    }
+    res.json(response);
 });
-app.get("/api/db-test", async (_req, res) => {
+app.get("/api/db-test", protectSetupRoutes, async (_req, res) => {
     try {
         const result = await testDbConnection();
         res.json({
@@ -469,7 +490,11 @@ app.use((error, req, res, next) => {
         path: req.path,
         statusCode: safeStatusCode,
         message: errorMessage,
-        stack: isProduction ? undefined : error instanceof Error ? error.stack : undefined,
+        stack: isProduction
+            ? undefined
+            : error instanceof Error
+                ? error.stack
+                : undefined,
     }));
     res.status(safeStatusCode).json({
         message: safeStatusCode >= 500
@@ -478,6 +503,64 @@ app.use((error, req, res, next) => {
     });
 });
 void warmDatabaseConnection();
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`SplitVerse backend running on http://localhost:${PORT}`);
+});
+server.keepAliveTimeout = Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 65_000);
+server.headersTimeout = Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 66_000);
+server.requestTimeout = Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 120_000);
+let shutdownStarted = false;
+async function shutdownServer(signal, exitCode = 0, cause) {
+    if (shutdownStarted) {
+        return;
+    }
+    shutdownStarted = true;
+    const shutdownLog = {
+        time: new Date().toISOString(),
+        level: cause ? "error" : "info",
+        event: "server_shutdown",
+        signal,
+        message: cause instanceof Error ? cause.message : undefined,
+    };
+    if (cause) {
+        console.error(JSON.stringify(shutdownLog));
+    }
+    else {
+        console.log(JSON.stringify(shutdownLog));
+    }
+    const forceShutdownTimer = setTimeout(() => {
+        console.error(JSON.stringify({
+            time: new Date().toISOString(),
+            level: "error",
+            event: "server_shutdown_timeout",
+            signal,
+        }));
+        process.exit(1);
+    }, Number(process.env.SHUTDOWN_TIMEOUT_MS || 10_000));
+    forceShutdownTimer.unref();
+    server.close(async (closeError) => {
+        try {
+            await db.end();
+        }
+        catch (databaseCloseError) {
+            console.error("Database pool shutdown failed:", databaseCloseError);
+            exitCode = 1;
+        }
+        finally {
+            clearTimeout(forceShutdownTimer);
+            process.exit(closeError ? 1 : exitCode);
+        }
+    });
+}
+process.once("SIGTERM", () => {
+    void shutdownServer("SIGTERM");
+});
+process.once("SIGINT", () => {
+    void shutdownServer("SIGINT");
+});
+process.once("uncaughtException", (error) => {
+    void shutdownServer("uncaughtException", 1, error);
+});
+process.once("unhandledRejection", (reason) => {
+    void shutdownServer("unhandledRejection", 1, reason);
 });

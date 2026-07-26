@@ -101,10 +101,7 @@ export class CircuitBreaker {
         timedOut = true;
         this.recordFailure();
         reject(
-          new DependencyTimeoutError(
-            this.options.name,
-            this.options.timeoutMs,
-          ),
+          new DependencyTimeoutError(this.options.name, this.options.timeoutMs),
         );
       }, this.options.timeoutMs);
     });

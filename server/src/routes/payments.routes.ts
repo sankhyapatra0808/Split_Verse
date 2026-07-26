@@ -23,7 +23,9 @@ import {
 } from "../utils/razorpay.js";
 
 const router = express.Router();
-const walletOrderMaxAmount = Number(process.env.RAZORPAY_WALLET_TOP_UP_MAX || 100000);
+const walletOrderMaxAmount = Number(
+  process.env.RAZORPAY_WALLET_TOP_UP_MAX || 100000,
+);
 const supportedCurrencies = new Set(["INR"]);
 
 const createWalletOrderSchema = z
@@ -36,15 +38,30 @@ const createWalletOrderSchema = z
 
 const verifyWalletPaymentSchema = z
   .object({
-    razorpayOrderId: z.string().trim().min(1, "Razorpay order id is required"),
-    razorpayPaymentId: z.string().trim().min(1, "Razorpay payment id is required"),
-    razorpaySignature: z.string().trim().min(1, "Razorpay signature is required"),
+    razorpayOrderId: z
+      .string()
+      .trim()
+      .regex(/^order_[A-Za-z0-9]+$/, "Razorpay order id is invalid")
+      .max(80),
+    razorpayPaymentId: z
+      .string()
+      .trim()
+      .regex(/^pay_[A-Za-z0-9]+$/, "Razorpay payment id is invalid")
+      .max(80),
+    razorpaySignature: z
+      .string()
+      .trim()
+      .regex(/^[a-fA-F0-9]{64}$/, "Razorpay signature is invalid"),
   })
   .strict();
 
 const devApproveSchema = z
   .object({
-    razorpayOrderId: z.string().trim().min(1, "Razorpay order id is required"),
+    razorpayOrderId: z
+      .string()
+      .trim()
+      .regex(/^order_[A-Za-z0-9]+$/, "Razorpay order id is invalid")
+      .max(80),
   })
   .strict();
 
@@ -134,17 +151,35 @@ async function creditWalletForPaidOrder({
 }: {
   client: Queryable;
   order: PaymentOrderRow;
-  payment: Pick<RazorpayPayment, "id" | "amount" | "currency" | "status" | "method">;
+  payment: Pick<
+    RazorpayPayment,
+    "id" | "amount" | "currency" | "status" | "method"
+  >;
   idempotencyKey: string;
   source: "checkout" | "webhook" | "dev";
 }) {
   const expectedPaise = toPaise(Number(order.amount));
   const paidPaise = Number(payment.amount);
 
-  if (payment.currency !== order.currency) {
-    throw Object.assign(new Error("Payment currency does not match the order"), {
+  if (source !== "dev" && payment.status !== "captured") {
+    throw Object.assign(new Error("Payment is not captured"), {
+      statusCode: 409,
+    });
+  }
+
+  if (!Number.isSafeInteger(paidPaise) || paidPaise <= 0) {
+    throw Object.assign(new Error("Payment amount is invalid"), {
       statusCode: 400,
     });
+  }
+
+  if (payment.currency !== order.currency) {
+    throw Object.assign(
+      new Error("Payment currency does not match the order"),
+      {
+        statusCode: 400,
+      },
+    );
   }
 
   if (paidPaise !== expectedPaise) {
@@ -186,7 +221,11 @@ async function creditWalletForPaidOrder({
       idempotencyKey,
       order.provider_order_id,
       payment.id,
-      JSON.stringify({ source, razorpayStatus: payment.status, method: payment.method || null }),
+      JSON.stringify({
+        source,
+        razorpayStatus: payment.status,
+        method: payment.method || null,
+      }),
     ],
   );
 
@@ -227,7 +266,9 @@ router.post(
       const body = parseRequestBody(createWalletOrderSchema, req.body);
 
       if (!supportedCurrencies.has(body.currency)) {
-        return res.status(400).json({ message: "Unsupported payment currency" });
+        return res
+          .status(400)
+          .json({ message: "Unsupported payment currency" });
       }
 
       const dbUser = await getCurrentDbUser(firebaseUser.uid);
@@ -267,7 +308,11 @@ router.post(
           order.id,
           body.amount,
           body.currency,
-          JSON.stringify({ receipt, method: body.method || null, razorpayOrderStatus: order.status }),
+          JSON.stringify({
+            receipt,
+            method: body.method || null,
+            razorpayOrderStatus: order.status,
+          }),
         ],
       );
 
@@ -290,11 +335,15 @@ router.post(
 
       console.error("Create Razorpay wallet order failed:", error);
 
-      return res.status((error as Error & { statusCode?: number }).statusCode || 500).json({
+      const statusCode =
+        (error as Error & { statusCode?: number }).statusCode || 500;
+      return res.status(statusCode).json({
         message:
-          error instanceof Error
-            ? error.message
-            : "Failed to create Razorpay order",
+          statusCode >= 500
+            ? "Payment service is temporarily unavailable. Please try again."
+            : error instanceof Error
+              ? error.message
+              : "Failed to create Razorpay order",
       });
     }
   },
@@ -322,7 +371,9 @@ router.post(
       });
 
       if (!validSignature) {
-        return res.status(400).json({ message: "Invalid Razorpay payment signature" });
+        return res
+          .status(400)
+          .json({ message: "Invalid Razorpay payment signature" });
       }
 
       const dbUser = await getCurrentDbUser(firebaseUser.uid);
@@ -334,12 +385,15 @@ router.post(
       const payment = await fetchRazorpayPayment(body.razorpayPaymentId);
 
       if (payment.order_id !== body.razorpayOrderId) {
-        return res.status(400).json({ message: "Payment does not belong to this order" });
+        return res
+          .status(400)
+          .json({ message: "Payment does not belong to this order" });
       }
 
       if (payment.status !== "captured") {
         return res.status(409).json({
-          message: "Payment is not captured yet. Wallet will update after Razorpay confirms it.",
+          message:
+            "Payment is not captured yet. Wallet will update after Razorpay confirms it.",
         });
       }
 
@@ -374,7 +428,9 @@ router.post(
 
       if (order.user_id !== dbUser.id) {
         await client.query("ROLLBACK");
-        return res.status(403).json({ message: "This payment order is not yours" });
+        return res
+          .status(403)
+          .json({ message: "This payment order is not yours" });
       }
 
       const creditResult = await creditWalletForPaidOrder({
@@ -407,11 +463,15 @@ router.post(
 
       console.error("Verify Razorpay payment failed:", error);
 
-      return res.status((error as Error & { statusCode?: number }).statusCode || 500).json({
+      const statusCode =
+        (error as Error & { statusCode?: number }).statusCode || 500;
+      return res.status(statusCode).json({
         message:
-          error instanceof Error
-            ? error.message
-            : "Failed to verify Razorpay payment",
+          statusCode >= 500
+            ? "Payment verification is temporarily unavailable. Please try again."
+            : error instanceof Error
+              ? error.message
+              : "Failed to verify Razorpay payment",
       });
     } finally {
       client.release();
@@ -426,14 +486,26 @@ router.post(
     const client = await db.connect();
 
     try {
-      if (process.env.ENABLE_DEV_PAYMENT_APPROVAL !== "true") {
+      if (
+        process.env.NODE_ENV === "production" ||
+        process.env.ENABLE_DEV_PAYMENT_APPROVAL !== "true"
+      ) {
         return res.status(404).json({ message: "Not found" });
       }
 
       const secret = process.env.DEV_PAYMENT_APPROVAL_SECRET || "";
+      const suppliedSecret = req.header("x-dev-payment-secret") || "";
+      const secretBuffer = Buffer.from(secret);
+      const suppliedBuffer = Buffer.from(suppliedSecret);
+      const secretMatches =
+        secretBuffer.length > 0 &&
+        secretBuffer.length === suppliedBuffer.length &&
+        crypto.timingSafeEqual(secretBuffer, suppliedBuffer);
 
-      if (!secret || req.header("x-dev-payment-secret") !== secret) {
-        return res.status(403).json({ message: "Developer payment approval is protected" });
+      if (!secretMatches) {
+        return res
+          .status(403)
+          .json({ message: "Developer payment approval is protected" });
       }
 
       const firebaseUser = req.user;
@@ -480,7 +552,9 @@ router.post(
 
       if (order.user_id !== dbUser.id) {
         await client.query("ROLLBACK");
-        return res.status(403).json({ message: "This payment order is not yours" });
+        return res
+          .status(403)
+          .json({ message: "This payment order is not yours" });
       }
 
       const fakePaymentId = `dev_${body.razorpayOrderId}`;
@@ -548,12 +622,16 @@ export async function razorpayWebhookHandler(req: Request, res: Response) {
     });
 
     if (!validSignature) {
-      return res.status(400).json({ message: "Invalid Razorpay webhook signature" });
+      return res
+        .status(400)
+        .json({ message: "Invalid Razorpay webhook signature" });
     }
 
     const eventPayload = JSON.parse(rawBody.toString("utf8"));
     const eventType = String(eventPayload.event || "");
-    const payment = eventPayload.payload?.payment?.entity as RazorpayPayment | undefined;
+    const payment = eventPayload.payload?.payment?.entity as
+      | RazorpayPayment
+      | undefined;
 
     await client.query("BEGIN");
 
@@ -577,7 +655,11 @@ export async function razorpayWebhookHandler(req: Request, res: Response) {
       return res.json({ received: true, duplicate: true });
     }
 
-    if (eventType !== "payment.captured" || !payment?.order_id || !payment?.id) {
+    if (
+      eventType !== "payment.captured" ||
+      !payment?.order_id ||
+      !payment?.id
+    ) {
       await client.query(
         `
         UPDATE payment_idempotency_keys
@@ -656,9 +738,15 @@ export async function razorpayWebhookHandler(req: Request, res: Response) {
     await client.query("ROLLBACK").catch(() => undefined);
     console.error("Razorpay webhook failed:", error);
 
-    return res.status((error as Error & { statusCode?: number }).statusCode || 500).json({
+    const statusCode =
+      (error as Error & { statusCode?: number }).statusCode || 500;
+    return res.status(statusCode).json({
       message:
-        error instanceof Error ? error.message : "Razorpay webhook failed",
+        statusCode >= 500
+          ? "Webhook processing failed"
+          : error instanceof Error
+            ? error.message
+            : "Webhook processing failed",
     });
   } finally {
     client.release();

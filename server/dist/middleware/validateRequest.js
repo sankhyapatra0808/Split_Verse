@@ -57,10 +57,7 @@ function hasControlCharacter(value) {
         return code <= 31 || code === 127;
     });
 }
-export const uuidParamSchema = z
-    .string()
-    .trim()
-    .uuid("Invalid id format");
+export const uuidParamSchema = z.string().trim().uuid("Invalid id format");
 export const safeTextSchema = (label, max = 120) => z
     .string({ message: `${label} is required` })
     .trim()

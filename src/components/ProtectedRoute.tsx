@@ -25,7 +25,13 @@ export default function ProtectedRoute({
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  if (dbUser && dbUser.has_wallet_pin === false) {
+  const needsGoogleUsername = Boolean(
+    dbUser &&
+      !dbUser.username &&
+      ["google", "google.com"].includes(String(dbUser.provider || "")),
+  );
+
+  if (dbUser && (dbUser.has_wallet_pin === false || needsGoogleUsername)) {
     return <MandatoryWalletPinSetup />;
   }
 

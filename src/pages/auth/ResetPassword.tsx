@@ -18,8 +18,8 @@ import { withTopProgress } from "../../utils/topProgress";
 function getPasswordStrength(password: string) {
   let score = 0;
 
-  if (password.length >= 6) score += 1;
   if (password.length >= 10) score += 1;
+  if (password.length >= 14) score += 1;
   if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
   if (/\d/.test(password)) score += 1;
   if (/[^A-Za-z0-9]/.test(password)) score += 1;
@@ -74,8 +74,8 @@ export default function ResetPassword() {
       return;
     }
 
-    if (newPassword.length < 6) {
-      setError("Password must be at least 6 characters.");
+    if (newPassword.length < 10) {
+      setError("Password must be at least 10 characters.");
       return;
     }
 

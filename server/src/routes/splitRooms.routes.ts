@@ -20,14 +20,30 @@ import {
 const router = express.Router();
 const maxSplitRoomsPerDay = 10;
 const splitRoomMemberInsertChunkSize = 500;
-const maxSplitRoomItemAmount = Number(process.env.MAX_SPLIT_ROOM_ITEM_AMOUNT || 1000000);
+const maxSplitRoomItemAmount = Number(
+  process.env.MAX_SPLIT_ROOM_ITEM_AMOUNT || 1000000,
+);
 
 const createSplitRoomSchema = z
   .object({
     name: safeTextSchema("Room name", 100),
-    category: z.string().trim().max(60, "Category is too long").optional().default("general"),
-    members: z.array(z.string().trim().max(120, "Member value is too long")).max(20, "You can add up to 20 members").optional().default([]),
-    paidByEmail: z.string().trim().email("Choose a valid payer").max(254).optional(),
+    category: z
+      .string()
+      .trim()
+      .max(60, "Category is too long")
+      .optional()
+      .default("general"),
+    members: z
+      .array(z.string().trim().max(120, "Member value is too long"))
+      .max(20, "You can add up to 20 members")
+      .optional()
+      .default([]),
+    paidByEmail: z
+      .string()
+      .trim()
+      .email("Choose a valid payer")
+      .max(254)
+      .optional(),
   })
   .strict();
 
@@ -275,7 +291,6 @@ async function ensureSplitRoomTablesOnce() {
   return splitRoomTablesReady;
 }
 
-
 async function ensureNetSettlementTables() {
   await db.query(`
     CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -434,10 +449,7 @@ function getDebtLineQuery({
   `;
 }
 
-async function loadNetDebtLines(
-  client: Queryable,
-  currentUserId: string,
-) {
+async function loadNetDebtLines(client: Queryable, currentUserId: string) {
   const result = await client.query<NetDebtLineRow>(
     getDebtLineQuery({ currentUserOnly: true }),
     [currentUserId],
@@ -559,11 +571,14 @@ function serializeNetSettlements(
         isIncoming: toUserId === currentUserId,
         breakdown: pair.breakdown.sort(
           (left, right) =>
-            new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(),
+            new Date(left.createdAt).getTime() -
+            new Date(right.createdAt).getTime(),
         ),
       };
     })
-    .filter((settlement): settlement is NetSettlementResponseItem => Boolean(settlement))
+    .filter((settlement): settlement is NetSettlementResponseItem =>
+      Boolean(settlement),
+    )
     .sort((left, right) => {
       if (left.isOutgoing !== right.isOutgoing) {
         return left.isOutgoing ? -1 : 1;
@@ -603,11 +618,21 @@ async function insertItemSettlement(
     )
     VALUES ($1, $2, $3, $4, $5, $6);
     `,
-    [itemId, amount, method, counterItemId, walletTransactionId, createdByUserId],
+    [
+      itemId,
+      amount,
+      method,
+      counterItemId,
+      walletTransactionId,
+      createdByUserId,
+    ],
   );
 }
 
-async function markFullySettledItemsCollected(client: Queryable, itemIds: string[]) {
+async function markFullySettledItemsCollected(
+  client: Queryable,
+  itemIds: string[],
+) {
   const uniqueItemIds = [...new Set(itemIds)].filter(Boolean);
 
   if (uniqueItemIds.length === 0) {
@@ -633,7 +658,10 @@ async function markFullySettledItemsCollected(client: Queryable, itemIds: string
   return result.rows;
 }
 
-async function refreshRoomPaymentStatuses(client: Queryable, roomIds: string[]) {
+async function refreshRoomPaymentStatuses(
+  client: Queryable,
+  roomIds: string[],
+) {
   const uniqueRoomIds = [...new Set(roomIds)].filter(Boolean);
 
   if (uniqueRoomIds.length === 0) {
@@ -695,7 +723,11 @@ async function applyOffsetSettlements(
   let reverseRemaining = reverseLines[0]?.pending_amount ?? 0;
   const touchedItemIds: string[] = [];
 
-  while (remainingOffset > 0.009 && forwardLines[forwardIndex] && reverseLines[reverseIndex]) {
+  while (
+    remainingOffset > 0.009 &&
+    forwardLines[forwardIndex] &&
+    reverseLines[reverseIndex]
+  ) {
     const amount = roundMoneyValue(
       Math.min(remainingOffset, forwardRemaining, reverseRemaining),
     );
@@ -738,7 +770,6 @@ async function applyOffsetSettlements(
   return touchedItemIds;
 }
 
-
 async function applyAutomaticNetOffsetsForUser(
   client: Queryable,
   currentUserId: string,
@@ -777,10 +808,12 @@ async function applyAutomaticNetOffsetsForUser(
       forUpdate: true,
     });
     const userAOwesUserB = pairDebtLines.filter(
-      (line) => line.debtor_user_id === userA && line.creditor_user_id === userB,
+      (line) =>
+        line.debtor_user_id === userA && line.creditor_user_id === userB,
     );
     const userBOwesUserA = pairDebtLines.filter(
-      (line) => line.debtor_user_id === userB && line.creditor_user_id === userA,
+      (line) =>
+        line.debtor_user_id === userB && line.creditor_user_id === userA,
     );
     const userAOwesTotal = roundMoneyValue(
       userAOwesUserB.reduce((sum, line) => sum + line.pending_amount, 0),
@@ -788,7 +821,9 @@ async function applyAutomaticNetOffsetsForUser(
     const userBOwesTotal = roundMoneyValue(
       userBOwesUserA.reduce((sum, line) => sum + line.pending_amount, 0),
     );
-    const offsetAmount = roundMoneyValue(Math.min(userAOwesTotal, userBOwesTotal));
+    const offsetAmount = roundMoneyValue(
+      Math.min(userAOwesTotal, userBOwesTotal),
+    );
 
     if (offsetAmount <= 0.009) {
       continue;
@@ -807,7 +842,10 @@ async function applyAutomaticNetOffsetsForUser(
     affectedUserIds.add(userB);
   }
 
-  const collectedItems = await markFullySettledItemsCollected(client, touchedItemIds);
+  const collectedItems = await markFullySettledItemsCollected(
+    client,
+    touchedItemIds,
+  );
   const touchedRoomIds = collectedItems.map((item) => item.room_id);
   await refreshRoomPaymentStatuses(client, touchedRoomIds);
 
@@ -835,7 +873,6 @@ async function applyAutomaticNetOffsetsForUserInTransaction(
     client.release();
   }
 }
-
 
 async function getVisibleSettlementUserIds(
   client: Queryable,
@@ -1111,7 +1148,10 @@ function serializeRoom(
     const pendingAmount = item.collected_at
       ? 0
       : Math.max(Number(item.pending_amount ?? amount), 0);
-    const settledAmount = Math.max(amount - pendingAmount, Number(item.settled_amount ?? 0));
+    const settledAmount = Math.max(
+      amount - pendingAmount,
+      Number(item.settled_amount ?? 0),
+    );
 
     itemCountByMember.set(
       item.assigned_member_id,
@@ -1133,7 +1173,8 @@ function serializeRoom(
       if (pendingAmount > 0) {
         outstandingByMember.set(
           item.assigned_member_id,
-          (outstandingByMember.get(item.assigned_member_id) ?? 0) + pendingAmount,
+          (outstandingByMember.get(item.assigned_member_id) ?? 0) +
+            pendingAmount,
         );
       }
     }
@@ -1204,7 +1245,10 @@ function serializeRoom(
       const pendingAmount = item.collected_at
         ? 0
         : Math.max(Number(item.pending_amount ?? amount), 0);
-      const settledAmount = Math.max(amount - pendingAmount, Number(item.settled_amount ?? 0));
+      const settledAmount = Math.max(
+        amount - pendingAmount,
+        Number(item.settled_amount ?? 0),
+      );
 
       return {
         ...item,
@@ -1252,10 +1296,11 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       return res.status(404).json({ message: "User not found in database" });
     }
 
-    const offsetResult = await applyAutomaticNetOffsetsForVisibleRoomsInTransaction(
-      dbUser.id,
-      dbUser.email,
-    );
+    const offsetResult =
+      await applyAutomaticNetOffsetsForVisibleRoomsInTransaction(
+        dbUser.id,
+        dbUser.email,
+      );
 
     if (offsetResult.affectedUserIds.length > 0) {
       sendLiveUpdate(offsetResult.affectedUserIds, {
@@ -1371,7 +1416,6 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
   }
 });
 
-
 router.get(
   "/net-settlements",
   verifyFirebaseToken,
@@ -1392,7 +1436,9 @@ router.get(
         return res.status(404).json({ message: "User not found in database" });
       }
 
-      const offsetResult = await applyAutomaticNetOffsetsForUserInTransaction(dbUser.id);
+      const offsetResult = await applyAutomaticNetOffsetsForUserInTransaction(
+        dbUser.id,
+      );
 
       if (offsetResult.affectedUserIds.length > 0) {
         sendLiveUpdate(offsetResult.affectedUserIds, {
@@ -1489,7 +1535,9 @@ router.post(
       if (!receiver) {
         await client.query("ROLLBACK");
 
-        return res.status(404).json({ message: "Settlement receiver not found" });
+        return res
+          .status(404)
+          .json({ message: "Settlement receiver not found" });
       }
 
       const [leftLockId, rightLockId] = [payer.id, receiver.id].sort();
@@ -1509,14 +1557,23 @@ router.post(
         throw pinError;
       }
 
-      const pairDebtLines = await loadPairDebtLines(client, payer.id, receiver.id, {
-        forUpdate: true,
-      });
+      const pairDebtLines = await loadPairDebtLines(
+        client,
+        payer.id,
+        receiver.id,
+        {
+          forUpdate: true,
+        },
+      );
       const payerOwesReceiver = pairDebtLines.filter(
-        (line) => line.debtor_user_id === payer.id && line.creditor_user_id === receiver.id,
+        (line) =>
+          line.debtor_user_id === payer.id &&
+          line.creditor_user_id === receiver.id,
       );
       const receiverOwesPayer = pairDebtLines.filter(
-        (line) => line.debtor_user_id === receiver.id && line.creditor_user_id === payer.id,
+        (line) =>
+          line.debtor_user_id === receiver.id &&
+          line.creditor_user_id === payer.id,
       );
       const payerOwesTotal = roundMoneyValue(
         payerOwesReceiver.reduce((sum, line) => sum + line.pending_amount, 0),
@@ -1561,7 +1618,9 @@ router.post(
       }
 
       const touchedItemIds: string[] = [];
-      const offsetAmount = roundMoneyValue(Math.min(payerOwesTotal, receiverOwesTotal));
+      const offsetAmount = roundMoneyValue(
+        Math.min(payerOwesTotal, receiverOwesTotal),
+      );
 
       if (offsetAmount > 0) {
         touchedItemIds.push(
@@ -1643,7 +1702,10 @@ router.post(
         )),
       );
 
-      const collectedItems = await markFullySettledItemsCollected(client, touchedItemIds);
+      const collectedItems = await markFullySettledItemsCollected(
+        client,
+        touchedItemIds,
+      );
       await refreshRoomPaymentStatuses(
         client,
         collectedItems.map((item) => item.room_id),
@@ -1703,10 +1765,12 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       return res.status(404).json({ message: "User not found in database" });
     }
 
-    const { name, category, members: suppliedMembers, paidByEmail } = parseRequestBody(
-      createSplitRoomSchema,
-      req.body,
-    );
+    const {
+      name,
+      category,
+      members: suppliedMembers,
+      paidByEmail,
+    } = parseRequestBody(createSplitRoomSchema, req.body);
     const members = parseMembers(suppliedMembers);
 
     const roomsCreatedTodayResult = await client.query(
@@ -1741,7 +1805,8 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       ),
     ];
     const usersByEmail = await findUsersByEmail(client, memberEmails);
-    const normalizedPaidByEmail = paidByEmail?.trim().toLowerCase() || dbUser.email.toLowerCase();
+    const normalizedPaidByEmail =
+      paidByEmail?.trim().toLowerCase() || dbUser.email.toLowerCase();
     const paidByUser =
       normalizedPaidByEmail === dbUser.email.toLowerCase()
         ? dbUser
@@ -1751,7 +1816,8 @@ router.post("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
       await client.query("ROLLBACK");
 
       return res.status(400).json({
-        message: "The payer must be you or an active SplitVerse friend in this room.",
+        message:
+          "The payer must be you or an active SplitVerse friend in this room.",
       });
     }
 
@@ -1933,7 +1999,8 @@ router.post(
         assignedMember.email?.toLowerCase() === dbUser.email.toLowerCase();
       const isAssignedToPayer =
         assignedMember.user_id === accessRoom.paid_by_user_id ||
-        assignedMember.email?.toLowerCase() === accessRoom.paid_by_email.toLowerCase();
+        assignedMember.email?.toLowerCase() ===
+          accessRoom.paid_by_email.toLowerCase();
 
       const itemResult = await db.query(
         `
@@ -2145,7 +2212,10 @@ router.post(
         });
       }
 
-      const offsetResult = await applyAutomaticNetOffsetsForUser(client, dbUser.id);
+      const offsetResult = await applyAutomaticNetOffsetsForUser(
+        client,
+        dbUser.id,
+      );
 
       const itemResult = await client.query<{
         id: string;
@@ -2232,7 +2302,10 @@ router.post(
         );
       }
 
-      const collectedItems = await markFullySettledItemsCollected(client, touchedItemIds);
+      const collectedItems = await markFullySettledItemsCollected(
+        client,
+        touchedItemIds,
+      );
       await refreshRoomPaymentStatuses(client, [
         roomId,
         ...collectedItems.map((item) => item.room_id),
@@ -2266,7 +2339,6 @@ router.post(
     }
   },
 );
-
 
 router.patch(
   "/items/:itemId",
@@ -2580,8 +2652,6 @@ router.delete(
   },
 );
 
-
-
 router.delete(
   "/:roomId/members/:memberId",
   verifyFirebaseToken,
@@ -2876,7 +2946,6 @@ router.patch(
   },
 );
 
-
 router.post(
   "/:roomId/reminders",
   verifyFirebaseToken,
@@ -3023,7 +3092,10 @@ router.post(
       }
 
       const roomId = getRouteParam(req, "roomId");
-      const { mutedHours = 24 } = parseRequestBody(reminderActionSchema, req.body || {});
+      const { mutedHours = 24 } = parseRequestBody(
+        reminderActionSchema,
+        req.body || {},
+      );
 
       if (!roomId) {
         return res.status(400).json({ message: "Room id is required" });
@@ -3174,7 +3246,10 @@ router.post(
       }
 
       await client.query("BEGIN");
-      const offsetResult = await applyAutomaticNetOffsetsForUser(client, dbUser.id);
+      const offsetResult = await applyAutomaticNetOffsetsForUser(
+        client,
+        dbUser.id,
+      );
 
       const dueResult = await client.query<{ pending_amount: number }>(
         `
@@ -3235,17 +3310,22 @@ router.post(
 
       if (roomResult.rows.length === 0) {
         await client.query("ROLLBACK");
-        return res.status(404).json({ message: "Room not found or you do not own this room" });
+        return res
+          .status(404)
+          .json({ message: "Room not found or you do not own this room" });
       }
 
       await client.query("COMMIT");
 
       const notifiedUserIds = await getRoomUserIds(roomId);
-      sendLiveUpdate([dbUser.id, ...notifiedUserIds, ...offsetResult.affectedUserIds], {
-        type: "split-room",
-        reason: "room-finalized",
-        roomId,
-      });
+      sendLiveUpdate(
+        [dbUser.id, ...notifiedUserIds, ...offsetResult.affectedUserIds],
+        {
+          type: "split-room",
+          reason: "room-finalized",
+          roomId,
+        },
+      );
 
       return res.json({
         message: "Room finalized",
@@ -3308,7 +3388,9 @@ router.post(
       );
 
       if (archiveResult.rows.length === 0) {
-        return res.status(404).json({ message: "Room not found or you do not own this room" });
+        return res
+          .status(404)
+          .json({ message: "Room not found or you do not own this room" });
       }
 
       const notifiedUserIds = await getRoomUserIds(roomId);
@@ -3790,7 +3872,8 @@ router.get(
       const dbUserId = userResult.rows[0].id;
       const dbUserEmail = userResult.rows[0].email;
 
-      const offsetResult = await applyAutomaticNetOffsetsForUserInTransaction(dbUserId);
+      const offsetResult =
+        await applyAutomaticNetOffsetsForUserInTransaction(dbUserId);
 
       if (offsetResult.affectedUserIds.length > 0) {
         sendLiveUpdate(offsetResult.affectedUserIds, {

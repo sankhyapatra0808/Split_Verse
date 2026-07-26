@@ -18,14 +18,29 @@ const createWalletOrderSchema = z
     .strict();
 const verifyWalletPaymentSchema = z
     .object({
-    razorpayOrderId: z.string().trim().min(1, "Razorpay order id is required"),
-    razorpayPaymentId: z.string().trim().min(1, "Razorpay payment id is required"),
-    razorpaySignature: z.string().trim().min(1, "Razorpay signature is required"),
+    razorpayOrderId: z
+        .string()
+        .trim()
+        .regex(/^order_[A-Za-z0-9]+$/, "Razorpay order id is invalid")
+        .max(80),
+    razorpayPaymentId: z
+        .string()
+        .trim()
+        .regex(/^pay_[A-Za-z0-9]+$/, "Razorpay payment id is invalid")
+        .max(80),
+    razorpaySignature: z
+        .string()
+        .trim()
+        .regex(/^[a-fA-F0-9]{64}$/, "Razorpay signature is invalid"),
 })
     .strict();
 const devApproveSchema = z
     .object({
-    razorpayOrderId: z.string().trim().min(1, "Razorpay order id is required"),
+    razorpayOrderId: z
+        .string()
+        .trim()
+        .regex(/^order_[A-Za-z0-9]+$/, "Razorpay order id is invalid")
+        .max(80),
 })
     .strict();
 async function getCurrentDbUser(firebaseUid) {
@@ -69,6 +84,16 @@ async function getWalletBalance(client, userId) {
 async function creditWalletForPaidOrder({ client, order, payment, idempotencyKey, source, }) {
     const expectedPaise = toPaise(Number(order.amount));
     const paidPaise = Number(payment.amount);
+    if (source !== "dev" && payment.status !== "captured") {
+        throw Object.assign(new Error("Payment is not captured"), {
+            statusCode: 409,
+        });
+    }
+    if (!Number.isSafeInteger(paidPaise) || paidPaise <= 0) {
+        throw Object.assign(new Error("Payment amount is invalid"), {
+            statusCode: 400,
+        });
+    }
     if (payment.currency !== order.currency) {
         throw Object.assign(new Error("Payment currency does not match the order"), {
             statusCode: 400,
@@ -108,7 +133,11 @@ async function creditWalletForPaidOrder({ client, order, payment, idempotencyKey
         idempotencyKey,
         order.provider_order_id,
         payment.id,
-        JSON.stringify({ source, razorpayStatus: payment.status, method: payment.method || null }),
+        JSON.stringify({
+            source,
+            razorpayStatus: payment.status,
+            method: payment.method || null,
+        }),
     ]);
     await client.query(`
     UPDATE payment_orders
@@ -136,7 +165,9 @@ router.post("/razorpay/wallet-order", verifyFirebaseToken, async (req, res) => {
         }
         const body = parseRequestBody(createWalletOrderSchema, req.body);
         if (!supportedCurrencies.has(body.currency)) {
-            return res.status(400).json({ message: "Unsupported payment currency" });
+            return res
+                .status(400)
+                .json({ message: "Unsupported payment currency" });
         }
         const dbUser = await getCurrentDbUser(firebaseUser.uid);
         if (!dbUser) {
@@ -170,7 +201,11 @@ router.post("/razorpay/wallet-order", verifyFirebaseToken, async (req, res) => {
             order.id,
             body.amount,
             body.currency,
-            JSON.stringify({ receipt, method: body.method || null, razorpayOrderStatus: order.status }),
+            JSON.stringify({
+                receipt,
+                method: body.method || null,
+                razorpayOrderStatus: order.status,
+            }),
         ]);
         return res.status(201).json({
             keyId: getRazorpayKeyId(),
@@ -190,10 +225,13 @@ router.post("/razorpay/wallet-order", verifyFirebaseToken, async (req, res) => {
             return;
         }
         console.error("Create Razorpay wallet order failed:", error);
-        return res.status(error.statusCode || 500).json({
-            message: error instanceof Error
-                ? error.message
-                : "Failed to create Razorpay order",
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({
+            message: statusCode >= 500
+                ? "Payment service is temporarily unavailable. Please try again."
+                : error instanceof Error
+                    ? error.message
+                    : "Failed to create Razorpay order",
         });
     }
 });
@@ -211,7 +249,9 @@ router.post("/razorpay/verify-wallet-payment", verifyFirebaseToken, async (req, 
             signature: body.razorpaySignature,
         });
         if (!validSignature) {
-            return res.status(400).json({ message: "Invalid Razorpay payment signature" });
+            return res
+                .status(400)
+                .json({ message: "Invalid Razorpay payment signature" });
         }
         const dbUser = await getCurrentDbUser(firebaseUser.uid);
         if (!dbUser) {
@@ -219,7 +259,9 @@ router.post("/razorpay/verify-wallet-payment", verifyFirebaseToken, async (req, 
         }
         const payment = await fetchRazorpayPayment(body.razorpayPaymentId);
         if (payment.order_id !== body.razorpayOrderId) {
-            return res.status(400).json({ message: "Payment does not belong to this order" });
+            return res
+                .status(400)
+                .json({ message: "Payment does not belong to this order" });
         }
         if (payment.status !== "captured") {
             return res.status(409).json({
@@ -250,7 +292,9 @@ router.post("/razorpay/verify-wallet-payment", verifyFirebaseToken, async (req, 
         }
         if (order.user_id !== dbUser.id) {
             await client.query("ROLLBACK");
-            return res.status(403).json({ message: "This payment order is not yours" });
+            return res
+                .status(403)
+                .json({ message: "This payment order is not yours" });
         }
         const creditResult = await creditWalletForPaidOrder({
             client,
@@ -277,10 +321,13 @@ router.post("/razorpay/verify-wallet-payment", verifyFirebaseToken, async (req, 
             return;
         }
         console.error("Verify Razorpay payment failed:", error);
-        return res.status(error.statusCode || 500).json({
-            message: error instanceof Error
-                ? error.message
-                : "Failed to verify Razorpay payment",
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({
+            message: statusCode >= 500
+                ? "Payment verification is temporarily unavailable. Please try again."
+                : error instanceof Error
+                    ? error.message
+                    : "Failed to verify Razorpay payment",
         });
     }
     finally {
@@ -290,12 +337,21 @@ router.post("/razorpay/verify-wallet-payment", verifyFirebaseToken, async (req, 
 router.post("/dev/approve-wallet-order", verifyFirebaseToken, async (req, res) => {
     const client = await db.connect();
     try {
-        if (process.env.ENABLE_DEV_PAYMENT_APPROVAL !== "true") {
+        if (process.env.NODE_ENV === "production" ||
+            process.env.ENABLE_DEV_PAYMENT_APPROVAL !== "true") {
             return res.status(404).json({ message: "Not found" });
         }
         const secret = process.env.DEV_PAYMENT_APPROVAL_SECRET || "";
-        if (!secret || req.header("x-dev-payment-secret") !== secret) {
-            return res.status(403).json({ message: "Developer payment approval is protected" });
+        const suppliedSecret = req.header("x-dev-payment-secret") || "";
+        const secretBuffer = Buffer.from(secret);
+        const suppliedBuffer = Buffer.from(suppliedSecret);
+        const secretMatches = secretBuffer.length > 0 &&
+            secretBuffer.length === suppliedBuffer.length &&
+            crypto.timingSafeEqual(secretBuffer, suppliedBuffer);
+        if (!secretMatches) {
+            return res
+                .status(403)
+                .json({ message: "Developer payment approval is protected" });
         }
         const firebaseUser = req.user;
         if (!firebaseUser) {
@@ -330,7 +386,9 @@ router.post("/dev/approve-wallet-order", verifyFirebaseToken, async (req, res) =
         }
         if (order.user_id !== dbUser.id) {
             await client.query("ROLLBACK");
-            return res.status(403).json({ message: "This payment order is not yours" });
+            return res
+                .status(403)
+                .json({ message: "This payment order is not yours" });
         }
         const fakePaymentId = `dev_${body.razorpayOrderId}`;
         const creditResult = await creditWalletForPaidOrder({
@@ -387,7 +445,9 @@ export async function razorpayWebhookHandler(req, res) {
             signature,
         });
         if (!validSignature) {
-            return res.status(400).json({ message: "Invalid Razorpay webhook signature" });
+            return res
+                .status(400)
+                .json({ message: "Invalid Razorpay webhook signature" });
         }
         const eventPayload = JSON.parse(rawBody.toString("utf8"));
         const eventType = String(eventPayload.event || "");
@@ -408,7 +468,9 @@ export async function razorpayWebhookHandler(req, res) {
             await client.query("COMMIT");
             return res.json({ received: true, duplicate: true });
         }
-        if (eventType !== "payment.captured" || !payment?.order_id || !payment?.id) {
+        if (eventType !== "payment.captured" ||
+            !payment?.order_id ||
+            !payment?.id) {
             await client.query(`
         UPDATE payment_idempotency_keys
         SET processed_at = NOW()
@@ -468,8 +530,13 @@ export async function razorpayWebhookHandler(req, res) {
     catch (error) {
         await client.query("ROLLBACK").catch(() => undefined);
         console.error("Razorpay webhook failed:", error);
-        return res.status(error.statusCode || 500).json({
-            message: error instanceof Error ? error.message : "Razorpay webhook failed",
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({
+            message: statusCode >= 500
+                ? "Webhook processing failed"
+                : error instanceof Error
+                    ? error.message
+                    : "Webhook processing failed",
         });
     }
     finally {

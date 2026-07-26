@@ -348,3 +348,63 @@
 .transaction-advanced-input.compact {
   max-width: 120px;
 }
+
+/* Transaction toolbar refinement: search, status, typed month and export. */
+.transaction-history-grid .transaction-tools {
+  grid-template-columns: minmax(280px, 1fr) minmax(170px, 190px) minmax(150px, 170px) auto;
+}
+
+.transaction-history-grid .transaction-month-field {
+  min-width: 0;
+  display: block;
+}
+
+.transaction-history-grid .transaction-month-field .transaction-advanced-input {
+  width: 100%;
+  max-width: none;
+  min-height: 46px;
+  box-sizing: border-box;
+  border-color: var(--dash-hairline);
+  background: var(--dash-canvas);
+}
+
+.transaction-history-grid .transaction-month-field .transaction-advanced-input:focus {
+  border-color: var(--dash-primary);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(0, 82, 255, 0.1);
+}
+
+.transaction-history-grid .transaction-month-field .transaction-advanced-input[aria-invalid="true"] {
+  border-color: var(--dash-danger);
+}
+
+.transaction-history-grid .transaction-tools > .dashboard-primary-button {
+  min-width: 116px;
+  min-height: 46px;
+  justify-self: end;
+}
+
+.transaction-history-grid .transaction-filter-message {
+  margin: -4px 2px 0;
+  color: var(--dash-danger);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+@media (max-width: 980px) {
+  .transaction-history-grid .transaction-tools {
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 190px);
+  }
+
+  .transaction-history-grid .transaction-tools > .dashboard-primary-button {
+    width: 100%;
+    justify-self: stretch;
+  }
+}
+
+@media (max-width: 680px) {
+  .transaction-history-grid .transaction-tools {
+    grid-template-columns: 1fr;
+  }
+}

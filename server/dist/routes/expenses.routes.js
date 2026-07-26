@@ -33,7 +33,7 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        const { title, category, amount: numericAmount, expenseDate } = parseRequestBody(createExpenseSchema, req.body);
+        const { title, category, amount: numericAmount, expenseDate, } = parseRequestBody(createExpenseSchema, req.body);
         const userResult = await db.query(`
       SELECT id
       FROM users

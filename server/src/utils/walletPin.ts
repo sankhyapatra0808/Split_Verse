@@ -22,7 +22,9 @@ export class WalletPinError extends Error {
 const walletPinMaxFailedAttempts = Number(
   process.env.WALLET_PIN_MAX_FAILED_ATTEMPTS || 5,
 );
-const walletPinLockMs = Number(process.env.WALLET_PIN_LOCK_MS || 15 * 60 * 1000);
+const walletPinLockMs = Number(
+  process.env.WALLET_PIN_LOCK_MS || 15 * 60 * 1000,
+);
 
 export function normalizeWalletPin(value: unknown) {
   return String(value ?? "").replace(/\D/g, "");
@@ -110,7 +112,10 @@ export async function verifyWalletPinForUser(
         : "Incorrect wallet PIN",
       shouldLock ? 423 : 401,
       {
-        attemptsRemaining: Math.max(walletPinMaxFailedAttempts - nextAttempts, 0),
+        attemptsRemaining: Math.max(
+          walletPinMaxFailedAttempts - nextAttempts,
+          0,
+        ),
         lockedUntil: lockedUntilValue?.toISOString(),
       },
     );
@@ -131,7 +136,10 @@ export async function verifyWalletPinForUser(
   return true;
 }
 
-export function sendWalletPinError(res: { status: (code: number) => { json: (body: unknown) => unknown } }, error: unknown) {
+export function sendWalletPinError(
+  res: { status: (code: number) => { json: (body: unknown) => unknown } },
+  error: unknown,
+) {
   if (!(error instanceof WalletPinError)) {
     return false;
   }

@@ -7,11 +7,11 @@ import {
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
 import { sendLiveUpdate } from "../liveEvents.js";
+import { isEmailConfigured, sendTransactionalEmail } from "../utils/email.js";
 import {
-  isEmailConfigured,
-  sendTransactionalEmail,
-} from "../utils/email.js";
-import { parseRequestBody, sendValidationError } from "../middleware/validateRequest.js";
+  parseRequestBody,
+  sendValidationError,
+} from "../middleware/validateRequest.js";
 
 const router = express.Router();
 const acceptPageCacheTtlMs = Number(
@@ -19,11 +19,23 @@ const acceptPageCacheTtlMs = Number(
 );
 const acceptPageRenderVersion = "2026-06-22-v1";
 
-const friendRequestSchema = z
+const inviteEmailSchema = z
   .object({
     email: z.string().trim().email("Enter a valid email address").max(254),
   })
   .strict();
+
+const friendRequestSchema = z
+  .object({
+    email: z.string().trim().email("Enter a valid email address").max(254).optional(),
+    identifier: z.string().trim().min(2).max(254).optional(),
+    recipientUserId: z.string().uuid().optional(),
+  })
+  .strict()
+  .refine(
+    (value) => Boolean(value.email || value.identifier || value.recipientUserId),
+    { message: "Enter a username or email address" },
+  );
 
 const acceptPageMessages = {
   notFound: "Friend request not found",
@@ -52,6 +64,7 @@ const acceptPageCacheStats = {
 type DbUserRow = {
   id: string;
   name: string | null;
+  username: string;
   email: string;
   photo_url: string | null;
   profile_photo_url?: string | null;
@@ -68,7 +81,9 @@ type FriendRequestRow = {
   id: string;
   requester_user_id: string;
   requester_name: string | null;
+  requester_username?: string | null;
   requester_email: string;
+  recipient_user_id?: string | null;
   recipient_email: string;
   status: string;
   token: string;
@@ -117,6 +132,7 @@ async function getCurrentUser(firebaseUid: string) {
     SELECT
       id,
       name,
+      username,
       email,
       photo_url,
       profile_photo_url,
@@ -135,14 +151,58 @@ async function getCurrentUser(firebaseUid: string) {
 }
 
 function normalizeEmail(email: unknown) {
-  return String(email ?? "").trim().toLowerCase();
+  return String(email ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeUsernameIdentifier(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, "");
+}
+
+function maskEmail(email: string) {
+  const [localPart, domain = ""] = email.split("@");
+
+  if (!domain) {
+    return "";
+  }
+
+  const visible = localPart.slice(0, Math.min(2, localPart.length));
+  return `${visible}${localPart.length > visible.length ? "***" : ""}@${domain}`;
 }
 
 function getServerUrl(req: express.Request) {
   return (
-    process.env.SERVER_URL ||
-    `${req.protocol}://${req.get("host")}`
+    process.env.SERVER_URL || `${req.protocol}://${req.get("host")}`
   ).replace(/\/$/, "");
+}
+
+function getClientUrl(req: express.Request) {
+  const configuredClientUrl = String(process.env.CLIENT_URL || "").trim();
+
+  if (configuredClientUrl) {
+    return configuredClientUrl.replace(/\/$/, "");
+  }
+
+  const requestOrigin = String(req.get("origin") || "").trim();
+
+  if (/^https?:\/\//i.test(requestOrigin)) {
+    return requestOrigin.replace(/\/$/, "");
+  }
+
+  return getServerUrl(req);
+}
+
+function makeSignupInviteUrl(req: express.Request, recipientEmail: string) {
+  const searchParams = new URLSearchParams({
+    email: recipientEmail,
+    invited: "1",
+  });
+
+  return `${getClientUrl(req)}/signup?${searchParams.toString()}`;
 }
 
 function makeAcceptUrl(req: express.Request, token: string) {
@@ -164,6 +224,21 @@ async function createFriendship(userA: string, userB: string) {
     `,
     [userOneId, userTwoId],
   );
+}
+
+async function usersHaveBlockRelationship(userA: string, userB: string) {
+  const result = await db.query(
+    `
+    SELECT 1
+    FROM user_blocks
+    WHERE (blocker_user_id = $1 AND blocked_user_id = $2)
+       OR (blocker_user_id = $2 AND blocked_user_id = $1)
+    LIMIT 1;
+    `,
+    [userA, userB],
+  );
+
+  return result.rows.length > 0;
 }
 
 function escapeHtml(value: string) {
@@ -251,6 +326,58 @@ export function getAcceptPageCacheStats() {
   };
 }
 
+async function sendSplitVerseInviteEmail({
+  inviteUrl,
+  recipientEmail,
+  requesterName,
+}: {
+  inviteUrl: string;
+  recipientEmail: string;
+  requesterName: string;
+}) {
+  if (!isEmailConfigured()) {
+    return "not_configured";
+  }
+
+  const safeRequesterName = escapeHtml(requesterName);
+  const safeInviteUrl = escapeHtml(inviteUrl);
+
+  const emailResult = await sendTransactionalEmail({
+    to: recipientEmail,
+    subject: `${requesterName} invited you to SplitVerse`,
+    text: `${requesterName} invited you to join SplitVerse. Create your account here: ${inviteUrl}`,
+    html: `
+      <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0a0b0d;">
+        <h1 style="font-size:24px;margin:0 0 12px;">You are invited to SplitVerse</h1>
+
+        <p style="font-size:15px;line-height:1.5;margin:0 0 20px;">
+          ${safeRequesterName} invited you to join SplitVerse and split shared expenses fairly.
+        </p>
+
+        <a
+          href="${safeInviteUrl}"
+          style="display:inline-block;padding:12px 18px;border-radius:999px;background:#0052ff;color:#ffffff;text-decoration:none;font-weight:700;"
+        >
+          Make SplitVerse your own
+        </a>
+
+        <p style="font-size:13px;line-height:1.5;color:#667085;margin:20px 0 0;">
+          If the button does not work, copy and open this link:
+          <br />
+          ${safeInviteUrl}
+        </p>
+      </div>
+    `,
+  });
+
+  if (!emailResult.ok) {
+    console.error("SplitVerse invite email failed through Brevo SMTP:", emailResult);
+    return emailResult.reason;
+  }
+
+  return "sent";
+}
+
 async function sendFriendRequestEmail({
   acceptUrl,
   recipientEmail,
@@ -296,7 +423,10 @@ async function sendFriendRequestEmail({
   });
 
   if (!emailResult.ok) {
-    console.error("Friend request email failed through Brevo SMTP:", emailResult);
+    console.error(
+      "Friend request email failed through Brevo SMTP:",
+      emailResult,
+    );
     return emailResult.reason;
   }
 
@@ -325,6 +455,7 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
         SELECT
           friend.id,
           friend.name,
+          friend.username,
           friend.email,
           friend.photo_url,
           friend.profile_photo_url,
@@ -344,8 +475,14 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
             WHEN friendship.user_one_id = $1 THEN friendship.user_two_id
             ELSE friendship.user_one_id
           END
-        WHERE friendship.user_one_id = $1
-        OR friendship.user_two_id = $1
+        WHERE (friendship.user_one_id = $1
+        OR friendship.user_two_id = $1)
+        AND NOT EXISTS (
+          SELECT 1
+          FROM user_blocks blocked
+          WHERE (blocked.blocker_user_id = $1 AND blocked.blocked_user_id = friend.id)
+             OR (blocked.blocker_user_id = friend.id AND blocked.blocked_user_id = $1)
+        )
         ORDER BY friend.name NULLS LAST, friend.email;
         `,
         [dbUser.id],
@@ -356,6 +493,7 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           request.id,
           request.requester_user_id,
           requester.name AS requester_name,
+          requester.username AS requester_username,
           requester.email AS requester_email,
           requester.photo_url AS requester_photo_url,
           requester.profile_photo_url AS requester_profile_photo_url,
@@ -374,9 +512,15 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           ON requester.id = request.requester_user_id
         WHERE LOWER(request.recipient_email) = LOWER($1)
         AND request.status = 'pending'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM user_blocks blocked
+          WHERE (blocked.blocker_user_id = $2 AND blocked.blocked_user_id = requester.id)
+             OR (blocked.blocker_user_id = requester.id AND blocked.blocked_user_id = $2)
+        )
         ORDER BY request.created_at DESC;
         `,
-        [dbUser.email],
+        [dbUser.email, dbUser.id],
       ),
       db.query<FriendRequestRow>(
         `
@@ -384,6 +528,7 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
           request.id,
           request.requester_user_id,
           requester.name AS requester_name,
+          requester.username AS requester_username,
           requester.email AS requester_email,
           requester.photo_url AS requester_photo_url,
           requester.profile_photo_url AS requester_profile_photo_url,
@@ -425,6 +570,185 @@ router.get("/", verifyFirebaseToken, async (req: AuthRequest, res) => {
   }
 });
 
+router.get("/people", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const dbUser = await getCurrentUser(firebaseUser.uid);
+
+    if (!dbUser) {
+      return res.status(404).json({ message: "User not found in database" });
+    }
+
+    const query = normalizeUsernameIdentifier(req.query.query);
+
+    if (query.length < 2) {
+      return res.json({ people: [] });
+    }
+
+    if (query.length > 60) {
+      return res.status(400).json({ message: "Search is too long" });
+    }
+
+    const result = await db.query<
+      DbUserRow & {
+        relationship_status: "friends" | "request_sent" | "request_received" | "none";
+      }
+    >(
+      `
+      SELECT
+        candidate.id,
+        candidate.name,
+        candidate.username,
+        candidate.email,
+        candidate.photo_url,
+        candidate.profile_photo_url,
+        candidate.avatar_mode,
+        CASE
+          WHEN candidate.avatar_mode = 'initials' THEN NULL
+          ELSE COALESCE(candidate.profile_photo_url, candidate.photo_url)
+        END AS display_photo_url,
+        CASE
+          WHEN friendship.id IS NOT NULL THEN 'friends'
+          WHEN outgoing_request.id IS NOT NULL THEN 'request_sent'
+          WHEN incoming_request.id IS NOT NULL THEN 'request_received'
+          ELSE 'none'
+        END AS relationship_status
+      FROM users candidate
+      LEFT JOIN friendships friendship
+        ON friendship.user_one_id = LEAST($1::uuid, candidate.id)
+        AND friendship.user_two_id = GREATEST($1::uuid, candidate.id)
+      LEFT JOIN friend_requests outgoing_request
+        ON outgoing_request.requester_user_id = $1
+        AND outgoing_request.status = 'pending'
+        AND (
+          outgoing_request.recipient_user_id = candidate.id
+          OR LOWER(outgoing_request.recipient_email) = LOWER(candidate.email)
+        )
+      LEFT JOIN friend_requests incoming_request
+        ON incoming_request.requester_user_id = candidate.id
+        AND incoming_request.status = 'pending'
+        AND (
+          incoming_request.recipient_user_id = $1
+          OR LOWER(incoming_request.recipient_email) = LOWER($2)
+        )
+      WHERE candidate.id <> $1
+      AND NOT EXISTS (
+        SELECT 1
+        FROM user_blocks blocked
+        WHERE (blocked.blocker_user_id = $1 AND blocked.blocked_user_id = candidate.id)
+           OR (blocked.blocker_user_id = candidate.id AND blocked.blocked_user_id = $1)
+      )
+      AND (
+        LOWER(candidate.username) LIKE $3 || '%'
+        OR LOWER(COALESCE(candidate.name, '')) LIKE '%' || $3 || '%'
+        OR LOWER(candidate.email) = $3
+      )
+      ORDER BY
+        CASE WHEN LOWER(candidate.username) = $3 THEN 0 ELSE 1 END,
+        CASE WHEN LOWER(candidate.username) LIKE $3 || '%' THEN 0 ELSE 1 END,
+        candidate.name NULLS LAST,
+        candidate.username
+      LIMIT 20;
+      `,
+      [dbUser.id, dbUser.email, query],
+    );
+
+    return res.json({
+      people: result.rows.map((person) => ({
+        id: person.id,
+        name: person.name,
+        username: person.username,
+        emailHint: maskEmail(person.email),
+        photo_url: person.photo_url,
+        profile_photo_url: person.profile_photo_url,
+        avatar_mode: person.avatar_mode,
+        display_photo_url: person.display_photo_url,
+        relationshipStatus: person.relationship_status,
+      })),
+    });
+  } catch (error) {
+    console.error("Search people failed:", error);
+
+    return res.status(500).json({ message: "Failed to search people" });
+  }
+});
+
+router.post("/invites", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    const firebaseUser = req.user;
+
+    if (!firebaseUser) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const dbUser = await getCurrentUser(firebaseUser.uid);
+
+    if (!dbUser) {
+      return res.status(404).json({ message: "User not found in database" });
+    }
+
+    const payload = parseRequestBody(inviteEmailSchema, req.body);
+    const recipientEmail = normalizeEmail(payload.email);
+
+    if (recipientEmail === normalizeEmail(dbUser.email)) {
+      return res
+        .status(400)
+        .json({ message: "You cannot send an invite to yourself" });
+    }
+
+    const existingUserResult = await db.query<{ id: string }>(
+      `
+      SELECT id
+      FROM users
+      WHERE LOWER(email) = LOWER($1)
+      LIMIT 1;
+      `,
+      [recipientEmail],
+    );
+
+    if (existingUserResult.rows.length > 0) {
+      return res.status(409).json({
+        message:
+          "This person already uses SplitVerse. Find them in search and send a friend request instead.",
+      });
+    }
+
+    const inviteUrl = makeSignupInviteUrl(req, recipientEmail);
+    const emailStatus = await sendSplitVerseInviteEmail({
+      inviteUrl,
+      recipientEmail,
+      requesterName: dbUser.name || `@${dbUser.username}`,
+    });
+
+    if (emailStatus !== "sent") {
+      return res.status(503).json({
+        message: "The signup invite could not be delivered. Please try again later.",
+        emailStatus,
+      });
+    }
+
+    return res.status(200).json({
+      message: `Signup invite sent to ${recipientEmail}.`,
+      emailStatus,
+    });
+  } catch (error) {
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
+    console.error("Send SplitVerse invite failed:", error);
+
+    return res.status(500).json({
+      message: "Failed to send the SplitVerse invite",
+    });
+  }
+});
+
 router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
   try {
     await ensureFriendTables();
@@ -441,22 +765,59 @@ router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
       return res.status(404).json({ message: "User not found in database" });
     }
 
-    const { email } = parseRequestBody(friendRequestSchema, req.body);
-    const recipientEmail = normalizeEmail(email);
-
-    if (recipientEmail === dbUser.email.toLowerCase()) {
-      return res.status(400).json({ message: "You cannot send a friend request to yourself" });
-    }
-
+    const payload = parseRequestBody(friendRequestSchema, req.body);
+    const rawIdentifier = payload.identifier || payload.email || "";
+    const normalizedIdentifier = normalizeUsernameIdentifier(rawIdentifier);
     const recipientResult = await db.query<DbUserRow>(
       `
-      SELECT id, name, email, photo_url
+      SELECT
+        id,
+        name,
+        username,
+        email,
+        photo_url,
+        profile_photo_url,
+        avatar_mode,
+        CASE
+          WHEN avatar_mode = 'initials' THEN NULL
+          ELSE COALESCE(profile_photo_url, photo_url)
+        END AS display_photo_url
       FROM users
-      WHERE LOWER(email) = LOWER($1);
+      WHERE
+        ($1::uuid IS NOT NULL AND id = $1::uuid)
+        OR ($1::uuid IS NULL AND LOWER(email) = LOWER($2))
+        OR ($1::uuid IS NULL AND LOWER(username) = LOWER($3))
+      LIMIT 1;
       `,
-      [recipientEmail],
+      [
+        payload.recipientUserId || null,
+        normalizeEmail(rawIdentifier),
+        normalizedIdentifier,
+      ],
     );
     const recipientUser = recipientResult.rows[0];
+    const recipientEmail = recipientUser?.email || normalizeEmail(rawIdentifier);
+
+    if (!recipientUser && !z.string().email().safeParse(recipientEmail).success) {
+      return res.status(404).json({
+        message: "No SplitVerse user was found with that username. Enter a valid email to send an invite.",
+      });
+    }
+
+    if (
+      normalizeEmail(recipientEmail) === normalizeEmail(dbUser.email) ||
+      recipientUser?.id === dbUser.id
+    ) {
+      return res
+        .status(400)
+        .json({ message: "You cannot send a friend request to yourself" });
+    }
+
+    if (recipientUser && (await usersHaveBlockRelationship(dbUser.id, recipientUser.id))) {
+      return res.status(403).json({
+        message: "A friend request cannot be sent between blocked accounts.",
+      });
+    }
 
     if (recipientUser) {
       const [userOneId, userTwoId] = sortFriendPair(dbUser.id, recipientUser.id);
@@ -473,40 +834,63 @@ router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
       if (existingFriendResult.rows.length > 0) {
         return res.status(409).json({ message: "You are already friends" });
       }
+
+      const reverseRequestResult = await db.query<{ id: string }>(
+        `
+        SELECT id
+        FROM friend_requests
+        WHERE requester_user_id = $1
+        AND status = 'pending'
+        AND (
+          recipient_user_id = $2
+          OR LOWER(recipient_email) = LOWER($3)
+        )
+        LIMIT 1;
+        `,
+        [recipientUser.id, dbUser.id, dbUser.email],
+      );
+
+      if (reverseRequestResult.rows.length > 0) {
+        return res.status(409).json({
+          message: "This person has already sent you a friend request. Accept it from your inbox.",
+        });
+      }
     }
 
     const token = crypto.randomBytes(32).toString("hex");
-
     const requestResult = await db.query<FriendRequestRow>(
       `
       INSERT INTO friend_requests (
         requester_user_id,
+        recipient_user_id,
         recipient_email,
         token
       )
-      VALUES ($1, $2, $3)
+      VALUES ($1, $2, $3, $4)
       ON CONFLICT (requester_user_id, (LOWER(recipient_email)))
       WHERE status = 'pending'
       DO UPDATE SET
+        recipient_user_id = EXCLUDED.recipient_user_id,
         token = EXCLUDED.token,
         updated_at = NOW()
       RETURNING
         id,
         requester_user_id,
+        recipient_user_id,
         recipient_email,
         status,
         token,
         created_at,
         updated_at;
       `,
-      [dbUser.id, recipientEmail, token],
+      [dbUser.id, recipientUser?.id || null, recipientEmail, token],
     );
 
     const acceptUrl = makeAcceptUrl(req, requestResult.rows[0].token);
     const emailStatus = await sendFriendRequestEmail({
       acceptUrl,
       recipientEmail,
-      requesterName: dbUser.name || dbUser.email,
+      requesterName: dbUser.name || `@${dbUser.username}`,
     });
 
     sendLiveUpdate([dbUser.id, recipientUser?.id], {
@@ -519,6 +903,7 @@ router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
       request: {
         ...requestResult.rows[0],
         requester_name: dbUser.name,
+        requester_username: dbUser.username,
         requester_email: dbUser.email,
         acceptUrl,
         emailStatus,
@@ -537,49 +922,278 @@ router.post("/requests", verifyFirebaseToken, async (req: AuthRequest, res) => {
   }
 });
 
+router.delete(
+  "/requests/:requestId",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const firebaseUser = req.user;
 
-router.get("/:friendId/activity", verifyFirebaseToken, async (req: AuthRequest, res) => {
-  try {
-    await ensureFriendTables();
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
 
-    const firebaseUser = req.user;
+      const dbUser = await getCurrentUser(firebaseUser.uid);
 
-    if (!firebaseUser) {
-      return res.status(401).json({ message: "Unauthorized" });
+      if (!dbUser) {
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      const requestResult = await db.query<
+        FriendRequestRow & { is_requester: boolean }
+      >(
+        `
+        SELECT
+          request.*,
+          (request.requester_user_id = $2) AS is_requester
+        FROM friend_requests request
+        WHERE request.id = $1
+        AND request.status = 'pending'
+        AND (
+          request.requester_user_id = $2
+          OR request.recipient_user_id = $2
+          OR LOWER(request.recipient_email) = LOWER($3)
+        )
+        LIMIT 1;
+        `,
+        [req.params.requestId, dbUser.id, dbUser.email],
+      );
+      const friendRequest = requestResult.rows[0];
+
+      if (!friendRequest) {
+        return res.status(404).json({ message: "Friend request not found" });
+      }
+
+      const nextStatus = friendRequest.is_requester ? "cancelled" : "declined";
+      await db.query(
+        `
+        UPDATE friend_requests
+        SET status = $2,
+            updated_at = NOW()
+        WHERE id = $1;
+        `,
+        [friendRequest.id, nextStatus],
+      );
+
+      sendLiveUpdate(
+        [dbUser.id, friendRequest.requester_user_id, friendRequest.recipient_user_id],
+        {
+          type: "friends",
+          reason: nextStatus === "cancelled" ? "friend-request-cancelled" : "friend-request-declined",
+        },
+      );
+
+      return res.json({
+        message:
+          nextStatus === "cancelled"
+            ? "Friend request cancelled"
+            : "Friend request declined",
+      });
+    } catch (error) {
+      console.error("Delete friend request failed:", error);
+
+      return res.status(500).json({ message: "Failed to delete friend request" });
     }
+  },
+);
+
+router.get("/blocked", verifyFirebaseToken, async (req: AuthRequest, res) => {
+  try {
+    const firebaseUser = req.user;
+    if (!firebaseUser) return res.status(401).json({ message: "Unauthorized" });
 
     const dbUser = await getCurrentUser(firebaseUser.uid);
+    if (!dbUser) return res.status(404).json({ message: "User not found in database" });
 
-    if (!dbUser) {
-      return res.status(404).json({ message: "User not found in database" });
-    }
-
-    const friendId = String(req.params.friendId ?? "");
-
-    if (!friendId) {
-      return res.status(400).json({ message: "Friend id is required" });
-    }
-
-    const [userOneId, userTwoId] = sortFriendPair(dbUser.id, friendId);
-    const friendshipResult = await db.query(
+    const result = await db.query(
       `
+      SELECT
+        blocked_user.id,
+        blocked_user.name,
+        blocked_user.username,
+        blocked_user.email,
+        blocked_user.photo_url,
+        blocked_user.profile_photo_url,
+        blocked_user.avatar_mode,
+        CASE
+          WHEN blocked_user.avatar_mode = 'initials' THEN NULL
+          ELSE COALESCE(blocked_user.profile_photo_url, blocked_user.photo_url)
+        END AS display_photo_url,
+        user_blocks.created_at AS blocked_at
+      FROM user_blocks
+      JOIN users blocked_user ON blocked_user.id = user_blocks.blocked_user_id
+      WHERE user_blocks.blocker_user_id = $1
+      ORDER BY user_blocks.created_at DESC;
+      `,
+      [dbUser.id],
+    );
+
+    return res.json({ blockedUsers: result.rows });
+  } catch (error) {
+    console.error("Load blocked users failed:", error);
+    return res.status(500).json({ message: "Failed to load blocked users" });
+  }
+});
+
+router.delete(
+  "/blocked/:userId",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    try {
+      const firebaseUser = req.user;
+      if (!firebaseUser) return res.status(401).json({ message: "Unauthorized" });
+
+      const dbUser = await getCurrentUser(firebaseUser.uid);
+      if (!dbUser) return res.status(404).json({ message: "User not found in database" });
+
+      const blockedUserId = String(req.params.userId || "");
+      if (!blockedUserId) {
+        return res.status(400).json({ message: "Blocked user is required" });
+      }
+
+      const result = await db.query(
+        `DELETE FROM user_blocks
+         WHERE blocker_user_id = $1 AND blocked_user_id = $2
+         RETURNING id;`,
+        [dbUser.id, blockedUserId],
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ message: "Blocked user not found" });
+      }
+
+      sendLiveUpdate([dbUser.id, blockedUserId], {
+        type: "friends",
+        reason: "user-unblocked",
+      });
+      return res.json({ message: "User unblocked" });
+    } catch (error) {
+      console.error("Unblock user failed:", error);
+      return res.status(500).json({ message: "Failed to unblock user" });
+    }
+  },
+);
+
+router.post(
+  "/:friendId/block",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
+    try {
+      const firebaseUser = req.user;
+      if (!firebaseUser) return res.status(401).json({ message: "Unauthorized" });
+
+      const dbUser = await getCurrentUser(firebaseUser.uid);
+      if (!dbUser) return res.status(404).json({ message: "User not found in database" });
+
+      const friendId = String(req.params.friendId || "");
+      if (!friendId || friendId === dbUser.id) {
+        return res.status(400).json({ message: "Choose another user to block" });
+      }
+
+      const targetResult = await client.query(
+        `
+        SELECT
+          id, name, username, email, photo_url, profile_photo_url, avatar_mode,
+          CASE WHEN avatar_mode = 'initials' THEN NULL
+               ELSE COALESCE(profile_photo_url, photo_url) END AS display_photo_url
+        FROM users
+        WHERE id = $1
+        LIMIT 1;
+        `,
+        [friendId],
+      );
+      const blockedUser = targetResult.rows[0];
+      if (!blockedUser) return res.status(404).json({ message: "User not found" });
+
+      const [userOneId, userTwoId] = sortFriendPair(dbUser.id, friendId);
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO user_blocks (blocker_user_id, blocked_user_id)
+         VALUES ($1, $2)
+         ON CONFLICT (blocker_user_id, blocked_user_id) DO NOTHING;`,
+        [dbUser.id, friendId],
+      );
+      await client.query(
+        `DELETE FROM friendships WHERE user_one_id = $1 AND user_two_id = $2;`,
+        [userOneId, userTwoId],
+      );
+      await client.query(
+        `
+        UPDATE friend_requests
+        SET status = 'cancelled', updated_at = NOW()
+        WHERE status = 'pending'
+        AND (
+          (requester_user_id = $1 AND (recipient_user_id = $2 OR LOWER(recipient_email) = LOWER($3)))
+          OR
+          (requester_user_id = $2 AND (recipient_user_id = $1 OR LOWER(recipient_email) = LOWER($4)))
+        );
+        `,
+        [dbUser.id, friendId, blockedUser.email, dbUser.email],
+      );
+      await client.query("COMMIT");
+
+      sendLiveUpdate([dbUser.id, friendId], {
+        type: "friends",
+        reason: "user-blocked",
+      });
+      return res.json({ message: "User blocked", blockedUser });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      console.error("Block user failed:", error);
+      return res.status(500).json({ message: "Failed to block user" });
+    } finally {
+      client.release();
+    }
+  },
+);
+
+router.get(
+  "/:friendId/activity",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    try {
+      await ensureFriendTables();
+
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const dbUser = await getCurrentUser(firebaseUser.uid);
+
+      if (!dbUser) {
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      const friendId = String(req.params.friendId ?? "");
+
+      if (!friendId) {
+        return res.status(400).json({ message: "Friend id is required" });
+      }
+
+      const [userOneId, userTwoId] = sortFriendPair(dbUser.id, friendId);
+      const friendshipResult = await db.query(
+        `
       SELECT id
       FROM friendships
       WHERE user_one_id = $1
       AND user_two_id = $2;
       `,
-      [userOneId, userTwoId],
-    );
+        [userOneId, userTwoId],
+      );
 
-    if (friendshipResult.rows.length === 0) {
-      return res.status(404).json({ message: "Friendship not found" });
-    }
+      if (friendshipResult.rows.length === 0) {
+        return res.status(404).json({ message: "Friendship not found" });
+      }
 
-    const friendResult = await db.query<FriendRow>(
-      `
+      const friendResult = await db.query<FriendRow>(
+        `
       SELECT
         users.id,
         users.name,
+        users.username,
         users.email,
         users.photo_url,
         users.profile_photo_url,
@@ -598,24 +1212,24 @@ router.get("/:friendId/activity", verifyFirebaseToken, async (req: AuthRequest, 
         )
       WHERE users.id = $2;
       `,
-      [dbUser.id, friendId],
-    );
+        [dbUser.id, friendId],
+      );
 
-    const friend = friendResult.rows[0];
+      const friend = friendResult.rows[0];
 
-    if (!friend) {
-      return res.status(404).json({ message: "Friend not found" });
-    }
+      if (!friend) {
+        return res.status(404).json({ message: "Friend not found" });
+      }
 
-    const activityResult = await db.query<{
-      id: string;
-      title: string;
-      amount: number;
-      direction: "incoming" | "outgoing" | "neutral";
-      source: string;
-      created_at: string;
-    }>(
-      `
+      const activityResult = await db.query<{
+        id: string;
+        title: string;
+        amount: number;
+        direction: "incoming" | "outgoing" | "neutral";
+        source: string;
+        created_at: string;
+      }>(
+        `
       WITH shared_rooms AS (
         SELECT DISTINCT room.id
         FROM split_rooms room
@@ -672,15 +1286,15 @@ router.get("/:friendId/activity", verifyFirebaseToken, async (req: AuthRequest, 
       ORDER BY created_at DESC
       LIMIT 8;
       `,
-      [dbUser.id, friendId, dbUser.email, friend.email],
-    );
+        [dbUser.id, friendId, dbUser.email, friend.email],
+      );
 
-    const summaryResult = await db.query<{
-      rooms_together: number;
-      total_settled: number;
-      net_position: number;
-    }>(
-      `
+      const summaryResult = await db.query<{
+        rooms_together: number;
+        total_settled: number;
+        net_position: number;
+      }>(
+        `
       WITH shared_rooms AS (
         SELECT DISTINCT room.id
         FROM split_rooms room
@@ -713,88 +1327,93 @@ router.get("/:friendId/activity", verifyFirebaseToken, async (req: AuthRequest, 
         COALESCE(friend_wallet.incoming - friend_wallet.outgoing, 0)::float AS net_position
       FROM friend_wallet;
       `,
-      [dbUser.id, friendId, dbUser.email, friend.email],
-    );
+        [dbUser.id, friendId, dbUser.email, friend.email],
+      );
 
-    return res.json({
-      friend,
-      summary: {
-        roomsTogether: Number(summaryResult.rows[0]?.rooms_together ?? 0),
-        totalSettled: Number(summaryResult.rows[0]?.total_settled ?? 0),
-        pendingWithFriend: 0,
-        netPosition: Number(summaryResult.rows[0]?.net_position ?? 0),
-      },
-      recentActivity: activityResult.rows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        amount: Number(row.amount),
-        direction: row.direction,
-        source: row.source,
-        createdAt: row.created_at,
-      })),
-    });
-  } catch (error) {
-    console.error("Load friend activity failed:", error);
+      return res.json({
+        friend,
+        summary: {
+          roomsTogether: Number(summaryResult.rows[0]?.rooms_together ?? 0),
+          totalSettled: Number(summaryResult.rows[0]?.total_settled ?? 0),
+          pendingWithFriend: 0,
+          netPosition: Number(summaryResult.rows[0]?.net_position ?? 0),
+        },
+        recentActivity: activityResult.rows.map((row) => ({
+          id: row.id,
+          title: row.title,
+          amount: Number(row.amount),
+          direction: row.direction,
+          source: row.source,
+          createdAt: row.created_at,
+        })),
+      });
+    } catch (error) {
+      console.error("Load friend activity failed:", error);
 
-    return res.status(500).json({
-      message: "Failed to load friend activity",
-    });
-  }
-});
-
-router.delete("/:friendId", verifyFirebaseToken, async (req: AuthRequest, res) => {
-  try {
-    await ensureFriendTables();
-
-    const firebaseUser = req.user;
-
-    if (!firebaseUser) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return res.status(500).json({
+        message: "Failed to load friend activity",
+      });
     }
+  },
+);
 
-    const dbUser = await getCurrentUser(firebaseUser.uid);
+router.delete(
+  "/:friendId",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    try {
+      await ensureFriendTables();
 
-    if (!dbUser) {
-      return res.status(404).json({ message: "User not found in database" });
-    }
+      const firebaseUser = req.user;
 
-    const friendId = String(req.params.friendId ?? "");
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
 
-    if (!friendId) {
-      return res.status(400).json({ message: "Friend id is required" });
-    }
+      const dbUser = await getCurrentUser(firebaseUser.uid);
 
-    const [userOneId, userTwoId] = sortFriendPair(dbUser.id, friendId);
-    const deleteResult = await db.query<{ id: string }>(
-      `
+      if (!dbUser) {
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      const friendId = String(req.params.friendId ?? "");
+
+      if (!friendId) {
+        return res.status(400).json({ message: "Friend id is required" });
+      }
+
+      const [userOneId, userTwoId] = sortFriendPair(dbUser.id, friendId);
+      const deleteResult = await db.query<{ id: string }>(
+        `
       DELETE FROM friendships
       WHERE user_one_id = $1
       AND user_two_id = $2
       RETURNING id;
       `,
-      [userOneId, userTwoId],
-    );
+        [userOneId, userTwoId],
+      );
 
-    if (deleteResult.rows.length === 0) {
-      return res.status(404).json({ message: "Friendship not found" });
+      if (deleteResult.rows.length === 0) {
+        return res.status(404).json({ message: "Friendship not found" });
+      }
+
+      sendLiveUpdate([dbUser.id, friendId], {
+        type: "friends",
+        reason: "friend-deleted",
+      });
+
+      return res.json({
+        message: "Friend deleted",
+      });
+    } catch (error) {
+      console.error("Delete friend failed:", error);
+
+      return res.status(500).json({
+        message: "Failed to delete friend",
+      });
     }
-
-    sendLiveUpdate([dbUser.id, friendId], {
-      type: "friends",
-      reason: "friend-deleted",
-    });
-
-    return res.json({
-      message: "Friend deleted",
-    });
-  } catch (error) {
-    console.error("Delete friend failed:", error);
-
-    return res.status(500).json({
-      message: "Failed to delete friend",
-    });
-  }
-});
+  },
+);
 
 router.post(
   "/requests/:requestId/accept",
@@ -830,6 +1449,12 @@ router.post(
 
       if (!friendRequest) {
         return res.status(404).json({ message: "Friend request not found" });
+      }
+
+      if (await usersHaveBlockRelationship(friendRequest.requester_user_id, dbUser.id)) {
+        return res.status(403).json({
+          message: "This friend request cannot be accepted because one account is blocked.",
+        });
       }
 
       await createFriendship(friendRequest.requester_user_id, dbUser.id);
@@ -886,9 +1511,13 @@ router.get("/accept/:token", async (req, res) => {
       return sendAcceptPage(req, res, "alreadyAccepted");
     }
 
+    if (friendRequest.status !== "pending") {
+      return sendAcceptPage(req, res, "notFound", 404);
+    }
+
     const recipientResult = await db.query<DbUserRow>(
       `
-      SELECT id, name, email, photo_url
+      SELECT id, name, username, email, photo_url
       FROM users
       WHERE LOWER(email) = LOWER($1);
       `,

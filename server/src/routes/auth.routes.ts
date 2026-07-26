@@ -10,19 +10,41 @@ import { adminAuth } from "../config/firebaseAdmin.js";
 import { isEmailConfigured, sendTransactionalEmail } from "../utils/email.js";
 import {
   type AuthRequest,
+  requireRecentAuthentication,
+  verifyFirebaseCredentialToken,
   verifyFirebaseToken,
 } from "../middleware/verifyFirebaseToken.js";
-import { parseRequestBody, sendValidationError } from "../middleware/validateRequest.js";
+import {
+  parseRequestBody,
+  sendValidationError,
+} from "../middleware/validateRequest.js";
 import {
   sendWalletPinError,
   verifyWalletPinForUser,
 } from "../utils/walletPin.js";
+import { verifyFirebaseEmailPassword } from "../utils/firebasePasswordAuth.js";
 
 const router = express.Router();
 const deleteAccountConfirmationText = "/DeleteAccount";
 const loginOtpLength = 6;
-const loginOtpExpiryMs = 10 * 60 * 1000;
-const maxLoginOtpAttempts = 5;
+const loginOtpExpiryMs = Number(
+  process.env.LOGIN_OTP_EXPIRY_MS || 10 * 60 * 1000,
+);
+const maxLoginOtpAttempts = Number(process.env.LOGIN_OTP_MAX_ATTEMPTS || 5);
+const loginOtpMaxRequests = Number(process.env.LOGIN_OTP_MAX_REQUESTS || 5);
+const loginOtpRequestWindowMinutes = Number(
+  process.env.LOGIN_OTP_REQUEST_WINDOW_MINUTES || 15,
+);
+const loginOtpMaxResends = Number(process.env.LOGIN_OTP_MAX_RESENDS || 3);
+const loginOtpResendCooldownMs = Number(
+  process.env.LOGIN_OTP_RESEND_COOLDOWN_MS || 30 * 1000,
+);
+const loginOtpPepper = process.env.LOGIN_OTP_PEPPER?.trim() || "";
+const profileIdentityOtpLength = 6;
+const profileIdentityOtpExpiryMs = 10 * 60 * 1000;
+const profileIdentityOtpMaxAttempts = 5;
+const profileIdentityOtpMaxRequests = 3;
+const profileIdentityOtpRequestWindowMinutes = 15;
 const supportedAppCurrencies = new Set([
   "INR",
   "USD",
@@ -49,8 +71,12 @@ const supportedAppLanguages = new Set([
   "pt",
 ]);
 const walletPinLengthMessage = "Wallet PIN must be 4 to 6 digits";
-const walletPinMaxFailedAttempts = Number(process.env.WALLET_PIN_MAX_FAILED_ATTEMPTS || 5);
-const walletPinLockMs = Number(process.env.WALLET_PIN_LOCK_MS || 15 * 60 * 1000);
+const walletPinMaxFailedAttempts = Number(
+  process.env.WALLET_PIN_MAX_FAILED_ATTEMPTS || 5,
+);
+const walletPinLockMs = Number(
+  process.env.WALLET_PIN_LOCK_MS || 15 * 60 * 1000,
+);
 const walletPinResetOtpLength = 6;
 const walletPinResetOtpExpiryMs = Number(
   process.env.WALLET_PIN_RESET_OTP_EXPIRY_MS || 10 * 60 * 1000,
@@ -65,10 +91,10 @@ const walletPinResetOtpWindowMinutes = Number(
   process.env.WALLET_PIN_RESET_OTP_WINDOW_MINUTES || 15,
 );
 const walletPinOtpPepper =
-  process.env.WALLET_PIN_OTP_PEPPER ||
-  process.env.RAZORPAY_WEBHOOK_SECRET ||
-  process.env.SETUP_ROUTE_SECRET ||
-  "splitverse-local-wallet-pin-otp-pepper";
+  process.env.WALLET_PIN_RESET_OTP_PEPPER?.trim() ||
+  (process.env.NODE_ENV === "production"
+    ? ""
+    : "splitverse-development-wallet-pin-otp-pepper");
 
 const passwordResetOtpLength = 6;
 const passwordResetOtpExpiryMs = Number(
@@ -84,9 +110,10 @@ const passwordResetOtpWindowMinutes = Number(
   process.env.PASSWORD_RESET_OTP_WINDOW_MINUTES || 15,
 );
 const passwordResetOtpPepper =
-  process.env.PASSWORD_RESET_OTP_PEPPER ||
-  walletPinOtpPepper ||
-  "splitverse-local-password-reset-otp-pepper";
+  process.env.PASSWORD_RESET_OTP_PEPPER?.trim() ||
+  (process.env.NODE_ENV === "production"
+    ? ""
+    : "splitverse-development-password-reset-otp-pepper");
 
 const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
 const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY?.trim();
@@ -105,7 +132,6 @@ if (isCloudinaryConfigured) {
     secure: true,
   });
 }
-
 
 const walletPinValueSchema = z
   .string()
@@ -130,12 +156,24 @@ const walletPinSchema = z
       .trim()
       .regex(/^\d{4,6}$/, walletPinLengthMessage)
       .optional(),
+    username: z
+      .string()
+      .trim()
+      .transform((value) => normalizeUsername(value))
+      .refine(
+        (value) => /^[a-z0-9_]{3,30}$/.test(value),
+        "Username must be 3 to 30 characters using lowercase letters, numbers, or underscores",
+      )
+      .optional(),
   })
   .strict();
 
 const verifyWalletPinSchema = z
   .object({
-    pin: z.string().trim().regex(/^\d{4,6}$/, walletPinLengthMessage),
+    pin: z
+      .string()
+      .trim()
+      .regex(/^\d{4,6}$/, walletPinLengthMessage),
   })
   .strict();
 
@@ -160,7 +198,7 @@ const passwordResetEmailSchema = z
 
 const passwordResetPasswordSchema = z
   .string({ message: "New password is required" })
-  .min(6, "Password must be at least 6 characters")
+  .min(10, "Password must be at least 10 characters")
   .max(128, "Password is too long");
 
 const passwordResetRequestSchema = z
@@ -193,6 +231,41 @@ const allowedProfilePhotoMimeTypes = new Set([
   "image/gif",
 ]);
 
+function detectProfilePhotoMimeType(buffer: Buffer) {
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return "image/jpeg";
+  }
+
+  if (
+    buffer.length >= 8 &&
+    buffer
+      .subarray(0, 8)
+      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) {
+    return "image/png";
+  }
+
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+
+  const gifHeader = buffer.subarray(0, 6).toString("ascii");
+  if (gifHeader === "GIF87a" || gifHeader === "GIF89a") {
+    return "image/gif";
+  }
+
+  return null;
+}
+
 const profilePhotoUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -209,15 +282,90 @@ const profilePhotoUpload = multer({
   },
 });
 
-type LoginOtpSession = {
-  firebaseUid: string;
-  email: string;
-  otpHash: string;
-  expiresAt: number;
-  attempts: number;
-};
+const usernameValueSchema = z
+  .string({ message: "Username is required" })
+  .trim()
+  .transform((value) => normalizeUsername(value))
+  .refine(
+    (value) => /^[a-z0-9_]{3,30}$/.test(value),
+    "Username must be 3 to 30 characters using lowercase letters, numbers, or underscores",
+  );
 
-const loginOtpSessions = new Map<string, LoginOtpSession>();
+const usernameAvailabilitySchema = z
+  .object({
+    username: usernameValueSchema,
+  })
+  .strict();
+
+const syncUserSchema = z
+  .object({
+    username: usernameValueSchema.optional(),
+    requireUsername: z.boolean().optional().default(false),
+    deferUsernameSetup: z.boolean().optional().default(false),
+  })
+  .strict();
+
+const loginOtpRequestSchema = z
+  .object({
+    identifier: z
+      .string({ message: "Username or email is required" })
+      .trim()
+      .min(1, "Username or email is required")
+      .max(254, "Username or email is too long")
+      .optional(),
+    email: z
+      .string()
+      .trim()
+      .min(1, "Email address is required")
+      .max(254, "Email address is too long")
+      .optional(),
+    password: z
+      .string({ message: "Password is required" })
+      .min(1, "Password is required")
+      .max(128, "Password is too long"),
+  })
+  .strict()
+  .refine((value) => Boolean(value.identifier || value.email), {
+    message: "Username or email is required",
+    path: ["identifier"],
+  })
+  .transform((value) => ({
+    identifier: String(value.identifier || value.email || "").trim(),
+    password: value.password,
+  }));
+
+const loginOtpVerifySchema = z
+  .object({
+    sessionId: z.string().trim().uuid("Login session is invalid"),
+    otp: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, "Enter the 6-digit login code"),
+  })
+  .strict();
+
+const loginOtpResendSchema = z
+  .object({
+    sessionId: z.string().trim().uuid("Login session is invalid"),
+  })
+  .strict();
+
+const profileIdentityChangeRequestSchema = z
+  .object({
+    field: z.enum(["name", "email"]),
+    value: z.string().trim().min(1, "New value is required").max(254),
+  })
+  .strict();
+
+const profileIdentityChangeConfirmSchema = z
+  .object({
+    requestId: z.string().trim().uuid("Verification request is invalid"),
+    otp: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, "Enter the 6-digit verification code"),
+  })
+  .strict();
 
 type Queryable = {
   query: <T extends QueryResultRow = QueryResultRow>(
@@ -272,9 +420,23 @@ function getWalletPinStrengthIssue(pin: string) {
   return "";
 }
 
+function assertOtpPepperConfigured(secret: string, feature: string) {
+  const sufficientlyStrong = secret.length >= 32;
+
+  if (sufficientlyStrong || process.env.NODE_ENV !== "production") return;
+
+  throw Object.assign(new Error(`${feature} is temporarily unavailable.`), {
+    statusCode: 503,
+    code: "OTP_SECURITY_NOT_CONFIGURED",
+  });
+}
+
 function createWalletPinResetOtp() {
   return crypto
-    .randomInt(10 ** (walletPinResetOtpLength - 1), 10 ** walletPinResetOtpLength)
+    .randomInt(
+      10 ** (walletPinResetOtpLength - 1),
+      10 ** walletPinResetOtpLength,
+    )
     .toString();
 }
 
@@ -417,22 +579,27 @@ async function sendPasswordResetOtpEmail({
   });
 
   if (!emailResult.ok) {
-    console.error("Password reset OTP email failed through Brevo SMTP:", emailResult);
+    console.error(
+      "Password reset OTP email failed through Brevo SMTP:",
+      emailResult,
+    );
     return emailResult.reason;
   }
 
   return "sent";
 }
 
+function assertLoginOtpConfigured() {
+  if (loginOtpPepper.length >= 32 || process.env.NODE_ENV !== "production") {
+    return;
+  }
 
-function cleanupExpiredLoginOtpSessions() {
-  const now = Date.now();
-
-  loginOtpSessions.forEach((session, sessionId) => {
-    if (session.expiresAt <= now) {
-      loginOtpSessions.delete(sessionId);
-    }
-  });
+  if (process.env.NODE_ENV === "production") {
+    throw Object.assign(new Error("Email login is temporarily unavailable."), {
+      statusCode: 503,
+      code: "LOGIN_OTP_NOT_CONFIGURED",
+    });
+  }
 }
 
 function createLoginOtp() {
@@ -441,8 +608,13 @@ function createLoginOtp() {
     .toString();
 }
 
-function hashLoginOtp(otp: string) {
-  return crypto.createHash("sha256").update(otp).digest("hex");
+function hashLoginOtp(otp: string, sessionId: string, firebaseUid: string) {
+  const pepper = loginOtpPepper || "splitverse-development-login-otp-pepper";
+
+  return crypto
+    .createHmac("sha256", pepper)
+    .update(`${sessionId}:${firebaseUid}:${otp}`)
+    .digest("hex");
 }
 
 function timingSafeEqualHex(left: string, right: string) {
@@ -455,8 +627,170 @@ function timingSafeEqualHex(left: string, right: string) {
   );
 }
 
+async function resolveLoginEmail(identifier: string) {
+  const normalizedIdentifier = identifier.trim().toLowerCase();
+  const looksLikeUsername =
+    normalizedIdentifier.startsWith("@") ||
+    !normalizedIdentifier.includes("@");
+
+  if (!looksLikeUsername) {
+    const parsedEmail = z.string().email().safeParse(normalizedIdentifier);
+
+    if (parsedEmail.success) {
+      return parsedEmail.data;
+    }
+  } else {
+    const username = normalizeUsername(normalizedIdentifier);
+
+    if (/^[a-z0-9_]{3,30}$/.test(username)) {
+      const result = await db.query<{ email: string }>(
+        `
+        SELECT email
+        FROM users
+        WHERE LOWER(username) = LOWER($1)
+        LIMIT 1;
+        `,
+        [username],
+      );
+
+      if (result.rows[0]?.email) {
+        return result.rows[0].email.toLowerCase();
+      }
+    }
+  }
+
+  throw Object.assign(new Error("Incorrect username, email, or password."), {
+    statusCode: 401,
+    code: "INVALID_LOGIN_CREDENTIALS",
+  });
+}
+
+function createProfileIdentityOtp() {
+  return crypto
+    .randomInt(
+      10 ** (profileIdentityOtpLength - 1),
+      10 ** profileIdentityOtpLength,
+    )
+    .toString();
+}
+
+function hashProfileIdentityOtp(
+  otp: string,
+  requestId: string,
+  userId: string,
+  changeType: "name" | "email",
+) {
+  const pepper = loginOtpPepper || "splitverse-development-login-otp-pepper";
+
+  return crypto
+    .createHmac("sha256", pepper)
+    .update(`${requestId}:${userId}:${changeType}:${otp}`)
+    .digest("hex");
+}
+
+async function sendProfileIdentityOtpEmail({
+  currentEmail,
+  otp,
+  changeType,
+}: {
+  currentEmail: string;
+  otp: string;
+  changeType: "name" | "email";
+}) {
+  if (!isEmailConfigured()) {
+    return "not_configured" as const;
+  }
+
+  const label = changeType === "name" ? "account name" : "registered email";
+  const emailResult = await sendTransactionalEmail({
+    to: currentEmail,
+    subject: `Confirm your SplitVerse ${label} change`,
+    text: `Your SplitVerse verification code is ${otp}. It expires in 10 minutes. Use it only to confirm the requested ${label} change.`,
+    html: `
+      <div style="font-family:Inter,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0a0b0d;">
+        <h1 style="font-size:24px;margin:0 0 12px;">Confirm your ${label} change</h1>
+        <p style="font-size:15px;line-height:1.5;margin:0 0 18px;">
+          Enter this one-time code in SplitVerse to confirm the change. It expires in 10 minutes.
+        </p>
+        <div style="font-size:30px;font-weight:800;letter-spacing:0.18em;padding:16px 18px;border-radius:14px;background:#f3f6ff;color:#0052ff;text-align:center;">
+          ${otp}
+        </div>
+        <p style="font-size:13px;line-height:1.5;margin:18px 0 0;color:#667085;">
+          If you did not request this change, do not share this code and review your account security.
+        </p>
+      </div>
+    `,
+  });
+
+  if (!emailResult.ok) {
+    console.error("Profile identity OTP email failed:", emailResult);
+    return emailResult.reason;
+  }
+
+  return "sent" as const;
+}
+
+function maskEmailAddress(email: string) {
+  const [localPart, domain = ""] = email.split("@");
+  const visibleLocal = localPart.slice(0, Math.min(2, localPart.length));
+  const hiddenLength = Math.max(2, localPart.length - visibleLocal.length);
+
+  return `${visibleLocal}${"*".repeat(hiddenLength)}@${domain}`;
+}
+
 function normalizeAvatarMode(value: unknown) {
   return value === "initials" ? "initials" : "photo";
+}
+
+function normalizeUsername(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, "");
+}
+
+function buildUsernameBase(name: string, email: string) {
+  const source = name.trim() || email.split("@")[0] || "user";
+  const normalized = source
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24);
+
+  if (normalized.length >= 3) {
+    return normalized;
+  }
+
+  return `user_${normalized || "sv"}`.slice(0, 24);
+}
+
+async function generateAvailableUsername(
+  preferredBase: string,
+  excludeUserId: string | null = null,
+) {
+  const base = buildUsernameBase(preferredBase, preferredBase);
+
+  for (let suffix = 0; suffix < 100; suffix += 1) {
+    const suffixText = suffix === 0 ? "" : `_${suffix}`;
+    const candidate = `${base.slice(0, 30 - suffixText.length)}${suffixText}`;
+    const existing = await db.query(
+      `
+      SELECT 1
+      FROM users
+      WHERE LOWER(username) = LOWER($1)
+      AND ($2::uuid IS NULL OR id <> $2::uuid)
+      LIMIT 1;
+      `,
+      [candidate, excludeUserId],
+    );
+
+    if (existing.rows.length === 0) {
+      return candidate;
+    }
+  }
+
+  const randomSuffix = crypto.randomBytes(4).toString("hex");
+  return `${base.slice(0, 21)}_${randomSuffix}`;
 }
 
 function normalizeProfilePhotoUrl(value: unknown) {
@@ -469,7 +803,10 @@ function normalizeProfilePhotoUrl(value: unknown) {
   try {
     const parsedUrl = new URL(photoUrl);
 
-    if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+    const httpAllowed =
+      process.env.NODE_ENV !== "production" && parsedUrl.protocol === "http:";
+
+    if (parsedUrl.protocol !== "https:" && !httpAllowed) {
       return null;
     }
 
@@ -590,122 +927,433 @@ async function sendLoginOtpEmail({
   return "sent";
 }
 
-router.post(
-  "/email-login-otp/request",
-  verifyFirebaseToken,
-  async (req: AuthRequest, res) => {
-    try {
-      cleanupExpiredLoginOtpSessions();
+router.post("/username/availability", async (req, res) => {
+  try {
+    const { username } = parseRequestBody(
+      usernameAvailabilitySchema,
+      req.body,
+    );
+    const result = await db.query(
+      `
+      SELECT 1
+      FROM users
+      WHERE LOWER(username) = LOWER($1)
+      LIMIT 1;
+      `,
+      [username],
+    );
 
-      const firebaseUser = req.user;
-
-      if (!firebaseUser) {
-        return res.status(401).json({
-          message: "Unauthorized",
-        });
-      }
-
-      if (firebaseUser.firebase?.sign_in_provider !== "password") {
-        return res.status(400).json({
-          message: "OTP login is only available for email and password sign-in",
-        });
-      }
-
-      if (!firebaseUser.email) {
-        return res.status(400).json({
-          message: "Firebase user email is missing",
-        });
-      }
-
-      const otp = createLoginOtp();
-      const emailStatus = await sendLoginOtpEmail({
-        email: firebaseUser.email,
-        otp,
-      });
-
-      if (emailStatus !== "sent") {
-        return res.status(503).json({
-          message:
-            emailStatus === "not_configured"
-              ? "Email OTP delivery is not configured. Add Brevo SMTP settings in server/.env."
-              : "Could not send the login OTP email. Please try again.",
-        });
-      }
-
-      const sessionId = crypto.randomUUID();
-      const expiresAt = Date.now() + loginOtpExpiryMs;
-
-      loginOtpSessions.set(sessionId, {
-        firebaseUid: firebaseUser.uid,
-        email: firebaseUser.email,
-        otpHash: hashLoginOtp(otp),
-        expiresAt,
-        attempts: 0,
-      });
-
-      return res.status(201).json({
-        sessionId,
-        email: firebaseUser.email,
-        expiresAt: new Date(expiresAt).toISOString(),
-      });
-    } catch (error) {
-      console.error("Request login OTP failed:", error);
-
-      return res.status(500).json({
-        message: "Failed to request login OTP",
-      });
+    return res.json({
+      username,
+      available: result.rows.length === 0,
+    });
+  } catch (error) {
+    if (sendValidationError(res, error)) {
+      return;
     }
-  },
-);
 
-router.post("/email-login-otp/verify", (req, res) => {
-  cleanupExpiredLoginOtpSessions();
-
-  const sessionId = String(req.body?.sessionId ?? "");
-  const otp = String(req.body?.otp ?? "").replace(/\D/g, "");
-
-  if (!sessionId || otp.length !== loginOtpLength) {
-    return res.status(400).json({
-      message: "Enter the 6-digit login code",
+    console.error("Check username availability failed:", error);
+    return res.status(500).json({
+      message: "Could not check username availability",
     });
   }
-
-  const session = loginOtpSessions.get(sessionId);
-
-  if (!session) {
-    return res.status(404).json({
-      message: "Login code expired. Please request a new code.",
-    });
-  }
-
-  if (session.attempts >= maxLoginOtpAttempts) {
-    loginOtpSessions.delete(sessionId);
-
-    return res.status(429).json({
-      message: "Too many incorrect codes. Please request a new code.",
-    });
-  }
-
-  const matches = timingSafeEqualHex(hashLoginOtp(otp), session.otpHash);
-
-  if (!matches) {
-    session.attempts += 1;
-
-    return res.status(401).json({
-      message: "Incorrect login code",
-    });
-  }
-
-  loginOtpSessions.delete(sessionId);
-
-  return res.json({
-    verified: true,
-  });
 });
 
+router.post("/email-login-otp/request", async (req, res) => {
+  try {
+    assertLoginOtpConfigured();
+    const { identifier, password } = parseRequestBody(
+      loginOtpRequestSchema,
+      req.body,
+    );
+    const email = await resolveLoginEmail(identifier);
+    const credential = await verifyFirebaseEmailPassword(email, password);
+
+    const requestCountResult = await db.query<{ request_count: number }>(
+      `
+      SELECT COUNT(*)::int AS request_count
+      FROM email_login_otp_sessions
+      WHERE firebase_uid = $1
+      AND created_at > NOW() - ($2::int * INTERVAL '1 minute');
+      `,
+      [credential.uid, loginOtpRequestWindowMinutes],
+    );
+
+    if (
+      Number(requestCountResult.rows[0]?.request_count || 0) >=
+      loginOtpMaxRequests
+    ) {
+      return res.status(429).json({
+        code: "LOGIN_OTP_RATE_LIMITED",
+        message: "Too many login code requests. Please try again later.",
+      });
+    }
+
+    const sessionId = crypto.randomUUID();
+    const otp = createLoginOtp();
+    const expiresAt = new Date(Date.now() + loginOtpExpiryMs);
+    const emailStatus = await sendLoginOtpEmail({
+      email: credential.email,
+      otp,
+    });
+
+    if (emailStatus !== "sent") {
+      return res.status(503).json({
+        code: "LOGIN_OTP_DELIVERY_FAILED",
+        message:
+          emailStatus === "not_configured"
+            ? "Email login is temporarily unavailable."
+            : "Could not send the login code. Please try again.",
+      });
+    }
+
+    const client = await db.connect();
+
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `
+        UPDATE email_login_otp_sessions
+        SET consumed_at = NOW()
+        WHERE firebase_uid = $1
+        AND consumed_at IS NULL;
+        `,
+        [credential.uid],
+      );
+      await client.query(
+        `
+        INSERT INTO email_login_otp_sessions (
+          id,
+          firebase_uid,
+          email,
+          otp_hash,
+          expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5);
+        `,
+        [
+          sessionId,
+          credential.uid,
+          credential.email,
+          hashLoginOtp(otp, sessionId, credential.uid),
+          expiresAt,
+        ],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    return res.status(201).json({
+      sessionId,
+      email: credential.email,
+      expiresAt: expiresAt.toISOString(),
+    });
+  } catch (error) {
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
+    const statusCode =
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      Number.isInteger(Number((error as { statusCode?: unknown }).statusCode))
+        ? Number((error as { statusCode?: unknown }).statusCode)
+        : 500;
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String(
+            (error as { code?: unknown }).code || "LOGIN_OTP_REQUEST_FAILED",
+          )
+        : "LOGIN_OTP_REQUEST_FAILED";
+
+    if (statusCode >= 500) {
+      console.error("Request login OTP failed:", error);
+    }
+
+    return res.status(statusCode).json({
+      code,
+      message:
+        statusCode === 401
+          ? "Incorrect username, email, or password."
+          : statusCode === 429
+            ? "Too many sign-in attempts. Please try again later."
+            : statusCode >= 500
+              ? "Email login is temporarily unavailable."
+              : error instanceof Error
+                ? error.message
+                : "Could not request login code.",
+    });
+  }
+});
+
+router.post("/email-login-otp/resend", async (req, res) => {
+  const client = await db.connect();
+
+  try {
+    assertLoginOtpConfigured();
+    const { sessionId } = parseRequestBody(loginOtpResendSchema, req.body);
+
+    await client.query("BEGIN");
+    const sessionResult = await client.query<{
+      id: string;
+      firebase_uid: string;
+      email: string;
+      resend_count: number;
+      last_sent_at: Date | string;
+      expires_at: Date | string;
+      consumed_at: Date | string | null;
+    }>(
+      `
+      SELECT
+        id,
+        firebase_uid,
+        email,
+        resend_count,
+        last_sent_at,
+        expires_at,
+        consumed_at
+      FROM email_login_otp_sessions
+      WHERE id = $1
+      FOR UPDATE;
+      `,
+      [sessionId],
+    );
+    const session = sessionResult.rows[0];
+
+    if (!session || session.consumed_at) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
+        code: "LOGIN_OTP_SESSION_EXPIRED",
+        message: "Login code expired. Please start sign-in again.",
+      });
+    }
+
+    if (new Date(session.expires_at).getTime() <= Date.now()) {
+      await client.query(
+        `UPDATE email_login_otp_sessions SET consumed_at = NOW() WHERE id = $1;`,
+        [session.id],
+      );
+      await client.query("COMMIT");
+      return res.status(410).json({
+        code: "LOGIN_OTP_SESSION_EXPIRED",
+        message: "Login code expired. Please start sign-in again.",
+      });
+    }
+
+    if (Number(session.resend_count) >= loginOtpMaxResends) {
+      await client.query("ROLLBACK");
+      return res.status(429).json({
+        code: "LOGIN_OTP_RESEND_LIMITED",
+        message: "Too many resend requests. Please start sign-in again.",
+      });
+    }
+
+    const elapsedSinceLastSend =
+      Date.now() - new Date(session.last_sent_at).getTime();
+
+    if (elapsedSinceLastSend < loginOtpResendCooldownMs) {
+      await client.query("ROLLBACK");
+      return res.status(429).json({
+        code: "LOGIN_OTP_RESEND_COOLDOWN",
+        message: "Please wait before requesting another login code.",
+        retryAfterSeconds: Math.ceil(
+          (loginOtpResendCooldownMs - elapsedSinceLastSend) / 1000,
+        ),
+      });
+    }
+
+    const otp = createLoginOtp();
+    const emailStatus = await sendLoginOtpEmail({ email: session.email, otp });
+
+    if (emailStatus !== "sent") {
+      await client.query("ROLLBACK");
+      return res.status(503).json({
+        code: "LOGIN_OTP_DELIVERY_FAILED",
+        message: "Could not send a new login code. Please try again.",
+      });
+    }
+
+    const expiresAt = new Date(Date.now() + loginOtpExpiryMs);
+    await client.query(
+      `
+      UPDATE email_login_otp_sessions
+      SET
+        otp_hash = $2,
+        failed_attempts = 0,
+        resend_count = resend_count + 1,
+        last_sent_at = NOW(),
+        expires_at = $3
+      WHERE id = $1;
+      `,
+      [
+        session.id,
+        hashLoginOtp(otp, session.id, session.firebase_uid),
+        expiresAt,
+      ],
+    );
+    await client.query("COMMIT");
+
+    return res.json({
+      sessionId: session.id,
+      email: session.email,
+      expiresAt: expiresAt.toISOString(),
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
+    console.error("Resend login OTP failed:", error);
+    return res.status(500).json({
+      code: "LOGIN_OTP_RESEND_FAILED",
+      message: "Could not resend the login code. Please try again.",
+    });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/email-login-otp/verify", async (req, res) => {
+  const client = await db.connect();
+
+  try {
+    assertLoginOtpConfigured();
+    const { sessionId, otp } = parseRequestBody(loginOtpVerifySchema, req.body);
+
+    await client.query("BEGIN");
+    const sessionResult = await client.query<{
+      id: string;
+      firebase_uid: string;
+      email: string;
+      otp_hash: string;
+      failed_attempts: number;
+      expires_at: Date | string;
+      consumed_at: Date | string | null;
+    }>(
+      `
+      SELECT
+        id,
+        firebase_uid,
+        email,
+        otp_hash,
+        failed_attempts,
+        expires_at,
+        consumed_at
+      FROM email_login_otp_sessions
+      WHERE id = $1
+      FOR UPDATE;
+      `,
+      [sessionId],
+    );
+    const session = sessionResult.rows[0];
+
+    if (!session || session.consumed_at) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({
+        code: "LOGIN_OTP_SESSION_EXPIRED",
+        message: "Login code expired. Please request a new code.",
+      });
+    }
+
+    if (new Date(session.expires_at).getTime() <= Date.now()) {
+      await client.query(
+        `UPDATE email_login_otp_sessions SET consumed_at = NOW() WHERE id = $1;`,
+        [session.id],
+      );
+      await client.query("COMMIT");
+      return res.status(410).json({
+        code: "LOGIN_OTP_SESSION_EXPIRED",
+        message: "Login code expired. Please request a new code.",
+      });
+    }
+
+    if (Number(session.failed_attempts) >= maxLoginOtpAttempts) {
+      await client.query(
+        `UPDATE email_login_otp_sessions SET consumed_at = NOW() WHERE id = $1;`,
+        [session.id],
+      );
+      await client.query("COMMIT");
+      return res.status(423).json({
+        code: "LOGIN_OTP_ATTEMPTS_EXCEEDED",
+        message: "Too many incorrect codes. Please start sign-in again.",
+      });
+    }
+
+    const submittedHash = hashLoginOtp(otp, session.id, session.firebase_uid);
+    const matches = timingSafeEqualHex(submittedHash, session.otp_hash);
+
+    if (!matches) {
+      const nextAttempts = Number(session.failed_attempts || 0) + 1;
+      const consume = nextAttempts >= maxLoginOtpAttempts;
+      await client.query(
+        `
+        UPDATE email_login_otp_sessions
+        SET
+          failed_attempts = $2,
+          consumed_at = CASE WHEN $3::boolean THEN NOW() ELSE consumed_at END
+        WHERE id = $1;
+        `,
+        [session.id, nextAttempts, consume],
+      );
+      await client.query("COMMIT");
+
+      return res.status(consume ? 423 : 401).json({
+        code: consume ? "LOGIN_OTP_ATTEMPTS_EXCEEDED" : "LOGIN_OTP_INCORRECT",
+        message: consume
+          ? "Too many incorrect codes. Please start sign-in again."
+          : "Incorrect login code.",
+        attemptsRemaining: Math.max(maxLoginOtpAttempts - nextAttempts, 0),
+      });
+    }
+
+    const verifiedAt = Math.floor(Date.now() / 1000);
+    const customToken = await adminAuth.createCustomToken(
+      session.firebase_uid,
+      {
+        splitverseOtpVerified: true,
+        splitverseOtpVerifiedAt: verifiedAt,
+        splitverseLoginSessionId: session.id,
+      },
+    );
+
+    await client.query(
+      `UPDATE email_login_otp_sessions SET consumed_at = NOW() WHERE id = $1;`,
+      [session.id],
+    );
+    await client.query("COMMIT");
+
+    return res.json({
+      verified: true,
+      customToken,
+      email: session.email,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+
+    if (sendValidationError(res, error)) {
+      return;
+    }
+
+    console.error("Verify login OTP failed:", error);
+    return res.status(500).json({
+      code: "LOGIN_OTP_VERIFY_FAILED",
+      message: "Could not verify the login code. Please try again.",
+    });
+  } finally {
+    client.release();
+  }
+});
 
 router.post("/password-reset/request", async (req, res) => {
   try {
+    assertOtpPepperConfigured(passwordResetOtpPepper, "Password reset");
     const { email } = parseRequestBody(passwordResetRequestSchema, req.body);
 
     if (!isEmailConfigured()) {
@@ -783,7 +1431,8 @@ router.post("/password-reset/request", async (req, res) => {
     );
 
     return res.status(201).json({
-      message: "Password reset code sent. Check your email inbox or spam folder.",
+      message:
+        "Password reset code sent. Check your email inbox or spam folder.",
       expiresInSeconds: Math.floor(passwordResetOtpExpiryMs / 1000),
     });
   } catch (error) {
@@ -803,6 +1452,7 @@ router.post("/password-reset/confirm", async (req, res) => {
   const client = await db.connect();
 
   try {
+    assertOtpPepperConfigured(passwordResetOtpPepper, "Password reset");
     const { email, otp, password } = parseRequestBody(
       passwordResetConfirmSchema,
       req.body,
@@ -835,7 +1485,8 @@ router.post("/password-reset/confirm", async (req, res) => {
       await client.query("ROLLBACK");
 
       return res.status(404).json({
-        message: "Password reset code expired or not found. Request a new code.",
+        message:
+          "Password reset code expired or not found. Request a new code.",
       });
     }
 
@@ -891,7 +1542,9 @@ router.post("/password-reset/confirm", async (req, res) => {
     }
 
     await adminAuth.updateUser(otpRow.firebase_uid, { password });
-    await adminAuth.revokeRefreshTokens(otpRow.firebase_uid).catch(() => undefined);
+    await adminAuth
+      .revokeRefreshTokens(otpRow.firebase_uid)
+      .catch(() => undefined);
 
     await client.query(
       `
@@ -925,9 +1578,14 @@ router.post("/password-reset/confirm", async (req, res) => {
 
 router.post(
   "/sync-user",
-  verifyFirebaseToken,
+  verifyFirebaseCredentialToken,
   async (req: AuthRequest, res) => {
     try {
+      const {
+        username: requestedUsername,
+        requireUsername,
+        deferUsernameSetup,
+      } = parseRequestBody(syncUserSchema, req.body ?? {});
       const firebaseUser = req.user;
 
       if (!firebaseUser) {
@@ -948,6 +1606,32 @@ router.post(
       const name = firebaseUser.name || email.split("@")[0];
       const photoUrl = firebaseUser.picture || null;
       const provider = firebaseUser.firebase?.sign_in_provider || "unknown";
+      const existingUserResult = await db.query<{ id: string; username: string | null }>(
+        `SELECT id, username FROM users WHERE firebase_uid = $1 LIMIT 1;`,
+        [firebaseUid],
+      );
+      const existingUser = existingUserResult.rows[0];
+
+      if (!existingUser?.username && !requestedUsername && requireUsername) {
+        return res.status(400).json({
+          code: "USERNAME_REQUIRED",
+          message:
+            "Choose your permanent username before creating your account.",
+        });
+      }
+
+      const canDeferUsernameSetup =
+        deferUsernameSetup &&
+        ["google", "google.com"].includes(String(provider || ""));
+      const username =
+        existingUser?.username ||
+        requestedUsername ||
+        (canDeferUsernameSetup
+          ? null
+          : await generateAvailableUsername(
+              buildUsernameBase(name, email),
+              existingUser?.id ?? null,
+            ));
 
       const result = await db.query(
         `
@@ -957,11 +1641,12 @@ router.post(
         email,
         photo_url,
         provider,
+        username,
         avatar_mode,
         app_currency,
         app_language
       )
-      VALUES ($1, $2, $3, $4, $5, 'photo', 'INR', 'en')
+      VALUES ($1, $2, $3, $4, $5, $6, 'photo', 'INR', 'en')
       ON CONFLICT (firebase_uid)
       DO UPDATE SET
         name = EXCLUDED.name,
@@ -977,7 +1662,7 @@ router.post(
           ELSE COALESCE(profile_photo_url, photo_url)
         END AS display_photo_url;
       `,
-        [firebaseUid, name, email, photoUrl, provider],
+        [firebaseUid, name, email, photoUrl, provider, username],
       );
 
       return res.json({
@@ -985,6 +1670,22 @@ router.post(
         user: result.rows[0],
       });
     } catch (error) {
+      if (sendValidationError(res, error)) {
+        return;
+      }
+
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        String((error as { code?: unknown }).code) === "23505"
+      ) {
+        return res.status(409).json({
+          code: "USERNAME_TAKEN",
+          message: "That username is already taken.",
+        });
+      }
+
       console.error("Sync user failed:", error);
 
       return res.status(500).json({
@@ -1010,6 +1711,7 @@ router.get("/me", verifyFirebaseToken, async (req: AuthRequest, res) => {
         id,
         firebase_uid,
         name,
+        username,
         email,
         photo_url,
         profile_photo_url,
@@ -1092,7 +1794,23 @@ router.post(
         });
       }
 
-      const profilePhotoUrl = await uploadProfilePhotoToCloudinary(file, firebaseUser.uid);
+      const detectedMimeType = detectProfilePhotoMimeType(file.buffer);
+
+      if (
+        !detectedMimeType ||
+        !allowedProfilePhotoMimeTypes.has(detectedMimeType)
+      ) {
+        return res.status(400).json({
+          message:
+            "The selected file is not a valid JPG, PNG, WEBP, or GIF image",
+        });
+      }
+
+      file.mimetype = detectedMimeType;
+      const profilePhotoUrl = await uploadProfilePhotoToCloudinary(
+        file,
+        firebaseUser.uid,
+      );
       const result = await db.query(
         `
         UPDATE users
@@ -1141,12 +1859,489 @@ router.post(
           ? Number((error as { statusCode?: unknown }).statusCode)
           : 500;
 
-      return res.status(Number.isFinite(statusCode) ? statusCode : 500).json({
+      const safeStatusCode =
+        Number.isFinite(statusCode) && statusCode >= 400 && statusCode < 600
+          ? statusCode
+          : 500;
+
+      return res.status(safeStatusCode).json({
         message:
-          error instanceof Error
-            ? error.message
-            : "Failed to upload profile photo",
+          safeStatusCode >= 500
+            ? "Profile photo upload is temporarily unavailable. Please try again."
+            : error instanceof Error
+              ? error.message
+              : "Failed to upload profile photo",
       });
+    }
+  },
+);
+
+
+router.post(
+  "/profile/identity-change/request",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    try {
+      assertLoginOtpConfigured();
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const { field, value } = parseRequestBody(
+        profileIdentityChangeRequestSchema,
+        req.body,
+      );
+      const userResult = await db.query<{
+        id: string;
+        name: string | null;
+        email: string;
+      }>(
+        `
+        SELECT id, name, email
+        FROM users
+        WHERE firebase_uid = $1
+        LIMIT 1;
+        `,
+        [firebaseUser.uid],
+      );
+      const currentUser = userResult.rows[0];
+
+      if (!currentUser) {
+        return res.status(404).json({ message: "User not found in database" });
+      }
+
+      let pendingValue = value.trim();
+
+      if (field === "name") {
+        if (pendingValue.length < 2 || pendingValue.length > 80) {
+          return res.status(400).json({
+            message: "Name must be between 2 and 80 characters.",
+          });
+        }
+
+        if (pendingValue === String(currentUser.name || "").trim()) {
+          return res.status(400).json({
+            message: "Enter a different name before requesting verification.",
+          });
+        }
+      } else {
+        const parsedEmail = z
+          .string()
+          .trim()
+          .email("Enter a valid email address")
+          .max(254, "Email address is too long")
+          .safeParse(pendingValue.toLowerCase());
+
+        if (!parsedEmail.success) {
+          return res.status(400).json({
+            message: parsedEmail.error.issues[0]?.message || "Enter a valid email address",
+          });
+        }
+
+        pendingValue = parsedEmail.data;
+
+        if (pendingValue === currentUser.email.toLowerCase()) {
+          return res.status(400).json({
+            message: "Enter a different email address before requesting verification.",
+          });
+        }
+
+        const emailInUse = await db.query(
+          `SELECT 1 FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1;`,
+          [pendingValue],
+        );
+
+        if (emailInUse.rows.length > 0) {
+          return res.status(409).json({
+            message: "That email address is already linked to another account.",
+          });
+        }
+      }
+
+      const requestCountResult = await db.query<{ request_count: number }>(
+        `
+        SELECT COUNT(*)::int AS request_count
+        FROM profile_identity_change_otps
+        WHERE user_id = $1
+        AND created_at > NOW() - ($2::int * INTERVAL '1 minute');
+        `,
+        [currentUser.id, profileIdentityOtpRequestWindowMinutes],
+      );
+
+      if (
+        Number(requestCountResult.rows[0]?.request_count || 0) >=
+        profileIdentityOtpMaxRequests
+      ) {
+        return res.status(429).json({
+          code: "PROFILE_IDENTITY_OTP_RATE_LIMITED",
+          message: "Too many verification requests. Please try again later.",
+        });
+      }
+
+      const requestId = crypto.randomUUID();
+      const otp = createProfileIdentityOtp();
+      const expiresAt = new Date(Date.now() + profileIdentityOtpExpiryMs);
+      const emailStatus = await sendProfileIdentityOtpEmail({
+        currentEmail: currentUser.email,
+        otp,
+        changeType: field,
+      });
+
+      if (emailStatus !== "sent") {
+        return res.status(503).json({
+          code: "PROFILE_IDENTITY_OTP_DELIVERY_FAILED",
+          message:
+            emailStatus === "not_configured"
+              ? "Email verification is temporarily unavailable."
+              : "Could not send the verification code. Please try again.",
+        });
+      }
+
+      const client = await db.connect();
+
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `
+          UPDATE profile_identity_change_otps
+          SET consumed_at = NOW()
+          WHERE user_id = $1
+          AND change_type = $2
+          AND consumed_at IS NULL;
+          `,
+          [currentUser.id, field],
+        );
+        await client.query(
+          `
+          INSERT INTO profile_identity_change_otps (
+            id,
+            user_id,
+            change_type,
+            pending_value,
+            otp_hash,
+            expires_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6);
+          `,
+          [
+            requestId,
+            currentUser.id,
+            field,
+            pendingValue,
+            hashProfileIdentityOtp(otp, requestId, currentUser.id, field),
+            expiresAt,
+          ],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      return res.status(201).json({
+        requestId,
+        field,
+        currentEmailHint: maskEmailAddress(currentUser.email),
+        expiresAt: expiresAt.toISOString(),
+        message: "Verification code sent to your current registered email.",
+      });
+    } catch (error) {
+      if (sendValidationError(res, error)) {
+        return;
+      }
+
+      console.error("Request profile identity change failed:", error);
+      return res.status(500).json({
+        message: "Could not request the account change verification code.",
+      });
+    }
+  },
+);
+
+router.post(
+  "/profile/identity-change/confirm",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
+    let firebaseUidForRollback = "";
+    let firebaseRollback:
+      | { field: "name"; oldValue: string | null }
+      | { field: "email"; oldValue: string }
+      | null = null;
+
+    try {
+      assertLoginOtpConfigured();
+      const firebaseUser = req.user;
+
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      firebaseUidForRollback = firebaseUser.uid;
+
+      const { requestId, otp } = parseRequestBody(
+        profileIdentityChangeConfirmSchema,
+        req.body,
+      );
+
+      await client.query("BEGIN");
+      const requestResult = await client.query<{
+        id: string;
+        user_id: string;
+        firebase_uid: string;
+        current_name: string | null;
+        current_email: string;
+        change_type: "name" | "email";
+        pending_value: string;
+        otp_hash: string;
+        attempts: number;
+        expires_at: Date | string;
+        consumed_at: Date | string | null;
+      }>(
+        `
+        SELECT
+          request.id,
+          request.user_id,
+          account.firebase_uid,
+          account.name AS current_name,
+          account.email AS current_email,
+          request.change_type,
+          request.pending_value,
+          request.otp_hash,
+          request.attempts,
+          request.expires_at,
+          request.consumed_at
+        FROM profile_identity_change_otps request
+        JOIN users account ON account.id = request.user_id
+        WHERE request.id = $1
+        AND account.firebase_uid = $2
+        FOR UPDATE;
+        `,
+        [requestId, firebaseUser.uid],
+      );
+      const changeRequest = requestResult.rows[0];
+
+      if (!changeRequest || changeRequest.consumed_at) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({
+          message: "This verification request is no longer available.",
+        });
+      }
+
+      if (new Date(changeRequest.expires_at).getTime() <= Date.now()) {
+        await client.query(
+          `UPDATE profile_identity_change_otps SET consumed_at = NOW() WHERE id = $1;`,
+          [requestId],
+        );
+        await client.query("COMMIT");
+        return res.status(410).json({
+          message: "This verification code has expired. Request a new code.",
+        });
+      }
+
+      if (Number(changeRequest.attempts) >= profileIdentityOtpMaxAttempts) {
+        await client.query(
+          `UPDATE profile_identity_change_otps SET consumed_at = NOW() WHERE id = $1;`,
+          [requestId],
+        );
+        await client.query("COMMIT");
+        return res.status(429).json({
+          message: "Too many incorrect verification attempts. Request a new code.",
+        });
+      }
+
+      const expectedHash = hashProfileIdentityOtp(
+        otp,
+        requestId,
+        changeRequest.user_id,
+        changeRequest.change_type,
+      );
+
+      if (!timingSafeEqualHex(expectedHash, changeRequest.otp_hash)) {
+        const nextAttempts = Number(changeRequest.attempts) + 1;
+        await client.query(
+          `
+          UPDATE profile_identity_change_otps
+          SET attempts = $2,
+              consumed_at = CASE WHEN $2 >= $3 THEN NOW() ELSE consumed_at END
+          WHERE id = $1;
+          `,
+          [requestId, nextAttempts, profileIdentityOtpMaxAttempts],
+        );
+        await client.query("COMMIT");
+        return res.status(401).json({
+          message:
+            nextAttempts >= profileIdentityOtpMaxAttempts
+              ? "Too many incorrect attempts. Request a new verification code."
+              : "Incorrect verification code.",
+        });
+      }
+
+      if (changeRequest.change_type === "name") {
+        firebaseRollback = {
+          field: "name",
+          oldValue: changeRequest.current_name,
+        };
+        await adminAuth.updateUser(changeRequest.firebase_uid, {
+          displayName: changeRequest.pending_value,
+        });
+        await client.query(
+          `
+          UPDATE users
+          SET name = $2, updated_at = NOW()
+          WHERE id = $1;
+          `,
+          [changeRequest.user_id, changeRequest.pending_value],
+        );
+        await client.query(
+          `
+          UPDATE split_room_members
+          SET display_name = $2
+          WHERE user_id = $1;
+          `,
+          [changeRequest.user_id, changeRequest.pending_value],
+        );
+      } else {
+        const newEmail = changeRequest.pending_value.toLowerCase();
+        const emailInUse = await client.query(
+          `
+          SELECT 1
+          FROM users
+          WHERE LOWER(email) = LOWER($1)
+          AND id <> $2
+          LIMIT 1;
+          `,
+          [newEmail, changeRequest.user_id],
+        );
+
+        if (emailInUse.rows.length > 0) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({
+            message: "That email address is already linked to another account.",
+          });
+        }
+
+        firebaseRollback = {
+          field: "email",
+          oldValue: changeRequest.current_email,
+        };
+        await adminAuth.updateUser(changeRequest.firebase_uid, {
+          email: newEmail,
+          emailVerified: false,
+        });
+        await client.query(
+          `
+          UPDATE users
+          SET email = $2, updated_at = NOW()
+          WHERE id = $1;
+          `,
+          [changeRequest.user_id, newEmail],
+        );
+        await client.query(
+          `
+          UPDATE friend_requests
+          SET recipient_email = $2
+          WHERE recipient_user_id = $1
+          OR LOWER(recipient_email) = LOWER($3);
+          `,
+          [changeRequest.user_id, newEmail, changeRequest.current_email],
+        );
+        await client.query(
+          `
+          UPDATE split_room_members
+          SET email = $2
+          WHERE user_id = $1
+          OR LOWER(COALESCE(email, '')) = LOWER($3);
+          `,
+          [changeRequest.user_id, newEmail, changeRequest.current_email],
+        );
+      }
+
+      await client.query(
+        `UPDATE profile_identity_change_otps SET consumed_at = NOW() WHERE id = $1;`,
+        [requestId],
+      );
+      await client.query("COMMIT");
+
+      const updatedUserResult = await db.query(
+        `
+        SELECT
+          id,
+          firebase_uid,
+          name,
+          username,
+          email,
+          photo_url,
+          profile_photo_url,
+          avatar_mode,
+          app_currency,
+          app_language,
+          (wallet_pin_hash IS NOT NULL) AS has_wallet_pin,
+          CASE
+            WHEN avatar_mode = 'initials' THEN NULL
+            ELSE COALESCE(profile_photo_url, photo_url)
+          END AS display_photo_url,
+          provider,
+          created_at,
+          updated_at
+        FROM users
+        WHERE id = $1;
+        `,
+        [changeRequest.user_id],
+      );
+
+      return res.json({
+        message:
+          changeRequest.change_type === "name"
+            ? "Account name updated successfully."
+            : "Registered email updated successfully.",
+        field: changeRequest.change_type,
+        user: updatedUserResult.rows[0],
+      });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+
+      if (firebaseRollback) {
+        if (firebaseRollback.field === "name") {
+          await adminAuth
+            .updateUser(firebaseUidForRollback, {
+              displayName: firebaseRollback.oldValue || undefined,
+            })
+            .catch(() => undefined);
+        } else {
+          await adminAuth
+            .updateUser(firebaseUidForRollback, {
+              email: firebaseRollback.oldValue,
+            })
+            .catch(() => undefined);
+        }
+      }
+
+      if (sendValidationError(res, error)) {
+        return;
+      }
+
+      const firebaseCode =
+        typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code || "")
+          : "";
+
+      if (firebaseCode === "auth/email-already-exists") {
+        return res.status(409).json({
+          message: "That email address is already linked to another account.",
+        });
+      }
+
+      console.error("Confirm profile identity change failed:", error);
+      return res.status(500).json({
+        message: "Could not complete the account identity change.",
+      });
+    } finally {
+      client.release();
     }
   },
 );
@@ -1181,6 +2376,15 @@ router.patch("/profile", verifyFirebaseToken, async (req: AuthRequest, res) => {
       "appLanguage",
       "app_language",
     );
+    const usernameSupplied = hasOwnBodyField(req.body, "username");
+
+    if (usernameSupplied) {
+      return res.status(403).json({
+        code: "USERNAME_IMMUTABLE",
+        message:
+          "Your SplitVerse username is permanent and cannot be changed after signup.",
+      });
+    }
 
     const avatarMode = avatarModeSupplied
       ? normalizeAvatarMode(req.body?.avatarMode ?? req.body?.avatar_mode)
@@ -1196,7 +2400,6 @@ router.patch("/profile", verifyFirebaseToken, async (req: AuthRequest, res) => {
     const appLanguage = appLanguageSupplied
       ? normalizeAppLanguage(req.body?.appLanguage ?? req.body?.app_language)
       : null;
-
     if (profilePhotoSupplied && rawProfilePhotoUrl && !profilePhotoUrl) {
       return res.status(400).json({
         message: "Profile photo must be a valid http or https image URL",
@@ -1232,6 +2435,7 @@ router.patch("/profile", verifyFirebaseToken, async (req: AuthRequest, res) => {
         id,
         firebase_uid,
         name,
+        username,
         email,
         photo_url,
         profile_photo_url,
@@ -1276,77 +2480,117 @@ router.patch("/profile", verifyFirebaseToken, async (req: AuthRequest, res) => {
   }
 });
 
-router.post("/wallet-pin", verifyFirebaseToken, async (req: AuthRequest, res) => {
-  const client = await db.connect();
+router.post(
+  "/wallet-pin",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
 
-  try {
-    const firebaseUser = req.user;
+    try {
+      const firebaseUser = req.user;
 
-    if (!firebaseUser) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
 
-    const { pin, currentPin } = parseRequestBody(walletPinSchema, req.body);
+      const { pin, currentPin, username: requestedUsername } =
+        parseRequestBody(walletPinSchema, req.body);
 
-    await client.query("BEGIN");
+      await client.query("BEGIN");
 
-    const userResult = await client.query<{
-      id: string;
-      wallet_pin_hash: string | null;
-    }>(
-      `
-      SELECT id, wallet_pin_hash
+      const userResult = await client.query<{
+        id: string;
+        wallet_pin_hash: string | null;
+        username: string | null;
+        provider: string | null;
+      }>(
+        `
+      SELECT id, wallet_pin_hash, username, provider
       FROM users
       WHERE firebase_uid = $1
       FOR UPDATE;
       `,
-      [firebaseUser.uid],
-    );
+        [firebaseUser.uid],
+      );
 
-    const user = userResult.rows[0];
+      const user = userResult.rows[0];
 
-    if (!user) {
-      await client.query("ROLLBACK");
-
-      return res.status(404).json({ message: "User not found in database" });
-    }
-
-    if (user.wallet_pin_hash) {
-      if (!currentPin) {
+      if (!user) {
         await client.query("ROLLBACK");
 
-        return res.status(400).json({ message: "Old wallet PIN is required" });
+        return res.status(404).json({ message: "User not found in database" });
       }
 
-      try {
-        await verifyWalletPinForUser(client, user.id, currentPin);
-      } catch (pinError) {
-        await client.query("COMMIT");
+      const isGoogleUser = ["google", "google.com"].includes(
+        String(user.provider || ""),
+      );
 
-        if (sendWalletPinError(res, pinError)) {
-          return;
-        }
-
-        throw pinError;
-      }
-
-      const sameAsOldPin = await argon2.verify(user.wallet_pin_hash, pin);
-
-      if (sameAsOldPin) {
+      if (!user.username && isGoogleUser && !requestedUsername) {
         await client.query("ROLLBACK");
 
         return res.status(400).json({
-          message: "New wallet PIN cannot be the same as the old PIN",
+          code: "USERNAME_REQUIRED",
+          message: "Choose your permanent username to complete Google signup.",
         });
       }
-    }
 
-    const nextHash = await argon2.hash(pin);
+      if (user.username && requestedUsername && requestedUsername !== user.username) {
+        await client.query("ROLLBACK");
 
-    await client.query(
-      `
+        return res.status(409).json({
+          code: "USERNAME_IMMUTABLE",
+          message: "Your SplitVerse username is permanent and cannot be changed.",
+        });
+      }
+
+      if (!user.username && requestedUsername && !isGoogleUser) {
+        await client.query("ROLLBACK");
+
+        return res.status(403).json({
+          code: "USERNAME_SETUP_NOT_ALLOWED",
+          message: "Username setup through this step is available only for Google signup.",
+        });
+      }
+
+      if (user.wallet_pin_hash) {
+        if (!currentPin) {
+          await client.query("ROLLBACK");
+
+          return res
+            .status(400)
+            .json({ message: "Old wallet PIN is required" });
+        }
+
+        try {
+          await verifyWalletPinForUser(client, user.id, currentPin);
+        } catch (pinError) {
+          await client.query("COMMIT");
+
+          if (sendWalletPinError(res, pinError)) {
+            return;
+          }
+
+          throw pinError;
+        }
+
+        const sameAsOldPin = await argon2.verify(user.wallet_pin_hash, pin);
+
+        if (sameAsOldPin) {
+          await client.query("ROLLBACK");
+
+          return res.status(400).json({
+            message: "New wallet PIN cannot be the same as the old PIN",
+          });
+        }
+      }
+
+      const nextHash = await argon2.hash(pin);
+
+      await client.query(
+        `
       UPDATE users
       SET
+        username = COALESCE(username, $3),
         wallet_pin_hash = $2,
         wallet_pin_failed_attempts = 0,
         wallet_pin_locked_until = NULL,
@@ -1354,55 +2598,71 @@ router.post("/wallet-pin", verifyFirebaseToken, async (req: AuthRequest, res) =>
         updated_at = NOW()
       WHERE id = $1;
       `,
-      [user.id, nextHash],
-    );
+        [user.id, nextHash, requestedUsername ?? null],
+      );
 
-    const updatedUser = await getAuthUserProfile(client, user.id);
+      const updatedUser = await getAuthUserProfile(client, user.id);
 
-    await client.query("COMMIT");
+      await client.query("COMMIT");
 
-    return res.json({
-      message: user.wallet_pin_hash
-        ? "Wallet PIN changed successfully"
-        : "Wallet PIN saved",
-      user: updatedUser,
-    });
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+      return res.json({
+        message: user.wallet_pin_hash
+          ? "Wallet PIN changed successfully"
+          : "Wallet PIN saved",
+        user: updatedUser,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
 
-    if (sendValidationError(res, error) || sendWalletPinError(res, error)) {
-      return;
+      if (sendValidationError(res, error) || sendWalletPinError(res, error)) {
+        return;
+      }
+
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        String((error as { code?: unknown }).code) === "23505"
+      ) {
+        return res.status(409).json({
+          code: "USERNAME_TAKEN",
+          message: "That username is already taken. Choose another one.",
+        });
+      }
+
+      console.error("Save wallet PIN failed:", error);
+
+      return res.status(500).json({ message: "Failed to save wallet PIN" });
+    } finally {
+      client.release();
     }
+  },
+);
 
-    console.error("Save wallet PIN failed:", error);
+router.post(
+  "/wallet-pin/verify",
+  verifyFirebaseToken,
+  async (req: AuthRequest, res) => {
+    const client = await db.connect();
 
-    return res.status(500).json({ message: "Failed to save wallet PIN" });
-  } finally {
-    client.release();
-  }
-});
+    try {
+      const firebaseUser = req.user;
 
-router.post("/wallet-pin/verify", verifyFirebaseToken, async (req: AuthRequest, res) => {
-  const client = await db.connect();
+      if (!firebaseUser) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
 
-  try {
-    const firebaseUser = req.user;
+      const { pin } = parseRequestBody(verifyWalletPinSchema, req.body);
 
-    if (!firebaseUser) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+      await client.query("BEGIN");
 
-    const { pin } = parseRequestBody(verifyWalletPinSchema, req.body);
-
-    await client.query("BEGIN");
-
-    const userResult = await client.query<{
-      id: string;
-      wallet_pin_hash: string | null;
-      wallet_pin_failed_attempts: number;
-      wallet_pin_locked_until: Date | string | null;
-    }>(
-      `
+      const userResult = await client.query<{
+        id: string;
+        wallet_pin_hash: string | null;
+        wallet_pin_failed_attempts: number;
+        wallet_pin_locked_until: Date | string | null;
+      }>(
+        `
       SELECT
         id,
         wallet_pin_hash,
@@ -1412,47 +2672,47 @@ router.post("/wallet-pin/verify", verifyFirebaseToken, async (req: AuthRequest, 
       WHERE firebase_uid = $1
       FOR UPDATE;
       `,
-      [firebaseUser.uid],
-    );
+        [firebaseUser.uid],
+      );
 
-    const user = userResult.rows[0];
+      const user = userResult.rows[0];
 
-    if (!user) {
-      await client.query("ROLLBACK");
+      if (!user) {
+        await client.query("ROLLBACK");
 
-      return res.status(404).json({ message: "User not found in database" });
-    }
+        return res.status(404).json({ message: "User not found in database" });
+      }
 
-    if (!user.wallet_pin_hash) {
-      await client.query("ROLLBACK");
+      if (!user.wallet_pin_hash) {
+        await client.query("ROLLBACK");
 
-      return res.status(400).json({ message: "Set a wallet PIN first" });
-    }
+        return res.status(400).json({ message: "Set a wallet PIN first" });
+      }
 
-    const lockedUntil = user.wallet_pin_locked_until
-      ? new Date(user.wallet_pin_locked_until).getTime()
-      : 0;
+      const lockedUntil = user.wallet_pin_locked_until
+        ? new Date(user.wallet_pin_locked_until).getTime()
+        : 0;
 
-    if (lockedUntil > Date.now()) {
-      await client.query("ROLLBACK");
+      if (lockedUntil > Date.now()) {
+        await client.query("ROLLBACK");
 
-      return res.status(423).json({
-        message: "Wallet PIN is temporarily locked. Try again later.",
-        lockedUntil: new Date(lockedUntil).toISOString(),
-      });
-    }
+        return res.status(423).json({
+          message: "Wallet PIN is temporarily locked. Try again later.",
+          lockedUntil: new Date(lockedUntil).toISOString(),
+        });
+      }
 
-    const pinMatches = await argon2.verify(user.wallet_pin_hash, pin);
+      const pinMatches = await argon2.verify(user.wallet_pin_hash, pin);
 
-    if (!pinMatches) {
-      const nextAttempts = Number(user.wallet_pin_failed_attempts || 0) + 1;
-      const shouldLock = nextAttempts >= walletPinMaxFailedAttempts;
-      const lockedUntilValue = shouldLock
-        ? new Date(Date.now() + walletPinLockMs)
-        : null;
+      if (!pinMatches) {
+        const nextAttempts = Number(user.wallet_pin_failed_attempts || 0) + 1;
+        const shouldLock = nextAttempts >= walletPinMaxFailedAttempts;
+        const lockedUntilValue = shouldLock
+          ? new Date(Date.now() + walletPinLockMs)
+          : null;
 
-      await client.query(
-        `
+        await client.query(
+          `
         UPDATE users
         SET
           wallet_pin_failed_attempts = $2,
@@ -1460,22 +2720,25 @@ router.post("/wallet-pin/verify", verifyFirebaseToken, async (req: AuthRequest, 
           updated_at = NOW()
         WHERE id = $1;
         `,
-        [user.id, nextAttempts, lockedUntilValue],
-      );
+          [user.id, nextAttempts, lockedUntilValue],
+        );
 
-      await client.query("COMMIT");
+        await client.query("COMMIT");
 
-      return res.status(401).json({
-        message: shouldLock
-          ? "Too many wrong wallet PIN attempts. Wallet PIN is temporarily locked."
-          : "Incorrect wallet PIN",
-        attemptsRemaining: Math.max(walletPinMaxFailedAttempts - nextAttempts, 0),
-        lockedUntil: lockedUntilValue?.toISOString(),
-      });
-    }
+        return res.status(401).json({
+          message: shouldLock
+            ? "Too many wrong wallet PIN attempts. Wallet PIN is temporarily locked."
+            : "Incorrect wallet PIN",
+          attemptsRemaining: Math.max(
+            walletPinMaxFailedAttempts - nextAttempts,
+            0,
+          ),
+          lockedUntil: lockedUntilValue?.toISOString(),
+        });
+      }
 
-    await client.query(
-      `
+      await client.query(
+        `
       UPDATE users
       SET
         wallet_pin_failed_attempts = 0,
@@ -1483,27 +2746,27 @@ router.post("/wallet-pin/verify", verifyFirebaseToken, async (req: AuthRequest, 
         updated_at = NOW()
       WHERE id = $1;
       `,
-      [user.id],
-    );
+        [user.id],
+      );
 
-    await client.query("COMMIT");
+      await client.query("COMMIT");
 
-    return res.json({ verified: true });
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+      return res.json({ verified: true });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
 
-    if (sendValidationError(res, error)) {
-      return;
+      if (sendValidationError(res, error)) {
+        return;
+      }
+
+      console.error("Verify wallet PIN failed:", error);
+
+      return res.status(500).json({ message: "Failed to verify wallet PIN" });
+    } finally {
+      client.release();
     }
-
-    console.error("Verify wallet PIN failed:", error);
-
-    return res.status(500).json({ message: "Failed to verify wallet PIN" });
-  } finally {
-    client.release();
-  }
-});
-
+  },
+);
 
 router.post(
   "/wallet-pin/reset-otp/request",
@@ -1512,6 +2775,7 @@ router.post(
     const client = await db.connect();
 
     try {
+      assertOtpPepperConfigured(walletPinOtpPepper, "Wallet PIN reset");
       const firebaseUser = req.user;
 
       if (!firebaseUser) {
@@ -1567,7 +2831,10 @@ router.post(
         [user.id, walletPinResetOtpWindowMinutes],
       );
 
-      if (Number(requestCountResult.rows[0].request_count) >= walletPinResetOtpMaxRequests) {
+      if (
+        Number(requestCountResult.rows[0].request_count) >=
+        walletPinResetOtpMaxRequests
+      ) {
         return res.status(429).json({
           message: "Too many reset OTP requests. Please try again later.",
         });
@@ -1610,7 +2877,11 @@ router.post(
         )
         VALUES ($1, $2, NOW() + ($3::int * INTERVAL '1 millisecond'));
         `,
-        [user.id, hashWalletPinResetOtp(otp, user.id), walletPinResetOtpExpiryMs],
+        [
+          user.id,
+          hashWalletPinResetOtp(otp, user.id),
+          walletPinResetOtpExpiryMs,
+        ],
       );
 
       await client.query("COMMIT");
@@ -1644,6 +2915,7 @@ router.post(
     const client = await db.connect();
 
     try {
+      assertOtpPepperConfigured(walletPinOtpPepper, "Wallet PIN reset");
       const firebaseUser = req.user;
 
       if (!firebaseUser) {
@@ -1744,16 +3016,18 @@ router.post(
         );
         await client.query("COMMIT");
 
-        return res.status(nextAttempts >= walletPinResetOtpMaxAttempts ? 423 : 401).json({
-          message:
-            nextAttempts >= walletPinResetOtpMaxAttempts
-              ? "Too many wrong OTP attempts. Please request a new OTP."
-              : "Incorrect OTP",
-          attemptsRemaining: Math.max(
-            walletPinResetOtpMaxAttempts - nextAttempts,
-            0,
-          ),
-        });
+        return res
+          .status(nextAttempts >= walletPinResetOtpMaxAttempts ? 423 : 401)
+          .json({
+            message:
+              nextAttempts >= walletPinResetOtpMaxAttempts
+                ? "Too many wrong OTP attempts. Please request a new OTP."
+                : "Incorrect OTP",
+            attemptsRemaining: Math.max(
+              walletPinResetOtpMaxAttempts - nextAttempts,
+              0,
+            ),
+          });
       }
 
       if (user.wallet_pin_hash) {
@@ -1820,6 +3094,7 @@ router.post(
 router.delete(
   "/account",
   verifyFirebaseToken,
+  requireRecentAuthentication(),
   async (req: AuthRequest, res) => {
     const client = await db.connect();
 

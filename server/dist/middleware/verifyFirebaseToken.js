@@ -39,16 +39,44 @@ function isDependencyUnavailable(error) {
         error instanceof DependencyTimeoutError ||
         isFirebaseDependencyFailure(error));
 }
-export async function verifyFirebaseToken(req, res, next) {
+function getBearerToken(req) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+        return "";
+    }
+    return authHeader.slice("Bearer ".length).trim();
+}
+export function isSplitVerseAuthorizedSession(token) {
+    const provider = String(token.firebase?.sign_in_provider || "");
+    if (provider === "password") {
+        const allowLegacyPasswordSessions = process.env.NODE_ENV !== "production" &&
+            process.env.ALLOW_LEGACY_PASSWORD_SESSIONS === "true";
+        return allowLegacyPasswordSessions;
+    }
+    if (provider === "custom") {
+        return token.splitverseOtpVerified === true;
+    }
+    // Federated providers such as Google already complete their provider's
+    // authentication flow and do not use the email-password OTP challenge.
+    return Boolean(provider);
+}
+async function verifyToken(req, res, next, options) {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        const token = getBearerToken(req);
+        if (!token) {
             return res.status(401).json({
+                code: "AUTH_TOKEN_MISSING",
                 message: "Missing authorization token",
             });
         }
-        const token = authHeader.split("Bearer ")[1];
-        const decodedToken = await firebaseAuthCircuitBreaker.execute(() => adminAuth.verifyIdToken(token));
+        const decodedToken = (await firebaseAuthCircuitBreaker.execute(() => adminAuth.verifyIdToken(token)));
+        if (options.requireSplitVerseSession &&
+            !isSplitVerseAuthorizedSession(decodedToken)) {
+            return res.status(401).json({
+                code: "LOGIN_OTP_REQUIRED",
+                message: "Complete email OTP verification before continuing.",
+            });
+        }
         req.user = decodedToken;
         next();
     }
@@ -56,11 +84,41 @@ export async function verifyFirebaseToken(req, res, next) {
         console.error("Firebase token verification failed:", error);
         if (isDependencyUnavailable(error)) {
             return res.status(503).json({
+                code: "AUTH_SERVICE_UNAVAILABLE",
                 message: "Authentication service is temporarily unavailable",
             });
         }
         return res.status(401).json({
+            code: "AUTH_TOKEN_INVALID",
             message: "Invalid or expired token",
         });
     }
+}
+/**
+ * Verifies a genuine Firebase token without requiring the SplitVerse OTP claim.
+ * This is intentionally limited to bootstrap routes such as user sync and the
+ * password-credential-to-OTP exchange.
+ */
+export function verifyFirebaseCredentialToken(req, res, next) {
+    return verifyToken(req, res, next, { requireSplitVerseSession: false });
+}
+/** Verifies both Firebase authenticity and SplitVerse session authorization. */
+export function verifyFirebaseToken(req, res, next) {
+    return verifyToken(req, res, next, { requireSplitVerseSession: true });
+}
+export function requireRecentAuthentication(maxAgeMs = 10 * 60 * 1000) {
+    return (req, res, next) => {
+        const authTimeSeconds = Number(req.user?.auth_time || 0);
+        const otpVerifiedAtSeconds = Number(req.user?.splitverseOtpVerifiedAt || 0);
+        const effectiveAuthTimeSeconds = Math.max(authTimeSeconds, otpVerifiedAtSeconds);
+        if (!Number.isFinite(effectiveAuthTimeSeconds) ||
+            effectiveAuthTimeSeconds <= 0 ||
+            Date.now() - effectiveAuthTimeSeconds * 1000 > maxAgeMs) {
+            return res.status(401).json({
+                code: "RECENT_AUTH_REQUIRED",
+                message: "Sign in again before completing this security-sensitive action.",
+            });
+        }
+        next();
+    };
 }
